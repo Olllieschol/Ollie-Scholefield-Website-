@@ -1736,6 +1736,81 @@
       const resume = Math.max(w2at, m.index + 1);
       if (resume < re.lastIndex) re.lastIndex = resume;
     }
+
+    // ---- Lowercase names ------------------------------------------------
+    // People type "contact oliver scholefield his number is 0414 593 204" all
+    // the time, and a name is PII regardless of case. The pass above cannot
+    // see it: capitalisation was the ONLY signal marking a token as a proper
+    // noun, and without it every adjacent word pair is a candidate filtered
+    // by a ~223-word list — nowhere near enough for arbitrary English.
+    //
+    // The GAZETTEER substitutes for capitalisation: token 1 must be a given
+    // name the list vouches for. That is only affordable because the list
+    // already exists for aggressive name detection.
+    //
+    // Still gated on hasIdentifier (checked by the caller), so this adds no
+    // standalone-name detection — it only recovers names the message already
+    // proves are next to other PII.
+    const gaz = (typeof window !== "undefined" && window.GuardAI && window.GuardAI.NAME_GAZETTEER) || null;
+    if (!gaz) return;
+    const LTOK = "[\\p{L}\\p{M}]['\u2019\\-]?[\\p{L}\\p{M}]+";
+    const lre = new RegExp(
+      "(?<![\\p{L}\\p{M}'\u2019-])(" + LTOK + "(?:\\s+" + LTOK + "){1,3})(?![\\p{L}\\p{M}'\u2019-])",
+      "gu"
+    );
+    let lm;
+    let lguard = 0;
+    while ((lm = lre.exec(text)) && lguard++ < 20000) {
+      const parts = lm[1].split(/\s+/);
+      const t1 = parts[0].toLowerCase();
+      const t2 = (parts[1] || "").toLowerCase();
+      // Rewind on rejection — the fifth place in this file that needs it.
+      const rewind = () => {
+        const sp = /\s+/.exec(lm[0]);
+        const at = sp ? lm.index + sp.index + sp[0].length : lm.index + 1;
+        if (at < lre.lastIndex) lre.lastIndex = at;
+      };
+      // Only when token 1 is genuinely LOWERCASE. If it is capitalised, the
+      // pass above owns it — and that pass correctly requires token 2 to be
+      // capitalised too, which is what stops "James is" pairing a real name
+      // with the following verb.
+      if (parts[0] !== t1) { rewind(); continue; }
+      if (!gaz.isFirst(t1)) { rewind(); continue; }
+      // Don't double-report what the capitalised pass already found.
+      if (out.some((x) => x.type === "NAME_PII" &&
+          x.index <= lm.index && x.index + x.value.length > lm.index)) { rewind(); continue; }
+      if (COMMON_WORDS.has(t2) || NAME_CONTEXT_WORDS.has(t2) || NON_SURNAME_WORDS.has(t2)) { rewind(); continue; }
+      if (STOPWORDS.has(parts[1]) ||
+          STOPWORDS.has(parts[1][0].toUpperCase() + parts[1].slice(1))) { rewind(); continue; }
+
+      // THIS PATH IS DELIBERATELY STRICTER THAN THE CAPITALISED ONE. Each of
+      // the three rules below was added because it was measured, not guessed:
+      // without them the false-positive rate on a 60-message lowercase corpus
+      // was 3/60 rather than 0/60.
+
+      // 1. Ambiguous given names are rejected outright. Surname corroboration
+      //    is not enough once capitalisation is gone — "the hunter green
+      //    colour" has a gazetteer given name AND a gazetteer surname.
+      //    Cost: "grace whitfield" typed lowercase is missed. Capitalised
+      //    still works.
+      if (AMBIGUOUS_FIRST.has(t1)) { rewind(); continue; }
+      // 2. A participle or adverb is not a surname ("carol singing tonight").
+      if (/(?:ing|ed|ly)$/.test(t2)) { rewind(); continue; }
+      // 3. A verb particle is not a surname ("jack up the price").
+      if (LC_PARTICLES.has(t2)) { rewind(); continue; }
+      // 4. A function word or common verb is not a surname ("james is at ...").
+      if (LC_NON_SURNAME.has(t2)) { rewind(); continue; }
+
+      let end = 0;
+      let cursor = 0;
+      for (const q of [parts[0], parts[1]]) {
+        const at = lm[1].indexOf(q, cursor);
+        end = at + q.length;
+        cursor = end;
+      }
+      out.push(finding("NAME_PII", "Full name (with other PII)",
+        lm[1].slice(0, end), lm.index, "medium"));
+    }
   }
 
   /* ---- Aggressive (standalone) name detection — OPT-IN, DEFAULT OFF ------ *
@@ -1747,6 +1822,38 @@
    * These are the reason this mode is off by default, and they never fire on
    * the strength of the given name alone.
    */
+  /**
+   * Function words and common verbs. Token 2 of a lowercase name candidate
+   * must not be one of these: "james is at 14 Grove Street" otherwise matches
+   * "james is" as a full name and masking DELETES the word "is", which is the
+   * corrupt-the-sentence failure this codebase treats as the worst outcome.
+   * The all-lowercase prose corpus missed this whole class — every entry in it
+   * was prose without a given name, so "given name + verb" never appeared.
+   */
+  const LC_NON_SURNAME = new Set([
+    "is", "was", "are", "were", "am", "be", "been", "being", "has", "have",
+    "had", "do", "does", "did", "will", "would", "can", "could", "should",
+    "shall", "may", "might", "must", "and", "or", "but", "so", "if", "then",
+    "than", "as", "at", "to", "of", "in", "on", "for", "with", "by", "from",
+    "the", "a", "an", "this", "that", "these", "those", "not", "no", "yes",
+    "he", "she", "they", "we", "you", "it", "i", "his", "her", "their",
+    "my", "your", "our", "its", "him", "them", "us", "me",
+    "just", "also", "very", "really", "please", "still", "now", "here",
+    "there", "when", "where", "who", "which", "what", "why", "how",
+    "said", "says", "told", "tells", "rang", "rings", "sent", "sends",
+    "works", "lives", "needs", "wants", "gets", "goes", "comes", "makes",
+    "takes", "gives", "knows", "thinks", "wrote", "writes", "left", "went",
+    "got", "put", "run", "runs", "ran", "keep", "keeps", "kept", "let",
+    "lets", "asked", "asks", "wait", "waits", "seems", "looks", "feels",
+  ]);
+
+  /** Verb particles — never a surname ("jack up the price"). */
+  const LC_PARTICLES = new Set([
+    "up", "down", "off", "out", "in", "on", "back", "over", "through",
+    "away", "around", "along", "across", "apart", "aside", "together",
+    "forward",
+  ]);
+
   const AMBIGUOUS_FIRST = new Set([
     // ordinary nouns / verbs / adjectives
     "grace", "hope", "faith", "joy", "rose", "lily", "daisy", "jasmine",

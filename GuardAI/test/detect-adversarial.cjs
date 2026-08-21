@@ -20,8 +20,10 @@ const CASES = [
   {
     name: "lowercase self-introduction",
     text: "my name is john smith and my email is john.smith@work.com",
-    mask: ["john.smith@work.com"],
-    limitation: [["john smith", "lowercase names need NER, not regex"]],
+    // Promoted from `limitation` once the lowercase path shipped. The old
+    // note said this "needs NER, not regex" — it turned out to need the
+    // gazetteer that already existed for aggressive name detection.
+    mask: ["john.smith@work.com", "john smith"],
   },
   {
     name: "rental reference (name + dob + address)",
