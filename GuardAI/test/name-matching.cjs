@@ -113,6 +113,52 @@ function check(ok, label, detail) {
     console.log("      " + r.masked);
   }
 
+  /* ---- Names longer than two tokens ---- */
+  console.log("\n--- three and four token names ---");
+  // A strictly two-token rule truncated every name that isn't First+Last:
+  // "Ng Wei Ming" was captured as "Ng Wei", so masking left the real "Ming"
+  // beside a fake name. The same half-leak as the hyphen bug, and it falls on
+  // Chinese, Vietnamese, Spanish double-surname and Arabic naming rather than
+  // being spread evenly.
+  const MULTI = [
+    "Ng Wei Ming",
+    "Nguyen Van An",
+    "María García López",
+    "Juan Carlos García López",
+    "Abd al-Rahman Hassan",
+    "Johan van der Berg",
+    "María de la Cruz",
+  ];
+  for (const name of MULTI) {
+    const text = `Contact ${name} on 0412 556 781`;
+    check(names(text).includes(name), `whole name captured: ${name}`,
+      JSON.stringify(names(text)));
+  }
+  for (const name of MULTI) {
+    const text = `Contact ${name} on 0412 556 781`;
+    const r = await maskText(w, text);
+    for (const part of name.split(/\s+/)) {
+      check(!r.masked.includes(part),
+        `no token of ${JSON.stringify(name)} survives masking (checked "${part}")`, r.masked);
+    }
+  }
+  // The run must give back trailing words that are not part of the name.
+  check(names("Contact James Whitfield tomorrow on 0412 556 781").includes("James Whitfield"),
+    "trailing lowercase word is not absorbed",
+    JSON.stringify(names("Contact James Whitfield tomorrow on 0412 556 781")));
+  check(names("Regarding James Whitfield Tomorrow, call 0412 556 781").includes("James Whitfield"),
+    "trailing capitalised stopword is trimmed off the run",
+    JSON.stringify(names("Regarding James Whitfield Tomorrow, call 0412 556 781")));
+  // A company name must stay a company, not become a three-word person.
+  {
+    const found = det.scan("Contact James Whitfield Consulting on 0412 556 781");
+    check(found.some((f) => f.type === "ORG" && f.value === "James Whitfield Consulting"),
+      "company designator keeps the span as an ORG, not a 3-token person",
+      JSON.stringify(found.map((f) => f.type + ":" + f.value)));
+    check(!found.some((f) => f.type === "NAME_PII" && f.value.includes("Consulting")),
+      "no person finding swallows the company designator");
+  }
+
   /* ---- The existing gate is unchanged ---- */
   console.log("\n--- unchanged behaviour ---");
   check(names("Contact James Whitfield about the invoice").length === 0,

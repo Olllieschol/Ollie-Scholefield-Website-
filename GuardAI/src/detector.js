@@ -1506,9 +1506,23 @@
    * letter class cannot match, so there is exactly one way to parse any input.
    */
   const NAME_TOKEN =
-    "\\p{Lu}[\\p{Ll}\\p{M}]*(?:['’\\-]\\p{Lu}?[\\p{Ll}\\p{M}]+)*";
+    "(?:al|el|ad|abu|ibn|bin)?-?\\p{Lu}[\\p{Ll}\\p{M}]*(?:['’\\-]\\p{Lu}?[\\p{Ll}\\p{M}]+)*";
+  /**
+   * Lowercase particles that sit INSIDE a name rather than ending it: "Johan
+   * van der Berg", "María de la Cruz", "Abd al-Rahman Hassan". They are not
+   * capitalised, so a run of capitalised tokens stops dead at them and the
+   * name is truncated — the same half-leak as the two-token limit. Kept as a
+   * fixed, short list: these are specific words, so matching them cannot
+   * generalise into ordinary prose.
+   */
+  const NAME_PARTICLES = new Set([
+    "van", "von", "de", "del", "della", "di", "da", "dos", "das", "du",
+    "la", "le", "den", "der", "ter", "ten", "bin", "binti", "binte", "ibn",
+    "al", "el", "af", "av", "y", "i", "op", "aan",
+  ]);
   // JS `\b` is ASCII-only, so it fires in the middle of "José". These do the
   // job properly: the character either side must not be part of a name token.
+  const NAME_PARTICLE_RE = "(?:van|von|de|del|della|di|da|dos|das|du|la|le|den|der|ter|ten|bin|binti|binte|ibn|al|el|af|av|y|i|op|aan)";
   const NAME_BOUNDARY_BEFORE = "(?<![\\p{L}\\p{M}'’-])";
   const NAME_BOUNDARY_AFTER = "(?![\\p{L}\\p{M}'’-])";
   /** Letters only, so "O'Brien" counts 6 and a stray "J" counts 1. */
@@ -1600,8 +1614,15 @@
     const lc = text.toLowerCase();
     const hasNameCtx = NAME_INTRO_PHRASES.some((p) => lc.includes(p));
     if (!hasIdentifier && !hasNameCtx) return;
+    // Two to FOUR tokens, not exactly two. A strictly two-token rule truncates
+    // every name that isn't First+Last — "Ng Wei Ming" was captured as
+    // "Ng Wei", so masking left the real "Ming" sitting in the message next to
+    // a fake name. That is the same half-leak as the hyphen bug, and it lands
+    // on Chinese, Vietnamese, Spanish double-surname, Arabic and "van der"
+    // naming conventions rather than being spread evenly. The run is trimmed
+    // from the right below, so a trailing non-name word can't be absorbed.
     const re = new RegExp(
-      `${NAME_BOUNDARY_BEFORE}(${NAME_TOKEN})\\s+(${NAME_TOKEN})${NAME_BOUNDARY_AFTER}`,
+      `${NAME_BOUNDARY_BEFORE}(${NAME_TOKEN}(?:\\s+(?:${NAME_PARTICLE_RE}\\s+){0,2}${NAME_TOKEN}){1,3})${NAME_BOUNDARY_AFTER}`,
       "gu"
     );
     const STOPWORDS = new Set([
@@ -1624,20 +1645,50 @@
       "Note", "Notes", "Update", "Reminder", "Urgent", "Important",
       "Confidential", "Draft", "Copy", "Meeting", "Call", "Email",
     ]);
-    /** Decide one candidate pair. Returns false when it is NOT a name. */
+    /** Could this single token be part of a person's name? */
+    const isNameWord = (tok) => {
+      // A particle is part of the name, never the end of it.
+      if (NAME_PARTICLES.has(tok.toLowerCase()) && tok === tok.toLowerCase()) return true;
+      if (STOPWORDS.has(tok)) return false;
+      const lc = tok.toLowerCase();
+      // Identifier/category keywords ("Medicare", "Licence") and common
+      // non-name words (form labels, finance and address parts, and company
+      // designators like "Consulting" / "Logistics" / "Group") are never part
+      // of a person's name. Checking EVERY token, not just the first two, is
+      // what stops the widened run from turning "James Whitfield Consulting"
+      // into a three-word person instead of a person beside a company.
+      if (NAME_CONTEXT_WORDS.has(lc) || COMMON_WORDS.has(lc)) return false;
+      // A bare initial ("J K Rowling") is not enough on its own.
+      if (letterCount(tok) < 2) return false;
+      return true;
+    };
+
+    /** Decide one candidate run. Returns false when it is NOT a name. */
     const accept = (m) => {
-      if (STOPWORDS.has(m[1])) return false;
-      const w1 = m[1].toLowerCase();
-      const w2 = m[2].toLowerCase();
-      // Skip if either token is an identifier/category keyword.
-      if (NAME_CONTEXT_WORDS.has(w1) || NAME_CONTEXT_WORDS.has(w2)) return false;
-      // Skip if either token is a common non-name word (form labels, finance,
-      // address parts, etc.) so structural text isn't masked as a person.
-      if (COMMON_WORDS.has(w1) || COMMON_WORDS.has(w2)) return false;
-      // A bare initial ("J K Rowling") is not enough on its own to call
-      // something a name; require at least two letters in each token.
-      if (letterCount(m[1]) < 2 || letterCount(m[2]) < 2) return false;
-      out.push(finding("NAME_PII", "Full name (with other PII)", m[0], m.index, "medium"));
+      const parts = m[1].split(/\s+/);
+      // Trim from the RIGHT while the trailing token isn't name-like, so a
+      // greedy run gives back words it shouldn't have taken
+      // ("James Whitfield Tomorrow" -> "James Whitfield").
+      while (parts.length > 2 && !isNameWord(parts[parts.length - 1])) parts.pop();
+      // Never end on a particle ("Johan van" is not a name).
+      while (parts.length && NAME_PARTICLES.has(parts[parts.length - 1].toLowerCase()) &&
+             parts[parts.length - 1] === parts[parts.length - 1].toLowerCase()) parts.pop();
+      if (parts.length < 2 || !parts.every(isNameWord)) return false;
+      // At least two CAPITALISED tokens — particles alone don't make a name.
+      const realTokens = parts.filter((t) => !NAME_PARTICLES.has(t.toLowerCase()) || t !== t.toLowerCase());
+      if (realTokens.length < 2) return false;
+      // Rebuild the value from the ORIGINAL text so the real spacing (and the
+      // index) stay exact — never parts.join(" "), which would silently
+      // normalise whitespace and desynchronise the span from the message.
+      let end = 0;
+      let cursor = 0;
+      for (const p of parts) {
+        const at = m[1].indexOf(p, cursor);
+        end = at + p.length;
+        cursor = end;
+      }
+      const value = m[1].slice(0, end);
+      out.push(finding("NAME_PII", "Full name (with other PII)", value, m.index, "medium"));
       return true;
     };
 
@@ -1657,7 +1708,12 @@
       // Same failure as the credential scanner: rejecting a candidate is not
       // neutral, because the rejected span is still consumed. See
       // scanCredential() for the identical fix.
-      const w2at = m.index + m[0].lastIndexOf(m[2]);
+      // Find the first WHITESPACE RUN, not a literal space: name tokens are
+      // separated by "\n" inside a CSV or table row, and an indexOf(" ")
+      // here resumed at the wrong token and lost the name entirely
+      // ("Email\nJessica Taylor" rewound to "Taylor", not "Jessica").
+      const sep = /\s+/.exec(m[0]);
+      const w2at = sep ? m.index + sep.index + sep[0].length : m.index + 1;
       const resume = Math.max(w2at, m.index + 1);
       if (resume < re.lastIndex) re.lastIndex = resume;
     }
