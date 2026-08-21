@@ -40,14 +40,14 @@ function loadWindow() {
     runtime: { getURL: (p) => "file://" + p, sendMessage() {}, lastError: null },
   };
   if (!w.InputEvent) w.InputEvent = w.Event;
-  for (const f of ["detector.js", "masker.js", "nlp-detector.js"]) w.eval(read(f));
+  for (const f of ["names-gazetteer.js", "detector.js", "masker.js", "nlp-detector.js"]) w.eval(read(f));
   w.__storage = storage;
   return w;
 }
 
 /** Mirror content.js buildReviewModel + computeMasked over plain text. */
-async function maskText(w, text) {
-  const det = new w.GuardAI.Detector();
+async function maskText(w, text, detOverride) {
+  const det = detOverride || new w.GuardAI.Detector();
   const masker = new w.GuardAI.Masker();
   await masker.load();
   const findings = det.scan(text);

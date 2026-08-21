@@ -1,14 +1,12 @@
 {
   "manifest_version": 3,
-  "name": "GuardAI — Local AI Privacy Guard",
+  "name": "GuardAI \u2014 Local AI Privacy Guard",
   "version": "1.0.0",
-  "description": "Warns about and masks sensitive data before you send it to AI chatbots. 100% local — nothing ever leaves your device.",
+  "description": "Warns about and masks sensitive data before you send it to AI chatbots. 100% local \u2014 nothing ever leaves your device.",
   "author": "GuardAI",
-
   "permissions": [
     "storage"
   ],
-
   "host_permissions": [
     "https://chatgpt.com/*",
     "https://*.chatgpt.com/*",
@@ -61,15 +59,12 @@
     "https://*.meta.ai/*",
     "https://use.ai/*",
     "https://*.use.ai/*",
-
     "https://*.supabase.co/*"
   ],
-
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
-
   "action": {
     "default_popup": "popup.html",
     "default_title": "GuardAI Privacy Dashboard",
@@ -79,13 +74,11 @@
       "128": "icons/icon128.png"
     }
   },
-
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-
   "content_scripts": [
     {
       "matches": [
@@ -142,6 +135,7 @@
         "https://*.use.ai/*"
       ],
       "js": [
+        "src/names-gazetteer.js",
         "src/detector.js",
         "src/nlp-detector.js",
         "src/masker.js",
@@ -154,7 +148,6 @@
       "all_frames": false
     }
   ],
-
   "web_accessible_resources": [
     {
       "resources": [
@@ -193,7 +186,6 @@
       ]
     }
   ],
-
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   }

@@ -1612,7 +1612,15 @@
     // Also detect when the user explicitly introduces themselves, even in a short
     // message with no other identifier (e.g. "my name is John Smith").
     const lc = text.toLowerCase();
-    const hasNameCtx = NAME_INTRO_PHRASES.some((p) => lc.includes(p));
+    // Word-bounded, not substring. `NAME_INTRO_PHRASES` contains bare "im ",
+    // and a plain includes() matched it INSIDE ordinary words — "Send Aroha
+    // Nkemdirim the draft" contains "im ", which unlocked name detection with
+    // no identifier anywhere in the message. Any text containing "Kim ",
+    // "claim ", "trim " or "swim " did the same.
+    const hasNameCtx = NAME_INTRO_PHRASES.some((p) => {
+      const esc = p.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return new RegExp("\\b" + esc + "\\b", "i").test(lc);
+    });
     if (!hasIdentifier && !hasNameCtx) return;
     // Two to FOUR tokens, not exactly two. A strictly two-token rule truncates
     // every name that isn't First+Last — "Ng Wei Ming" was captured as
@@ -1644,6 +1652,17 @@
       "Re", "Ref", "Fwd", "Fw", "Cc", "Bcc", "Reply", "Forwarded",
       "Note", "Notes", "Update", "Reminder", "Urgent", "Important",
       "Confidential", "Draft", "Copy", "Meeting", "Call", "Email",
+      // Imperative verbs. Harmless while the rule was strictly two tokens,
+      // but a 2-4 token run absorbs them ("Ask Aroha Nkemdirim" became one
+      // three-word name), and masking then replaces the verb too. Only verbs
+      // that are NOT also common given names are listed — "Mark", "Will",
+      // "Grace", "Chase" and "Bill" are deliberately absent.
+      "Ask", "Tell", "Send", "Check", "See", "Meet", "Find", "Let", "Get",
+      "Give", "Take", "Bring", "Look", "Watch", "Follow", "Add", "Remove",
+      "Reply", "Forward", "Book", "Confirm", "Cancel", "Review", "Approve",
+      "Sign", "Pay", "Ship", "Deliver", "Notify", "Remind", "Invite",
+      "Schedule", "Arrange", "Try", "Use", "Keep", "Make", "Put", "Show",
+      "Start", "Stop", "Help", "Ping", "Order", "Set", "Join", "Leave",
     ]);
     /** Could this single token be part of a person's name? */
     const isNameWord = (tok) => {
@@ -1719,6 +1738,157 @@
     }
   }
 
+  /* ---- Aggressive (standalone) name detection — OPT-IN, DEFAULT OFF ------ *
+   *
+   * Flags a name with no other PII beside it, using the bundled gazetteer.
+   * The default rule above is untouched and keeps working when this is off.
+   *
+   * Words that are BOTH a common given name and an ordinary word or place.
+   * These are the reason this mode is off by default, and they never fire on
+   * the strength of the given name alone.
+   */
+  const AMBIGUOUS_FIRST = new Set([
+    // ordinary nouns / verbs / adjectives
+    "grace", "hope", "faith", "joy", "rose", "lily", "daisy", "jasmine",
+    "amber", "pearl", "ruby", "crystal", "summer", "autumn", "dawn", "sky",
+    "star", "angel", "art", "bill", "mark", "will", "rob", "chase", "drew",
+    "miles", "reed", "wade", "hunter", "frank", "earl", "rich", "buck",
+    "dale", "glen", "cliff", "brook", "brooke", "heath", "field", "ford",
+    "rain", "storm", "sunny", "major", "guy", "van", "gene", "bud", "chip",
+    "penny", "hazel", "olive", "ivy", "iris", "jade", "sage", "clay",
+    "colt", "dean", "kent", "lane", "moss", "reign", "trinity", "melody",
+    "harmony", "serenity", "justice", "royal", "king", "prince", "duke",
+    // months and seasons
+    "april", "may", "june", "august", "julie", "noel",
+    // places
+    "sydney", "perth", "adelaide", "victoria", "georgia", "charlotte",
+    "florence", "paris", "austin", "houston", "dallas", "memphis", "phoenix",
+    "jordan", "kenya", "india", "china", "asia", "israel", "cyprus", "madison",
+    "jackson", "lincoln", "washington", "brooklyn", "chelsea", "kingston",
+    "richmond", "hamilton", "cleveland", "carolina", "dakota", "montana",
+    "savannah", "sierra", "cairo", "eden", "alexandria", "adelaide",
+  ]);
+
+  /**
+   * Capitalised words that are ordinary nouns or institutions, used to reject
+   * the SECOND token. This is what stops "Sydney Airport" and "Victoria
+   * Police" while still accepting a surname the gazetteer has never heard of
+   * — which matters, because any bounded surname list under-covers non-Anglo
+   * names, and gating on list membership alone would quietly protect those
+   * people less.
+   */
+  const NON_SURNAME_WORDS = new Set([
+    "airport", "police", "hospital", "university", "college", "school",
+    "station", "street", "road", "avenue", "highway", "bridge", "harbour",
+    "harbor", "beach", "park", "gardens", "square", "centre", "center",
+    "tower", "plaza", "mall", "market", "museum", "gallery", "library",
+    "stadium", "arena", "theatre", "theater", "cinema", "hotel", "motel",
+    "restaurant", "cafe", "bar", "club", "church", "cathedral", "temple",
+    "mosque", "council", "court", "prison", "clinic", "pharmacy", "bank",
+    "office", "building", "campus", "terminal", "port", "wharf", "quay",
+    "island", "bay", "river", "creek", "valley", "hill", "mount", "lake",
+    "forest", "desert", "coast", "north", "south", "east", "west", "central",
+    "city", "town", "suburb", "state", "county", "region", "district",
+    "day", "week", "month", "year", "morning", "evening", "night",
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
+    "sunday", "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+    "time", "date", "report", "invoice", "meeting", "project", "team",
+    "department", "division", "branch", "group", "company", "limited",
+  ]);
+
+  /** True when this offset begins a sentence (every word is capitalised there). */
+  function atSentenceStart(text, index) {
+    for (let i = index - 1; i >= 0; i--) {
+      const ch = text[i];
+      if (/\s/.test(ch)) continue;
+      return /[.!?;:\n]/.test(ch);
+    }
+    return true;
+  }
+
+  function detectStandaloneNames(text, out) {
+    const gaz = (typeof window !== "undefined" && window.GuardAI && window.GuardAI.NAME_GAZETTEER) || null;
+    if (!gaz) return;
+
+    const re = new RegExp(
+      `${NAME_BOUNDARY_BEFORE}(${NAME_TOKEN}(?:\\s+(?:${NAME_PARTICLE_RE}\\s+){0,2}${NAME_TOKEN}){1,3})${NAME_BOUNDARY_AFTER}`,
+      "gu"
+    );
+    let m;
+    let guard = 0;
+    while ((m = re.exec(text)) && guard++ < 20000) {
+      const parts = m[1].split(/\s+/);
+      const first = parts[0];
+      const second = parts[1];
+      if (!first || !second) continue;
+      const f1 = first.toLowerCase();
+      const f2 = second.toLowerCase();
+
+      // REWIND on every rejection, for the third time in this file: the run
+      // may START on a word that is not a given name ("Contact Chidi Okafor"),
+      // and continuing past it would skip the real name behind it. See
+      // detectNames() and scanCredential() for the same fix.
+      const rewind = () => {
+        const sep = /\s+/.exec(m[0]);
+        const at = sep ? m.index + sep.index + sep[0].length : m.index + 1;
+        if (at < re.lastIndex) re.lastIndex = at;
+      };
+
+      // The first token must be a given name the gazetteer vouches for.
+      if (!gaz.isFirst(f1)) { rewind(); continue; }
+      // Never re-flag something the ordinary rule already found.
+      if (out.some((x) => x.type === "NAME_PII" && x.index === m.index)) { rewind(); continue; }
+      if (NON_SURNAME_WORDS.has(f2) || COMMON_WORDS.has(f2)) { rewind(); continue; }
+
+      const ambiguous = AMBIGUOUS_FIRST.has(f1);
+      // An ambiguous word at the start of a sentence is almost always the
+      // ordinary word, not a name — every word is capitalised there, so the
+      // capitalisation carries no signal at all.
+      const surnameKnown = gaz.isLast(f2);
+      // Sentence-initial suppression, but a gazetteer surname outranks it:
+      // "Sydney Whitfield called" opens a sentence, yet "Whitfield" is
+      // corroboration that no amount of position can explain away. Without
+      // this, any name at the start of a message was invisible to this mode.
+      if (ambiguous && !surnameKnown && atSentenceStart(text, m.index)) { rewind(); continue; }
+
+      // HIGH: the gazetteer vouches for the surname too.
+      // MEDIUM: it doesn't, but the word isn't a common noun either. Kept
+      // rather than dropped so that a surname absent from a bounded,
+      // Anglo-leaning list is still protected — a spurious flag is a better
+      // failure than silently weaker protection. Medium findings are what
+      // force the warning card even in silent mode (see content.js).
+      const confidence = surnameKnown ? "high" : "medium";
+
+      // Trim the run the same way the ordinary rule does.
+      const kept = [first, second];
+      for (let i = 2; i < parts.length; i++) {
+        const t = parts[i];
+        const lc = t.toLowerCase();
+        const isParticle = NAME_PARTICLES.has(lc) && t === lc;
+        if (isParticle) { kept.push(t); continue; }
+        if (COMMON_WORDS.has(lc) || NON_SURNAME_WORDS.has(lc) || NAME_CONTEXT_WORDS.has(lc)) break;
+        kept.push(t);
+      }
+      while (kept.length > 2 && NAME_PARTICLES.has(kept[kept.length - 1].toLowerCase())) kept.pop();
+      let end = 0;
+      let cursor = 0;
+      for (const p of kept) {
+        const at = m[1].indexOf(p, cursor);
+        end = at + p.length;
+        cursor = end;
+      }
+      const value = m[1].slice(0, end);
+
+      const f = finding("NAME_PII", "Name (standalone detection)", value, m.index, confidence);
+      // Marks this as produced by the opt-in aggressive rule, so the silent-
+      // mode escalation can tell it apart from an ordinary NAME_PII finding
+      // (which also carries "medium" confidence).
+      f.aggressive = true;
+      out.push(f);
+    }
+  }
+
   /* ================================================================== *
    * Public class
    * ================================================================== */
@@ -1756,12 +1926,22 @@
       // migration, since it's simply absent from a disabled-list that only
       // ever names things explicitly turned off.
       this.disabledTypes = new Set();
+      // "Aggressive name detection" (settings.html). DEFAULT OFF — this one
+      // is opt-in, unlike the category toggles, so it is stored as its own
+      // boolean rather than in the disabled-categories OFF-list (which
+      // cannot express a default-off setting: absence there means enabled).
+      this.aggressiveNames = false;
     }
 
     /** Called by content.js after loading (or on change of) the
      * guardai_disabled_categories setting. Takes effect on the next scan(). */
     setDisabledTypes(types) {
       this.disabledTypes = new Set(types || []);
+    }
+
+    /** Called by content.js from loadSettings() and on storage change. */
+    setAggressiveNames(on) {
+      this.aggressiveNames = on === true;
     }
 
     scan(text) {
@@ -1808,6 +1988,10 @@
           out.some((f) => IDENTIFIER_TYPES.has(f.type)) ||
           /\b(bank|account holder|savings account)\b/i.test(text);
         detectNames(text, out, hasIdentifier);
+        // Opt-in standalone detection runs AFTER the ordinary rule so it can
+        // skip anything already found, and so the ordinary finding (which is
+        // not marked `aggressive`) always wins for a span both would match.
+        if (this.aggressiveNames) detectStandaloneNames(text, out);
       } catch (err) {
         console.warn("[GuardAI] detector \"names\" failed, continuing:", err);
       }

@@ -196,6 +196,7 @@
     // opening it IS the requested action there, not an unwanted side effect.
     lastMaskedText: null, // the masked text we just typed in; lets the user's
     // own manual send pass through without re-scanning/re-masking.
+    aggressiveNames: false, // "Aggressive name detection" — opt-in, default OFF
     disabledCategories: [], // finding TYPEs the user switched off in "What
     // GuardAI masks" (settings.html). Empty by default — everything on.
   };
@@ -218,6 +219,7 @@
         "guardai_auto_restore",
         "guardai_autopanel_enabled",
         "guardai_disabled_categories",
+        "guardai_aggressive_names",
         "guardai_theme",
       ]);
       state.enabled = data.guardai_enabled !== false; // default ON
@@ -228,6 +230,10 @@
         ? data.guardai_disabled_categories
         : [];
       detector.setDisabledTypes(state.disabledCategories);
+      // Default OFF: only an explicit `true` enables it, so a missing or
+      // malformed value can never silently turn on the noisier mode.
+      state.aggressiveNames = data.guardai_aggressive_names === true;
+      detector.setAggressiveNames(state.aggressiveNames);
       applyThemeToPage(data.guardai_theme === "light");
     } catch (err) {
       console.warn("[GuardAI] could not read settings, using defaults:", err);
@@ -260,6 +266,10 @@
     }
     if (changes.guardai_autopanel_enabled) {
       state.autoOpenPanel = changes.guardai_autopanel_enabled.newValue === true;
+    }
+    if (changes.guardai_aggressive_names) {
+      state.aggressiveNames = changes.guardai_aggressive_names.newValue === true;
+      detector.setAggressiveNames(state.aggressiveNames);
     }
     if (changes.guardai_disabled_categories) {
       state.disabledCategories = Array.isArray(changes.guardai_disabled_categories.newValue)
@@ -1696,7 +1706,16 @@
     // Any failure/uncertainty still falls back to the normal, fully-visible
     // warning card below — silent mode only ever silences a CONFIRMED-safe
     // send, never an uncertain one.
-    if (state.maskingEnabled) {
+    // Aggressive name detection, MEDIUM confidence: show the card even in
+    // silent mode. Not a new rule — the existing one applied consistently.
+    // Silent mode "only ever silences a CONFIRMED-safe send", and a
+    // medium-confidence standalone name is uncertain by construction: the
+    // gazetteer did not vouch for the surname. Left silent, a false positive
+    // rewrites something like "Sydney Airport" into a person's name and sends
+    // it with nothing on screen to explain the degraded reply. HIGH-confidence
+    // matches (both names in the gazetteer) stay silent like anything else.
+    const uncertainName = findings.some((f) => f.aggressive && f.severity !== "high");
+    if (state.maskingEnabled && !uncertainName) {
       const ok = await doMaskAndSend(editor, text, findings, { silent: true });
       if (ok === false) {
         showWarning(editor, text, findings, makeResender(editor));

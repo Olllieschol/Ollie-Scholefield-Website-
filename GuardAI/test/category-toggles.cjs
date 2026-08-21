@@ -49,6 +49,36 @@ for (const t of producedTypes) {
 for (const t of catalogueTypes) {
   check(producedTypes.has(t), `settings.js's "${t}" category corresponds to a real detector.js finding type (no stale/typo'd entries)`);
 }
+// MODE rows are deliberately NOT categories: they have their own storage keys
+// because the category list is an OFF-list where absence means enabled, which
+// cannot express a DEFAULT-OFF setting. They must therefore stay out of the
+// bijection above — if a mode were ever added to GROUPS it would fail the
+// check as a "category with no finding type", and weakening that check to
+// accommodate it would also stop it catching genuine catalogue drift.
+{
+  const modesMatch = settingsSrc.match(/const MODES = (\[[\s\S]*?\n  \]);/);
+  check(!!modesMatch, "settings.js exposes a separate MODES list");
+  const MODES = modesMatch ? eval(modesMatch[1]) : [];
+  check(MODES.length > 0, "at least one mode row exists");
+  for (const mode of MODES) {
+    check(!!mode.key && mode.key.startsWith("guardai_"),
+      `mode "${mode.title}" has its own guardai_* storage key (${mode.key})`);
+    check(!catalogueTypes.has(mode.key),
+      `mode "${mode.title}" is NOT in the category catalogue`);
+    check(!producedTypes.has(mode.key),
+      `mode "${mode.title}" is not a finding type`);
+  }
+  check(MODES.some((m) => m.key === "guardai_aggressive_names"),
+    "the aggressive-names mode is present");
+  const agg = MODES.find((m) => m.key === "guardai_aggressive_names");
+  check(agg && /off by default/i.test(agg.desc),
+    "the aggressive-names row says it is off by default");
+  check(agg && /false positive/i.test(agg.desc),
+    "the aggressive-names row warns about false positives");
+  check(agg && /warning card|masking mode/i.test(agg.note || ""),
+    "the aggressive-names row states the silent-mode interaction");
+}
+
 check(producedTypes.size === catalogueTypes.size,
   "catalogue count matches detector.js's actual finding-type count exactly",
   `detector.js: ${producedTypes.size}, settings.js: ${catalogueTypes.size}`);

@@ -22,7 +22,7 @@ const { JSDOM } = require("jsdom");
 const DIR = __dirname;
 const read = (f) => fs.readFileSync(path.join(DIR, "src", f), "utf8");
 
-function makeEnv({ pasteWorks }) {
+function makeEnv({ pasteWorks, seed }) {
   const dom = new JSDOM(`<!DOCTYPE html><html><body></body></html>`, {
     url: "https://chatgpt.com/c/abc123",
     runScripts: "dangerously",
@@ -113,16 +113,38 @@ function makeEnv({ pasteWorks }) {
   }
 
   // ---- chrome stub ----
-  const storage = {};
+  // `seed` pre-populates storage BEFORE content.js boots, so a test can set
+  // a toggle without depending on listener timing.
+  const storage = Object.assign({}, seed || {});
+  const storageListeners = [];
   window.chrome = {
     storage: {
       local: {
         get: (keys) => Promise.resolve(
           (Array.isArray(keys) ? keys : [keys]).reduce((o, k) => { if (k in storage) o[k] = storage[k]; return o; }, {})
         ),
-        set: (obj) => { Object.assign(storage, obj); return Promise.resolve(); },
+        set: (obj) => {
+          // Fire onChanged like real chrome.storage does. The old no-op stub
+          // meant any setting written AFTER boot never reached content.js, so
+          // a test could set a toggle, see nothing happen, and look like a
+          // product bug when it was the harness.
+          const changes = {};
+          for (const k of Object.keys(obj)) changes[k] = { oldValue: storage[k], newValue: obj[k] };
+          Object.assign(storage, obj);
+          for (const fn of storageListeners) {
+            try { fn(changes, "local"); } catch (_) {}
+          }
+          return Promise.resolve();
+        },
+        remove: (k) => {
+          const keys = Array.isArray(k) ? k : [k];
+          const changes = {};
+          for (const kk of keys) { changes[kk] = { oldValue: storage[kk] }; delete storage[kk]; }
+          for (const fn of storageListeners) { try { fn(changes, "local"); } catch (_) {} }
+          return Promise.resolve();
+        },
       },
-      onChanged: { addListener() {} },
+      onChanged: { addListener(fn) { storageListeners.push(fn); } },
     },
     runtime: { sendMessage() {}, lastError: null, getURL: (p) => "file://" + p },
   };
@@ -133,7 +155,10 @@ function makeEnv({ pasteWorks }) {
   // ---- load the real source files in order, evaluated against the jsdom window
   // so bare globals (location, history, setTimeout, getSelection, ...) resolve
   // naturally to the page context, exactly like a real content script. ----
-  for (const f of ["detector.js", "masker.js", "nlp-detector.js", "content.js"]) {
+  // Same order as manifest.json's content_scripts. names-gazetteer.js must
+  // come first: detector.js reads window.GuardAI.NAME_GAZETTEER at scan time,
+  // and without it aggressive name detection silently does nothing.
+  for (const f of ["names-gazetteer.js", "detector.js", "masker.js", "nlp-detector.js", "content.js"]) {
     window.eval(read(f));
   }
 

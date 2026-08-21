@@ -23,6 +23,23 @@
 
   const STORAGE_KEY = "guardai_disabled_categories";
   const THEME_KEY = "guardai_theme";
+  // MODE toggles are not categories. They have their own storage keys because
+  // the category list is an OFF-list (absence = enabled), which structurally
+  // cannot express a DEFAULT-OFF setting. Rendered in their own section, and
+  // excluded from the settings<->finding-type cross-check in
+  // test/category-toggles.cjs, since a mode is not a finding type.
+  const MODES = [
+    {
+      key: "guardai_aggressive_names",
+      title: "Aggressive name detection",
+      desc: "Off by default. Normally GuardAI only masks a full name when other personal " +
+            "information sits beside it. Turn this on to also catch names standing on their " +
+            "own. It will flag more false positives, because words like Sydney, April and " +
+            "Grace are both names and ordinary words.",
+      note: "With Masking mode on, an uncertain match still shows the warning card instead " +
+            "of being swapped silently, so a false positive can't quietly rewrite your message.",
+    },
+  ];
 
   /**
    * type   — the exact finding().type string detector.js produces.
@@ -96,6 +113,46 @@
   applyTheme(localStorage.getItem(THEME_KEY) === "light");
 
   const groupsEl = document.getElementById("groups");
+
+  async function renderModes() {
+    const host = document.getElementById("modes");
+    if (!host) return;
+    let data = {};
+    try { data = await chrome.storage.local.get(MODES.map((m) => m.key)); } catch (_) {}
+    host.innerHTML = "";
+    const section = document.createElement("section");
+    section.className = "group";
+    const heading = document.createElement("div");
+    heading.className = "group__title";
+    heading.textContent = "Detection mode";
+    section.appendChild(heading);
+    const list = document.createElement("div");
+    list.className = "group__list";
+    for (const mode of MODES) {
+      const on = data[mode.key] === true; // default OFF
+      const row = document.createElement("div");
+      row.className = "cat-row";
+      row.innerHTML =
+        `<div class="cat-row__text">` +
+        `<span class="cat-row__title">${escapeHtml(mode.title)}</span>` +
+        `<span class="cat-row__desc">${escapeHtml(mode.desc)}</span>` +
+        `<span class="cat-row__desc cat-row__warn">${escapeHtml(mode.note)}</span>` +
+        `<span class="cat-row__badge">Off by default</span>` +
+        `</div>` +
+        `<label class="gd-switch">` +
+        `<input type="checkbox" data-mode="${mode.key}" ${on ? "checked" : ""} />` +
+        `<span class="gd-slider"></span>` +
+        `</label>`;
+      list.appendChild(row);
+    }
+    section.appendChild(list);
+    host.appendChild(section);
+    host.querySelectorAll("input[data-mode]").forEach((box) => {
+      box.addEventListener("change", async () => {
+        await chrome.storage.local.set({ [box.getAttribute("data-mode")]: box.checked });
+      });
+    });
+  }
 
   function render(disabledSet) {
     groupsEl.innerHTML = "";
@@ -263,6 +320,7 @@
       /* storage unavailable — render with everything on, the safe default */
     }
     render(new Set(disabled));
+    await renderModes();
   })();
 
   // Live-refresh if the setting changes from elsewhere (e.g. this page open
