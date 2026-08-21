@@ -35,14 +35,60 @@
   /* ------------------------------------------------------------------ *
    * Australian-flavoured fake-data pools.
    * ------------------------------------------------------------------ */
-  const FIRST_NAMES = [
-    "David", "Emma", "Liam", "Olivia", "Noah", "Ava", "Jack", "Mia",
-    "Lucas", "Chloe", "Ethan", "Grace", "Oliver", "Sophie", "Henry", "Ruby",
+  /* Stand-in name pools, split by gender so a masked name keeps the gender of
+   * the real one. A female name replaced by a male stand-in makes the AI's
+   * reply subtly wrong ("name is Sophie Newman" -> "Got it, Oliver") and
+   * corrupts anything drafted downstream.
+   *
+   * SIZED AGAINST THE MAPPING CAP, not chosen for variety. The table holds up
+   * to MAX_ENTRIES (500) real<->fake pairs, and previewFake() guarantees
+   * uniqueness by RE-GENERATING on collision, giving up after 100 tries and
+   * returning a duplicate. The old pool was 16 first x 14 last = 224 combos —
+   * already under-provisioned against a 500-entry table, and a naive gender
+   * split would have halved it to 112 per gender. Past that point two
+   * different people silently share one stand-in, which is the same
+   * indistinguishable-fakes bug that made "[redacted-secret]" unusable.
+   * Each pool below clears 1,500 combinations. */
+  const FIRST_MALE = [
+    "David", "Liam", "Noah", "Jack", "Lucas", "Ethan", "Oliver", "Henry",
+    "Thomas", "Samuel", "Daniel", "Benjamin", "Alexander", "Nathan", "Patrick",
+    "Marcus", "Julian", "Adrian", "Elliot", "Vincent", "Dominic", "Gregory",
+    "Nicholas", "Simon", "Theodore", "Edward", "Malcolm", "Desmond", "Rupert",
+    "Callum", "Declan", "Rohan", "Mateo", "Andre", "Bruno", "Emeka", "Hassan",
+    "Kenji", "Viktor", "Stefan",
+  ];
+  const FIRST_FEMALE = [
+    "Emma", "Olivia", "Ava", "Mia", "Chloe", "Grace", "Sophie", "Ruby",
+    "Hannah", "Isla", "Freya", "Aisha", "Elena", "Nadia", "Priya", "Amara",
+    "Rosa", "Lena", "Maya", "Zara", "Iris", "Nina", "Clara", "Alice",
+    "Beatrice", "Camille", "Delia", "Esther", "Fiona", "Greta", "Helena",
+    "Ingrid", "Juliet", "Katya", "Leila", "Miriam", "Naomi", "Paloma",
+    "Rosalind", "Tamsin",
+  ];
+  /* Used whenever the real name's gender is unknown, contradictory across
+   * origins, or genuinely unisex. A neutral stand-in cannot be WRONG, only
+   * uninformative — which is the whole point: the gazetteer tags
+   * conservatively, so this pool absorbs every case I was not sure about. */
+  const FIRST_UNISEX = [
+    "Alex", "Sam", "Jordan", "Riley", "Casey", "Jamie", "Taylor", "Morgan",
+    "Avery", "Quinn", "Charlie", "Frankie", "Robin", "Rowan", "Sasha",
+    "Cameron", "Devon", "Emerson", "Harper", "Kai", "Logan", "Marley",
+    "Parker", "Reese", "Skyler", "Toni", "Val", "Wren", "Ari", "Blake",
+    "Dakota", "Ellis", "Finley", "Hayden", "Indigo", "Jules", "Kerry",
+    "Lennox", "Micah", "Noor",
   ];
   const LAST_NAMES = [
     "Clarke", "Walker", "Bennett", "Hughes", "Foster", "Reid", "Murphy",
     "Marshall", "Coleman", "Newman", "Dawson", "Fletcher", "Barker", "Wells",
+    "Ashton", "Bramley", "Carver", "Delaney", "Ellery", "Fairbourne",
+    "Garrick", "Halloway", "Ingram", "Jarrett", "Kendrick", "Lockhart",
+    "Merrick", "Northcote", "Oakley", "Pennington", "Quillan", "Radcliffe",
+    "Sinclair", "Thorne", "Underwood", "Vance", "Winslow", "Yardley",
+    "Ashford", "Bellamy",
   ];
+  /* Kept as the union so anything that still wants "a person's first name"
+   * without caring about gender behaves exactly as before. */
+  const FIRST_NAMES = [...FIRST_MALE, ...FIRST_FEMALE, ...FIRST_UNISEX];
   const STREET_NAMES = [
     "Oak", "Maple", "Cedar", "Birch", "Elm", "Willow", "Acacia", "Banksia",
     "Wattle", "Jacaranda", "Eucalypt", "Hibiscus",
@@ -284,7 +330,26 @@
       return chars.join("");
     },
     NAME_PII(real, seed) {
-      return `${pick(FIRST_NAMES, seed)} ${pick(LAST_NAMES, seed >>> 3)}`;
+      // Keep the stand-in's gender matching the real name's, so the AI's reply
+      // and anything drafted from it stay correct. Without this, "name is
+      // Sophie Newman" could come back as "Got it, Oliver".
+      //
+      // `real` was already passed to every generator and simply ignored here,
+      // so this needs no plumbing — only the FIRST token is used, which also
+      // means previewFake()'s collision retry (which appends ":<n>" to `real`)
+      // still resolves to the same gender.
+      const firstToken = String(real || "").trim().split(/[\s'’-]+/)[0] || "";
+      const gaz = (typeof window !== "undefined" && window.GuardAI &&
+                   window.GuardAI.NAME_GAZETTEER) || null;
+      const g = gaz ? gaz.genderOf(firstToken) : null;
+      // "u" (known unisex) and null (not in the list) are treated the same:
+      // a NEUTRAL stand-in. A neutral name cannot be wrong, only
+      // uninformative, and the gazetteer tags conservatively on purpose so
+      // every uncertain case lands here rather than being guessed. That
+      // matters most for non-Anglo names, where confidence is lowest and a
+      // confidently wrong stand-in would be the worst outcome.
+      const pool = g === "m" ? FIRST_MALE : g === "f" ? FIRST_FEMALE : FIRST_UNISEX;
+      return `${pick(pool, seed)} ${pick(LAST_NAMES, seed >>> 3)}`;
     },
     ORG(real, seed) {
       // Keep the real name's own designator/descriptor ("Pty Ltd",

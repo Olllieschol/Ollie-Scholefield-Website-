@@ -41,124 +41,119 @@
 (function () {
   "use strict";
 
-  // ---- Given names --------------------------------------------------------
-  const FIRST = [
-    // Anglo-Celtic
-    "james john robert michael william david richard joseph thomas charles",
-    "christopher daniel matthew anthony donald mark paul steven andrew kenneth",
-    "george edward brian ronald timothy jason jeffrey ryan jacob gary",
-    "nicholas eric stephen jonathan larry justin scott brandon benjamin samuel",
-    "gregory alexander patrick jack dennis jerry tyler aaron jose adam",
-    "nathan henry douglas zachary peter kyle ethan walter noah jeremy",
-    "christian keith roger terry gerald harold sean austin carl arthur",
-    "lawrence dylan jesse jordan bryan billy joe bruce gabriel logan",
-    "mary patricia jennifer linda elizabeth barbara susan jessica sarah karen",
-    "nancy lisa margaret betty sandra ashley dorothy kimberly emily donna",
-    "michelle carol amanda melissa deborah stephanie rebecca sharon laura cynthia",
-    "kathleen amy angela shirley anna brenda pamela emma nicole helen",
-    "samantha katherine christine debra rachel carolyn janet catherine maria heather",
-    "diane ruth julie olivia joyce virginia victoria kelly lauren christina joan",
-    "evelyn judith megan andrea cheryl hannah jacqueline martha gloria teresa",
-    "sara janice marie julia kathryn grace judy theresa madison beverly",
-    "denise marilyn amber danielle abigail brittany rose natalie sophia alexis",
-    "lori kayla jane charlotte chloe zoe sophie isla amelia poppy",
-    "liam oliver harry archie leo freddie alfie theo finlay callum",
-    "siobhan aoife niamh saoirse ciara eoin cian oisin declan fergus",
-    "bridget maeve roisin sinead orla padraig seamus liadh cormac ronan",
-    "angus hamish fiona isla mairi eilidh calum struan lachlan rory",
-    // Chinese (pinyin and Cantonese romanisations)
-    "wei ming chen jun hui feng lei yang tao bin",
-    "jing yan hua ping li qiang gang jie xin yu",
-    "xiaoming xiaohong xiaoli jianguo jianhua guoqiang zhiqiang zhihua yuxuan zixuan",
-    "mei ling fang juan xia yun lan zhen qin hong",
-    "siu wing kwok chun yuen hoi keung shun tak wah",
-    "ka man yee ling chi kit fung hei lok ching",
-    "haoyu yichen ziyi yiran ruoxi jiahao yuhan sicheng tianyi wenjun",
-    // Indian subcontinent
-    "priya ananya aarav vihaan arjun aditya rohan rahul ravi anil",
-    "sunil vijay ajay sanjay rajesh mahesh suresh ramesh dinesh mukesh",
-    "amit sumit rohit mohit ankit nikhil akash vikas manish gaurav",
-    "deepak pankaj kiran karan varun tarun harsh yash krishna gopal",
-    "kavya divya shreya pooja neha sneha riya isha aditi anjali",
-    "swati preeti jyoti kavita sunita anita namrata shalini megha ritu",
-    "rajan naveen praveen sachin nitin sameer zubin farhan imran salman",
-    "arun bala murali senthil karthik prakash suresh ganesh mohan raman",
-    "lakshmi saraswati parvati radha sita gita usha rekha asha mala",
-    "gurpreet harpreet manpreet jaspreet amrit simran navjot rupinder baljit sukhwinder",
-    "tenzin pemba dorje karma sonam nima pasang lhamo dawa tashi",
-    "kasun nuwan chamara dilshan sanduni ishara thilini nadeesha lakmal ruwan",
-    // Arabic, Turkish, Persian, Afghan
-    "mohammed muhammad ahmed ahmad ali omar hassan hussein khalid ibrahim",
-    "yusuf youssef mustafa mahmoud tariq bilal rashid sami karim nabil",
-    "fatima aisha layla zainab maryam noor huda amira salma rania",
-    "yasmin dalia hala nadia samira leila farida iman sabrina malak",
-    "mehmet mustafa emre burak serkan kerem baris cem murat tolga",
-    "elif zeynep merve ayse fatma esra selin ceren dilara pinar",
-    "reza mehdi hossein amir kourosh farhad babak arash siavash payam",
-    "shirin parisa maryam nasrin laleh mitra golnaz roya azadeh sanaz",
-    "wahid najib zahra rahim habib mansour jamil nasir tahir waleed",
-    // Southern and Eastern European
-    "giuseppe giovanni antonio francesco luigi angelo vincenzo pietro salvatore carlo",
-    "marco andrea alessandro matteo lorenzo davide simone federico stefano riccardo",
-    "maria giulia francesca chiara sara valentina martina alessia elena silvia",
-    "dimitrios georgios ioannis konstantinos nikolaos panagiotis christos vasilios athanasios stavros",
-    "eleni maria katerina sofia despina vasiliki angeliki georgia dimitra anastasia",
-    "piotr pawel jakub lukasz mateusz krzysztof marcin tomasz michal grzegorz",
-    "anna katarzyna malgorzata agnieszka barbara ewa magdalena joanna zofia natalia",
-    "ivan marko luka petar nikola stefan milan dragan zoran josip",
-    "ana ivana marija jelena snezana vesna dragana mirjana natasa sanja",
-    "andrei mihai stefan cristian gheorghe alexandru vasile florin bogdan razvan",
-    // African (Nigerian, Ghanaian, Somali, Sudanese, Ethiopian, Eritrean)
-    "chidi ngozi adebayo temitope olumide chinedu emeka ifeoma amaka obinna",
-    "yewande folake babatunde oluwaseun chiamaka nnamdi uchenna adaeze kelechi ikenna",
-    "kwame kofi kwabena yaw abena akosua ama afia esi nana",
-    "abdirahman hodan ayaan farhia guled ismail hassan warsame nasra amina",
-    "deng akol garang nyandeng ajak majok aluel achol bol thon",
-    "abebe tadesse getachew mulugeta selamawit hanna bethlehem meseret tigist yohannes",
-    // East and Southeast Asian
-    "hiroshi yuki sakura takeshi kenji akira haruto sota yui aoi",
-    "minjun seojun doyoon jiwoo hyunwoo sungmin jihye soyeon eunji minseo",
-    "somchai somsak suchart pornthip siriporn kanya arthit nattapong wanida chalermchai",
-    "budi agus dewi sri putri wayan ketut made nyoman rina",
-    "aziz farah hafiz nurul syafiq amirah zulkifli shahrul faridah rosnah",
-    // Vietnamese
-    "nguyen tran phuong linh thanh huong minh tuan hoang anh",
-    "duc long quan hieu khanh trang mai lan ngoc thao",
-    "bao chau dung giang hanh khoa nhung phuc quyen son",
-    // Filipino
-    "jose maria juan antonio ramon carlo miguel angelo joshua mark",
-    "rosario cristina angelica jennylyn jasmine grace divina imelda corazon lourdes",
-    "reynaldo rodel jomar dexter arnel wilfredo ferdinand romeo rolando edgardo",
-    // Latin American and Iberian
-    "carlos luis jorge fernando ricardo eduardo alejandro javier diego rafael",
-    "mateo santiago sebastian nicolas emiliano thiago benicio joaquin ignacio bruno",
-    "valentina isabella sofia camila lucia mariana gabriela daniela paula andrea",
-    "carmen pilar rocio inmaculada montserrat esperanza consuelo dolores mercedes soledad",
-    // Pacific Islander and Māori
-    "sione viliami tevita filipe manaia moana anahera aroha kiri hine",
-    "tama rangi kauri matiu wiremu tane ariki mere ngaio hemi",
-    "sina lupe tafili malia siale ofa lagi tupou vaea tevita",
-    // Aboriginal and Torres Strait Islander
-    "jedda kirra lowanna alinta warrin jarrah kirrily narelle koori yindi",
-    "birrani miminy tarni waru wandjina bindi allira eumarrah kalinda talia",
-    // AMBIGUOUS given names — words that are also ordinary nouns, months or
-    // places. They belong here because they ARE real given names; the
-    // detector cross-references them against its own AMBIGUOUS_FIRST set and
-    // demands a second signal before flagging. Leaving them out instead would
-    // not make the detector safer, it would just make that whole tier dead
-    // code: a word absent from this list is never a candidate at all.
-    // Deliberately excluded: place names that are not plausibly given names
-    // (Perth, Houston, Dallas, Memphis, Cairo, Kenya, Cyprus).
-    "hope faith joy lily daisy pearl ruby crystal summer autumn",
-    "dawn sky star angel art bill will rob chase drew",
-    "miles reed wade hunter frank earl rich buck dale glen",
-    "cliff brook brooke heath ford rain storm sunny guy van",
-    "gene bud chip penny hazel olive ivy iris jade sage",
-    "clay colt dean kent lane moss trinity melody harmony serenity",
-    "justice royal king prince duke april may june august noel",
-    "sydney adelaide florence paris phoenix india jackson lincoln washington brooklyn",
-    "chelsea kingston richmond hamilton cleveland carolina dakota montana savannah sierra",
-    "eden alexandria",
+  // ---- Given names, partitioned by likely gender ----------------------
+  //
+  // The partition exists so a masked stand-in can keep the same gender: a
+  // female name replaced by a male one makes the AI's reply subtly wrong
+  // ("name is Sophie Newman" -> "Got it, Oliver").
+  //
+  // TAGGED CONSERVATIVELY, AND THAT IS THE POINT. Anything I was not
+  // confident about is UNISEX, not guessed. Gender is culturally variable in
+  // exactly the way this list is built to span — "juan" is a Spanish male
+  // name and a Chinese female one, "andrea" is male in Italian and female in
+  // English, "jean" flips between French and English. A wrong tag produces a
+  // confidently wrong stand-in, which is worse than a neutral one, and it
+  // would land hardest on the non-Anglo names the quotas exist to protect.
+  // Unisex routes that uncertainty to a neutral stand-in instead.
+  //
+  // So UNISEX here means any of three things, and the code does not care
+  // which: genuinely unisex, unknown to me, or contradictory across origins.
+  // Most Chinese, Vietnamese and Korean romanisations sit here because
+  // romanised form alone does not carry gender reliably.
+  //
+  // Detection is UNAFFECTED: isFirst() is the union of all three, so the
+  // matcher sees exactly the same set of names as before this split.
+  const FIRST_MALE = [
+    "aarav aaron abdirahman abebe adam adebayo aditya agus ahmad ahmed ajay akash",
+    "akira akol alejandro alessandro alexander alexandru alfie ali amir amit",
+    "andrei andrew angelo angus anil ankit anthony antonio arash archie arjun",
+    "arnel arthit arthur arun athanasios aziz babak babatunde bala baljit bao",
+    "baris benicio benjamin bilal billy bogdan bol brandon brian bruce bruno",
+    "bryan budi burak callum calum carl carlo carlos cem chalermchai chamara",
+    "charles chidi chinedu christian christopher christos cian cormac cristian",
+    "daniel david davide declan deepak deng dennis dexter diego dilshan dimitrios",
+    "dinesh donald dorje douglas doyoon dragan duc dylan edgardo eduardo edward",
+    "emeka emiliano emre eoin eric ethan farhad farhan federico ferdinand fergus",
+    "fernando filipe finlay florin francesco freddie gabriel ganesh garang gary",
+    "gaurav george georgios gerald getachew gheorghe giovanni giuseppe gopal",
+    "gregory grzegorz guled guoqiang gurpreet habib hafiz hamish harold harpreet",
+    "harry harsh haruto hassan hemi henry hieu hiroshi hossein hussein hyunwoo",
+    "ibrahim ignacio ikenna imran ioannis ismail ivan jack jacob jakub james",
+    "jamil jason jaspreet javier jeffrey jeremy jerry jesse jiahao jianguo",
+    "jianhua joaquin joe john jomar jonathan jorge jose joseph joshua josip",
+    "justin karan karim karthik kasun keith kenji kenneth kerem ketut keung",
+    "khalid kofi konstantinos kourosh krishna krzysztof kwabena kwame kwok kyle",
+    "lachlan lakmal larry lawrence leo liam logan long lorenzo luigi luis luka",
+    "lukasz made mahesh mahmoud majok manish manpreet mansour marcin marco marko",
+    "mateo mateusz matiu matteo matthew mehdi mehmet michael michal miguel mihai",
+    "milan minjun mohammed mohan mohit muhammad mukesh mulugeta murali murat",
+    "mustafa nabil najib nasir nathan nattapong naveen nicholas nicolas nikhil",
+    "nikola nikolaos nitin nnamdi noah nuwan nyoman obinna oisin oliver olumide",
+    "omar padraig panagiotis pankaj patrick paul pawel payam pemba petar peter",
+    "phuc pietro piotr prakash praveen quan rafael rahim rahul rajan rajesh raman",
+    "ramesh ramon rashid ravi razvan reynaldo reza ricardo riccardo richard",
+    "robert rodel roger rohan rohit rolando romeo ronald ronan rory ruwan ryan",
+    "sachin salman salvatore sameer sami samuel sanjay santiago scott seamus sean",
+    "sebastian senthil seojun serkan shahrul siale siavash sicheng simone sione",
+    "somchai somsak son sota stavros stefan stefano stephen steven struan suchart",
+    "sukhwinder sumit sungmin sunil suresh syafiq tadesse tahir tak takeshi tama",
+    "tane tariq tarun tenzin terry tevita theo thiago thomas thon timothy tolga",
+    "tomasz tyler varun vasile vasilios vihaan vijay vikas viliami vincenzo wah",
+    "wahid waleed warsame wayan wenjun wilfredo william wiremu yash yaw yohannes",
+    "youssef yusuf zachary zhihua zhiqiang zoran zubin zulkifli",
+  ].join(" ");
+
+  const FIRST_FEMALE = [
+    "abena abigail achol adaeze aditi afia agnieszka aisha akosua alessia alexis",
+    "aluel ama amaka amanda amber amelia amina amira amirah amrit amy ana anahera",
+    "ananya anastasia andrea angela angelica angeliki anita anjali anna aoi aoife",
+    "aroha asha ashley ayaan ayse azadeh barbara bethlehem betty beverly brenda",
+    "bridget brittany camila carmen carol carolyn catherine ceren charlotte",
+    "cheryl chiamaka chiara chloe christina christine ciara consuelo corazon",
+    "cristina cynthia dalia daniela danielle deborah debra denise despina dewi",
+    "diane dilara dimitra divina divya dolores donna dorothy dragana eilidh elena",
+    "eleni elif elizabeth emily emma esi esperanza esra eunji evelyn ewa fang",
+    "farhia farida faridah fatima fatma fiona folake francesca gabriela georgia",
+    "gita giulia gloria golnaz grace hala hanna hannah heather helen hine hodan",
+    "hong huda huong ifeoma iman imelda inmaculada isabella isha ishara isla",
+    "ivana jacqueline jane janet janice jasmine jelena jennifer jennylyn jessica",
+    "jihye joan joanna joyce judith judy julia julie jyoti kanya karen katarzyna",
+    "katerina katherine kathleen kathryn kavita kavya kelly kimberly kiri lakshmi",
+    "laleh lan laura lauren layla leila lhamo liadh linda ling lisa lori lourdes",
+    "lucia lupe madison maeve magdalena mai mairi mala malak malgorzata malia",
+    "manaia margaret maria mariana marie marija marilyn martha martina mary",
+    "maryam megan megha mei melissa mercedes mere merve meseret michelle minseo",
+    "mirjana mitra montserrat nadeesha nadia namrata nancy nasra nasrin natalia",
+    "natalie natasa navjot neha ngoc ngozi nhung niamh nicole noor nurul nyandeng",
+    "ofa olivia orla pamela parisa parvati patricia paula pilar pinar pooja poppy",
+    "pornthip preeti priya putri qin rachel radha rania rebecca rekha rina ritu",
+    "riya rocio roisin rosario rose rosnah roya ruby rupinder ruth sabrina sakura",
+    "salma samantha samira sanaz sandra sanduni sanja saoirse sara sarah",
+    "saraswati selamawit selin shalini sharon shirin shirley shreya silvia simran",
+    "sina sinead siobhan siriporn sita sneha snezana sofia soledad sophia sophie",
+    "soyeon sri stephanie sunita susan swati teresa thao theresa thilini tigist",
+    "trang tupou usha vaea valentina vasiliki vesna victoria virginia wanida xia",
+    "yasmin yewande yui yun zahra zainab zeynep zhen zoe zofia",
+  ].join(" ");
+
+  const FIRST_UNISEX = [
+    "adelaide ajak alexandria alinta allira angel anh april ariki art august",
+    "austin autumn bill bin bindi birrani brook brooke brooklyn buck bud carolina",
+    "chase chau chelsea chen chi ching chip chun clay cleveland cliff colt",
+    "crystal daisy dakota dale dawa dawn dean drew duke dung earl eden eumarrah",
+    "faith farah feng florence ford frank fung gang gene giang glen guy hamilton",
+    "hanh haoyu harmony hazel heath hei hoang hoi hope hua hui hunter india iris",
+    "ivy jackson jade jarrah jedda jie jing jiwoo jordan joy juan jun june",
+    "justice ka kalinda karma kauri kayla kelechi kent khanh khoa king kingston",
+    "kiran kirra kirrily kit koori lagi lane lei li lily lincoln linh lok lowanna",
+    "man mark may melody miles miminy ming minh moana montana moss nana narelle",
+    "ngaio nguyen nima noel olive oluwaseun paris pasang pearl penny phoenix",
+    "phuong ping prince qiang quyen rain rangi reed rich richmond rob royal ruoxi",
+    "sage savannah serenity shun sierra siu sky sonam star storm summer sunny",
+    "sydney tafili talia tao tarni tashi temitope thanh tianyi tran trinity tuan",
+    "uchenna van wade walter wandjina warrin waru washington wei will wing",
+    "xiaohong xiaoli xiaoming xin yan yang yee yichen yindi yiran yu yuen yuhan",
+    "yuki yuxuan zixuan ziyi",
   ].join(" ");
 
   // ---- Surnames -----------------------------------------------------------
@@ -233,8 +228,15 @@
   const toSet = (s) => new Set(s.split(/\s+/).filter(Boolean));
 
   window.GuardAI = window.GuardAI || {};
+  const firstMale = toSet(FIRST_MALE);
+  const firstFemale = toSet(FIRST_FEMALE);
+  const firstUnisex = toSet(FIRST_UNISEX);
+
   window.GuardAI.NAME_GAZETTEER = {
-    first: toSet(FIRST),
+    firstMale,
+    firstFemale,
+    firstUnisex,
+    first: new Set([...firstMale, ...firstFemale, ...firstUnisex]),
     last: toSet(LAST),
     /**
      * Both are lowercase; callers must lowercase before lookup. A name
@@ -242,6 +244,18 @@
      * name" — see the header.
      */
     isFirst(w) { return this.first.has(String(w).toLowerCase()); },
+    /**
+     * "m" | "f" | "u" | null. "u" and null are treated identically by the
+     * masker (both take a neutral stand-in); they are kept distinct only so
+     * callers can tell "known to be unisex" from "not in the list".
+     */
+    genderOf(w) {
+      const k = String(w).toLowerCase();
+      if (firstMale.has(k)) return "m";
+      if (firstFemale.has(k)) return "f";
+      if (firstUnisex.has(k)) return "u";
+      return null;
+    },
     isLast(w) { return this.last.has(String(w).toLowerCase()); },
   };
 })();
