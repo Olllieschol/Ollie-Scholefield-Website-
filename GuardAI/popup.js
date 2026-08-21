@@ -25,6 +25,7 @@
   const els = {
     enabled: $("toggle-enabled"),
     masking: $("toggle-masking"),
+    autopanel: $("toggle-autopanel"),
     scoreValue: $("score-value"),
     scoreRing: $("score-ring"),
     scoreHint: $("score-hint"),
@@ -40,15 +41,26 @@
 
   /* ---- Load everything from storage and paint the UI ---- */
   async function render() {
-    const data = await chrome.storage.local.get([
-      "guardai_enabled",
-      "guardai_masking_enabled",
-      "guardai_stats",
-      "guardai_mapping",
-    ]);
+    let data;
+    try {
+      data = await chrome.storage.local.get([
+        "guardai_enabled",
+        "guardai_masking_enabled",
+        "guardai_autopanel_enabled",
+        "guardai_stats",
+        "guardai_mapping",
+      ]);
+    } catch (err) {
+      // Storage genuinely unavailable (rare, but the popup must still look
+      // intentional rather than blank). Show an on-brand banner and stop.
+      showStorageError();
+      return;
+    }
+    clearStorageError();
 
     const enabled = data.guardai_enabled !== false;
     const masking = data.guardai_masking_enabled === true;
+    const autopanel = data.guardai_autopanel_enabled === true; // default OFF
     const stats = data.guardai_stats || {
       detected: 0,
       masked: 0,
@@ -59,16 +71,46 @@
 
     els.enabled.checked = enabled;
     els.masking.checked = masking;
+    els.autopanel.checked = autopanel;
     document.body.classList.toggle("gd-disabled", !enabled);
 
-    els.detected.textContent = stats.detected || 0;
-    els.masked.textContent = stats.masked || 0;
-    els.sent.textContent = stats.sentUnmasked || 0;
+    animateCount(els.detected, stats.detected || 0);
+    animateCount(els.masked, stats.masked || 0);
+    animateCount(els.sent, stats.sentUnmasked || 0);
     els.mapCount.textContent = mapping.length;
 
     renderPlatforms(stats.platforms || {});
     renderSwaps(mapping);
     renderScore(stats);
+  }
+
+  /** Set a stat's number, briefly pulsing the ring/highlight if it changed so
+   *  the user feels the update land instead of it silently ticking over. */
+  function animateCount(el, value) {
+    if (!el) return;
+    const prev = parseInt(el.textContent, 10);
+    el.textContent = value;
+    if (!Number.isNaN(prev) && prev !== value) {
+      el.classList.remove("gd-bump");
+      void el.offsetWidth; // restart the animation
+      el.classList.add("gd-bump");
+    }
+  }
+
+  let _storageErrorEl = null;
+  function showStorageError() {
+    if (_storageErrorEl) return;
+    _storageErrorEl = document.createElement("div");
+    _storageErrorEl.className = "gd-error-banner";
+    _storageErrorEl.setAttribute("role", "alert");
+    _storageErrorEl.innerHTML =
+      "<strong>Storage unavailable.</strong> GuardAI can't read its saved data " +
+      "right now. Your protection still works on the page — try reopening this " +
+      "panel, or reload the extension if it persists.";
+    document.body.insertBefore(_storageErrorEl, document.body.firstChild);
+  }
+  function clearStorageError() {
+    if (_storageErrorEl) { _storageErrorEl.remove(); _storageErrorEl = null; }
   }
 
   /**
@@ -133,22 +175,32 @@
     }
     score = Math.max(0, Math.min(100, score));
 
+    const prevScore = parseInt(els.scoreValue.textContent, 10);
     els.scoreValue.textContent = score;
     els.scoreRing.style.setProperty("--pct", score + "%");
 
-    let color = "var(--accent)";
+    // Green when healthy, amber/red as exposure rises — the score is the
+    // first thing a user should read, so it gets colour instead of staying
+    // monochrome like the rest of the popup.
+    let color = "var(--good)";
     let hint = "You're protected. Keep masking sensitive data.";
     if (score < 50) {
       color = "var(--danger)";
       hint = "High exposure — you've sent sensitive data unmasked. Turn on masking mode.";
     } else if (score < 80) {
-      color = "var(--warn)";
       hint = "Some data was sent unmasked. Consider enabling masking mode.";
     } else if (detected === 0) {
       hint = "You're protected. Nothing risky sent yet.";
     }
-    els.scoreRing.style.background = `radial-gradient(closest-side, var(--bg-card) 79%, transparent 80%), conic-gradient(${color} ${score}%, #30363d 0)`;
+    els.scoreRing.style.background = `radial-gradient(closest-side, var(--bg-card) 79%, transparent 80%), conic-gradient(${color} ${score}%, var(--track) 0)`;
     els.scoreHint.textContent = hint;
+
+    // Pulse the ring when the score actually changes so protection feels live.
+    if (!Number.isNaN(prevScore) && prevScore !== score) {
+      els.scoreRing.classList.remove("gd-pulse");
+      void els.scoreRing.offsetWidth;
+      els.scoreRing.classList.add("gd-pulse");
+    }
   }
 
   /* ---- Wire up controls ---- */
@@ -171,7 +223,35 @@
     await chrome.storage.local.set({ guardai_masking_enabled: els.masking.checked });
   });
 
+  els.autopanel.addEventListener("change", async () => {
+    await chrome.storage.local.set({ guardai_autopanel_enabled: els.autopanel.checked });
+  });
+
+  // Click-to-arm, click-again-to-confirm — NOT window.confirm(): Chrome
+  // closes an extension's action popup the instant a native alert/confirm/
+  // prompt would open inside it (there's nowhere for a blocking modal to
+  // live in a transient bubble), so a real confirm() here would silently
+  // eat the click instead of asking anything. This stays entirely inside
+  // the popup's own UI instead.
+  let clearArmed = false;
+  let clearArmTimer = null;
   els.clearMap.addEventListener("click", async () => {
+    if (!clearArmed) {
+      clearArmed = true;
+      els.clearMap.textContent = "Click again to confirm";
+      els.clearMap.classList.add("gd-btn--armed");
+      clearTimeout(clearArmTimer);
+      clearArmTimer = setTimeout(() => {
+        clearArmed = false;
+        els.clearMap.textContent = "Clear all data";
+        els.clearMap.classList.remove("gd-btn--armed");
+      }, 4000);
+      return;
+    }
+    clearTimeout(clearArmTimer);
+    clearArmed = false;
+    els.clearMap.classList.remove("gd-btn--armed");
+    els.clearMap.textContent = "Clear all data"; // so flash()'s revert lands on the right label
     await chrome.storage.local.remove("guardai_mapping");
     await render();
     flash(els.clearMap, "Cleared");
@@ -180,6 +260,10 @@
   els.privacyLink.addEventListener("click", (e) => {
     e.preventDefault();
     chrome.tabs.create({ url: chrome.runtime.getURL("privacy-policy.html") });
+  });
+
+  $("settings-btn").addEventListener("click", () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL("settings.html") });
   });
 
   // Live-refresh if storage changes while the popup is open.
@@ -197,5 +281,23 @@
     return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 
+  /* Company connection banner. Asks the worker rather than reading storage
+     directly, so "connected" means one thing in one place. */
+  function renderCompanyBanner() {
+    const banner = $("company-banner");
+    if (!banner) return;
+    try {
+      chrome.runtime.sendMessage({ type: "GUARDAI_COMPANY_STATUS" }, (res) => {
+        if (chrome.runtime.lastError) return;
+        const conn = res && res.connection;
+        banner.classList.toggle("is-on", Boolean(conn));
+        if (conn) $("company-name").textContent = conn.companyName;
+      });
+    } catch (_) {
+      /* worker asleep — the banner simply stays hidden this time */
+    }
+  }
+
   render();
+  renderCompanyBanner();
 })();

@@ -4,18 +4,297 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>GuardAI</title>
-    <link rel="stylesheet" href="popup.css" />
+    <!-- Inlined, not linked: an external stylesheet loses the race against
+         Chrome's first paint of the popup window, so the window gets sized
+         to the unstyled (full-width) layout and never shrinks back down —
+         it just leaves a blank strip of body background beside the styled
+         content once the CSS does land. Inlining removes the race outright. -->
+    <style>
+/* GuardAI — popup styles (inlined; see the comment above for why).
+ * Monochrome, high-contrast "serious security tool" palette. The ONLY colour
+ * anywhere in the chrome is a single restrained functional red (--danger),
+ * used strictly for destructive actions and genuine high-exposure warnings —
+ * that's a safety signal, not decoration. Everything else is pure greyscale.
+ * The brand logo (the one green mark in the header) is intentionally the sole
+ * brand accent. --accent is the monochrome "active/protected" tone (near-white
+ * in dark mode, near-black in light mode). */
+
+/* ---- Dark (default) ---- */
+:root {
+  --bg:        #0d0d0d;
+  --bg-card:   #171717;
+  --bg-card-2: #212121;
+  --border:    #2e2e2e;
+  --text:      #f4f4f5;
+  --text-dim:  #9a9a9f;
+  --accent:    #f4f4f5;   /* monochrome "active/protected" tone */
+  --on-accent: #0d0d0d;   /* text/knob sitting on top of --accent */
+  --track:     #2e2e2e;   /* score-ring / progress track */
+  --danger:    #f0564b;   /* destructive + danger */
+  --good:      #2ea043;   /* privacy score in a healthy state */
+  --radius:    12px;
+  --slider-off: #333333;
+}
+
+/* ---- Light mode overrides ---- */
+body.gd-light {
+  --bg:        #ffffff;
+  --bg-card:   #f6f6f7;
+  --bg-card-2: #ececee;
+  --border:    #dcdce0;
+  --text:      #0a0a0a;
+  --text-dim:  #6a6a70;
+  --accent:    #0a0a0a;
+  --on-accent: #ffffff;
+  --track:     #e2e2e6;
+  --slider-off: #cbcbd2;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* Chrome sizes an extension popup window to whatever it measures on the
+ * FIRST layout pass, then only ever GROWS it for later content — it never
+ * shrinks back down if a later reflow turns out narrower. If anything (a
+ * long unbroken description string, a race between font/asset load and
+ * that first measurement, an out-of-flow element) is even fleetingly wider
+ * than 340px on that first pass, the window locks in at the wider size and
+ * stays there — a persistent blank strip of background beside the correctly
+ * -340px-wide content, which no CSS on the content itself can fix after the
+ * fact. Constraining BOTH html and body (not just body) and clipping
+ * overflow-x on both means nothing in the document can ever be measured as
+ * wider than 340px, not even for a single frame, so there is nothing left
+ * for Chrome to lock onto. */
+html {
+  width: 340px;
+  overflow-x: hidden;
+}
+body {
+  width: 340px;
+  max-width: 340px;
+  overflow-x: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  padding: 16px;
+  font-size: 13px;
+  transition: background 0.18s, color 0.18s;
+}
+
+/* ---- Header ---- */
+.gd-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.gd-brand { display: flex; align-items: center; gap: 10px; }
+.gd-logo { width: 26px; height: 26px; display: block; object-fit: contain; }
+.gd-title { font-size: 18px; font-weight: 700; letter-spacing: 0.2px; }
+.gd-subtitle { font-size: 11px; color: var(--text-dim); }
+
+/* Controls: theme toggle + on/off toggle side by side */
+.gd-header-controls { display: flex; align-items: center; gap: 8px; }
+
+/* Day/night button */
+.gd-theme-btn {
+  width: 30px; height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-dim);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  font-size: 14px; line-height: 1;
+  flex: none;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.gd-theme-btn:hover { border-color: var(--text); color: var(--text); }
+.gd-theme-btn:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+
+/* ---- Toggle switch ----
+ * "On" = green track with an inverted knob, so an active toggle reads as a
+ * clear "protected/enabled" signal — this is one of the deliberate colour
+ * exceptions to the otherwise-monochrome palette, same intent as --good on
+ * the privacy score. Applies to every .gd-switch in the popup (master
+ * enable, masking mode, any added later) since they share this one rule. */
+.gd-switch { position: relative; display: inline-block; width: 42px; height: 24px; flex: none; }
+.gd-switch input { opacity: 0; width: 0; height: 0; }
+.gd-slider {
+  position: absolute; inset: 0; cursor: pointer;
+  background: var(--slider-off); border-radius: 24px; transition: background 0.2s;
+}
+.gd-slider::before {
+  content: ""; position: absolute; height: 18px; width: 18px;
+  left: 3px; bottom: 3px; background: var(--text); border-radius: 50%;
+  transition: transform 0.2s, background 0.2s;
+}
+.gd-switch input:checked + .gd-slider { background: var(--good); }
+.gd-switch input:checked + .gd-slider::before { transform: translateX(18px); background: var(--on-accent); }
+.gd-switch input:focus-visible + .gd-slider { outline: 2px solid var(--text); outline-offset: 2px; }
+
+/* ---- Score card ---- */
+/* Company connection banner. Shown only when an invite code has been entered,
+   because the whole point is that the user can see, at a glance and without
+   digging, that some of their activity is now visible to someone else. */
+.gd-company {
+  display: none;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--good);
+  border-radius: 8px;
+  background: var(--bg-card);
+}
+.gd-company.is-on { display: flex; }
+.gd-company svg { width: 14px; height: 14px; flex: 0 0 14px; margin-top: 2px; color: var(--good); }
+.gd-company p { font-size: 11.5px; line-height: 1.45; color: var(--text-dim); }
+.gd-company strong { color: var(--text); font-weight: 600; }
+
+.gd-score-card {
+  display: flex; align-items: center; gap: 16px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px; margin-bottom: 14px;
+}
+.gd-score-ring {
+  position: relative; width: 78px; height: 78px; border-radius: 50%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background:
+    radial-gradient(closest-side, var(--bg-card) 79%, transparent 80%),
+    conic-gradient(var(--accent) var(--pct, 100%), var(--track) 0);
+  flex: none;
+  transition: transform 0.25s ease;
+}
+/* Brief pop when the score updates, so protection feels tangible. */
+.gd-score-ring.gd-pulse { animation: gd-ring-pulse 0.5s ease; }
+@keyframes gd-ring-pulse {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.06); }
+  100% { transform: scale(1); }
+}
+.gd-score-value { font-size: 22px; font-weight: 700; line-height: 1; }
+.gd-score-label { font-size: 8px; color: var(--text-dim); text-align: center; text-transform: uppercase; letter-spacing: 0.5px; }
+.gd-score-hint { font-size: 12px; color: var(--text-dim); line-height: 1.45; }
+
+/* ---- Rows ---- */
+.gd-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px 14px; margin-bottom: 12px;
+}
+.gd-row__title { display: block; font-weight: 600; }
+.gd-row__desc { display: block; font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+
+/* ---- Stats ---- */
+.gd-stats { display: flex; gap: 8px; margin-bottom: 14px; }
+.gd-stat {
+  flex: 1; background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px 6px; text-align: center;
+}
+.gd-stat__num { display: block; font-size: 22px; font-weight: 700; }
+.gd-stat__num.gd-bump { animation: gd-bump 0.4s ease; }
+@keyframes gd-bump {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.28); }
+  100% { transform: scale(1); }
+}
+.gd-stat__lbl { display: block; font-size: 10px; color: var(--text-dim); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.4px; }
+
+/* ---- Platforms ---- */
+.gd-platforms { margin-bottom: 14px; }
+.gd-section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-dim); margin-bottom: 8px; }
+.gd-platform-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.gd-chip {
+  background: var(--bg-card-2); border: 1px solid var(--border);
+  border-radius: 999px; padding: 4px 10px; font-size: 11px;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.gd-chip__count { color: var(--text); font-weight: 700; }
+.gd-empty { font-size: 11px; color: var(--text-dim); font-style: italic; }
+
+/* ---- Recent swaps ---- */
+.gd-swaps { margin-bottom: 14px; }
+.gd-swap-list { display: flex; flex-direction: column; gap: 6px; max-height: 140px; overflow-y: auto; }
+.gd-swap {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 8px; padding: 7px 10px; font-size: 11.5px;
+}
+/* real -> fake is shown with weight/strike, not colour: the real value is
+ * struck-through and dimmed (it's what you DON'T want sent), the fake is
+ * bright and bold (the safe stand-in). Semantic without any colour. */
+.gd-swap__real { color: var(--text-dim); text-decoration: line-through; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gd-swap__arrow { color: var(--text-dim); flex: none; }
+.gd-swap__fake { color: var(--text); font-weight: 700; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gd-swap__type { margin-left: auto; font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px; flex: none; }
+/* subtle highlight when a swap row is freshly added */
+.gd-swap.gd-swap--new { animation: gd-swap-in 0.6s ease; }
+@keyframes gd-swap-in {
+  0% { background: var(--accent); }
+  100% { background: var(--bg-card); }
+}
+
+/* ---- Buttons ---- */
+.gd-btn {
+  border: 1px solid var(--border); background: var(--bg-card-2);
+  color: var(--text); border-radius: 8px; padding: 6px 12px;
+  font-size: 12px; cursor: pointer; transition: 0.15s;
+}
+.gd-btn:hover { border-color: var(--text-dim); }
+.gd-btn:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.gd-btn--danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+.gd-btn--danger:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); }
+/* Armed = the user just clicked once and is one more click away from
+ * actually deleting anything — filled solid so "this is now a different,
+ * more serious button" reads at a glance, not just a colour tweak. */
+.gd-btn--armed {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+.gd-btn--armed:hover { background: var(--danger); filter: brightness(1.08); }
+
+/* ---- Footer ---- */
+.gd-footer { display: flex; align-items: center; justify-content: space-between; padding-top: 6px; border-top: 1px solid var(--border); }
+.gd-badge { font-size: 10px; color: var(--text-dim); font-weight: 600; }
+.gd-link { font-size: 11px; color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+.gd-link:hover { color: var(--text-dim); }
+.gd-link:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+
+/* Disabled visual state when master toggle is off */
+body.gd-disabled .gd-score-card,
+body.gd-disabled .gd-stats,
+body.gd-disabled .gd-platforms { opacity: 0.45; pointer-events: none; }
+
+/* Storage-unavailable banner (popup can't read chrome.storage.local) */
+.gd-error-banner {
+  background: color-mix(in srgb, var(--danger) 10%, var(--bg-card));
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 12px 14px; margin-bottom: 12px; font-size: 12px; line-height: 1.5;
+}
+.gd-error-banner strong { color: var(--danger); }
+
+/* Respect users who prefer reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+    </style>
   </head>
   <body>
     <header class="gd-header">
       <div class="gd-brand">
-        <span class="gd-logo">&#128737;</span>
+        <img class="gd-logo" src="icons/icon48.png" alt="GuardAI" width="26" height="26" />
         <div>
           <h1 class="gd-title">GuardAI</h1>
           <p class="gd-subtitle">Local AI privacy guard</p>
         </div>
       </div>
       <div class="gd-header-controls">
+        <!-- What GuardAI masks: per-category detection toggles -->
+        <button id="settings-btn" class="gd-theme-btn" title="What GuardAI masks" aria-label="What GuardAI masks">&#9881;</button>
         <!-- Dark/light mode toggle -->
         <button id="theme-toggle" class="gd-theme-btn" title="Toggle dark/light mode">&#9728;</button>
         <!-- Master enable/disable -->
@@ -26,6 +305,12 @@
       </div>
     </header>
 
+    <!-- Company connection indicator -->
+    <div class="gd-company" id="company-banner">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="2.6" stroke="currentColor" stroke-width="1.8"/></svg>
+      <p>Connected to <strong id="company-name">your company</strong>. Your masking activity is visible to your admin: <strong>how many</strong> items and <strong>what kind</strong>, never the values or your messages.</p>
+    </div>
+
     <!-- Privacy score -->
     <section class="gd-score-card">
       <div class="gd-score-ring" id="score-ring">
@@ -35,14 +320,26 @@
       <p class="gd-score-hint" id="score-hint">You're protected. Nothing risky sent yet.</p>
     </section>
 
-    <!-- Masking mode -->
+    <!-- Masking mode (silent auto-mask) -->
     <section class="gd-row">
       <div>
         <span class="gd-row__title">Masking mode</span>
-        <span class="gd-row__desc">Auto-replace sensitive data with fakes before sending.</span>
+        <span class="gd-row__desc">When on: sensitive data is replaced and sent automatically, no interruptions.<br />When off: you'll see a warning card before anything sends.</span>
       </div>
-      <label class="gd-switch" title="Enable masking before sending">
+      <label class="gd-switch" title="Auto-mask and send silently, with no warning card">
         <input type="checkbox" id="toggle-masking" />
+        <span class="gd-slider"></span>
+      </label>
+    </section>
+
+    <!-- Auto-open detail panel after masking -->
+    <section class="gd-row">
+      <div>
+        <span class="gd-row__title">Detail panel</span>
+        <span class="gd-row__desc">When on: the full breakdown pops up every time something's masked.<br />When off: just the badge updates. Click it anytime to see details.</span>
+      </div>
+      <label class="gd-switch" title="Automatically open the panel after masking">
+        <input type="checkbox" id="toggle-autopanel" />
         <span class="gd-slider"></span>
       </label>
     </section>
@@ -85,7 +382,7 @@
         <span class="gd-row__title">Local mapping table</span>
         <span class="gd-row__desc"><span id="map-count">0</span> stored mappings (device only).</span>
       </div>
-      <button id="clear-map" class="gd-btn gd-btn--danger">Clear</button>
+      <button id="clear-map" class="gd-btn gd-btn--danger">Clear all data</button>
     </section>
 
     <footer class="gd-footer">

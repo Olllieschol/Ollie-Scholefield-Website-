@@ -1,0 +1,275 @@
+/**
+ * GuardAI — settings.js
+ * ---------------------------------------------------------------------------
+ * "What GuardAI masks": per-category detection toggles.
+ *
+ * The category list below is a MANUAL mirror of every finding type detector.js
+ * actually produces (grep `finding("` in src/detector.js — 24 distinct types
+ * as of this writing) and of which of those masker.js's MASKABLE set actually
+ * swaps for a fake vs only flags on the warning card. There's no build step
+ * in this extension to generate it automatically; if a new detector/type is
+ * ever added to detector.js, add its row here too, or it will keep running
+ * (safe default — nothing silently stops being protected) but won't appear
+ * in this list to be turned off.
+ *
+ * Persisted as chrome.storage.local["guardai_disabled_categories"]: an array
+ * of TYPE strings that are OFF. Absent from the array = on. This means an
+ * empty/missing array is "everything on", so a category added to this file
+ * later defaults to enabled for existing users with no migration needed.
+ * ---------------------------------------------------------------------------
+ */
+(function () {
+  "use strict";
+
+  const STORAGE_KEY = "guardai_disabled_categories";
+  const THEME_KEY = "guardai_theme";
+
+  /**
+   * type   — the exact finding().type string detector.js produces.
+   * title  — short label, matches content.js's MARK_STYLE where one exists.
+   * desc   — one line explaining what it catches, in plain language.
+   * masked — true if masker.js's MASKABLE set swaps this for a fake; false
+   *          means it's warning-only (flagged on the card, never auto-sent
+   *          disguised) regardless of this toggle.
+   */
+  const GROUPS = [
+    {
+      title: "People & organisations",
+      categories: [
+        { type: "NAME_PII", title: "Full names", desc: "A person's first + last name, when other personal detail is nearby.", masked: true },
+        { type: "ORG", title: "Company / organisation names", desc: "A registered business name — “Pty Ltd”, “Logistics”, “Group” and similar.", masked: true },
+      ],
+    },
+    {
+      title: "Contact & location",
+      categories: [
+        { type: "PHONE", title: "Phone numbers", desc: "Australian mobile and landline numbers.", masked: true },
+        { type: "EMAIL", title: "Email addresses", desc: "Any address in the form name@domain.", masked: true },
+        { type: "ADDRESS", title: "Physical addresses", desc: "A street number, name and suburb/city.", masked: true },
+        { type: "GPS", title: "GPS coordinates", desc: "Precise latitude/longitude pairs.", masked: true },
+      ],
+    },
+    {
+      title: "Government & identity documents",
+      categories: [
+        { type: "PASSPORT", title: "Passport numbers", desc: "Australian passport document numbers.", masked: true },
+        { type: "LICENCE", title: "Driver licence numbers", desc: "State-prefixed or bare licence numbers.", masked: true },
+        { type: "MEDICARE", title: "Medicare numbers", desc: "10–11 digit Medicare card numbers.", masked: true },
+        { type: "TFN", title: "Tax File Numbers", desc: "8–9 digit Australian TFNs.", masked: true },
+        { type: "DOB", title: "Dates of birth", desc: "A birth date, written or numeric.", masked: false },
+      ],
+    },
+    {
+      title: "Financial & account numbers",
+      categories: [
+        { type: "CREDIT_CARD", title: "Credit / debit card numbers", desc: "13–19 digit card numbers.", masked: true },
+        { type: "BSB", title: "Bank BSBs", desc: "6-digit branch identifier, e.g. 062-000.", masked: true },
+        { type: "BANK_ACCOUNT", title: "Bank account numbers", desc: "A digit run near banking context.", masked: true },
+        { type: "REF_CODE", title: "Account / reference codes", desc: "Letters-then-digits codes like BW-44192, ACC-2291.", masked: true },
+        { type: "ABN", title: "Australian Business Numbers (ABN)", desc: "11-digit ABNs.", masked: true },
+        { type: "ACN", title: "Australian Company Numbers (ACN)", desc: "9-digit ACNs.", masked: true },
+        { type: "MONEY", title: "Financial amounts", desc: "Specific dollar figures with business/personal context.", masked: false },
+      ],
+    },
+    {
+      title: "Credentials",
+      categories: [
+        { type: "USERNAME", title: "Usernames / login IDs", desc: "Detected by phrasing: “username is X”, “user: X”, “the login for … is X”.", masked: true },
+        { type: "PASSWORD", title: "Passwords / login credentials", desc: "Detected by phrasing: “password is X”, “pwd: X”. Also API keys, connection strings and seed phrases.", masked: true },
+      ],
+    },
+    {
+      title: "Confidential & sensitive content",
+      categories: [
+        { type: "CONFIDENTIAL", title: "Confidential / restricted markers", desc: "Text explicitly marked confidential, NDA, internal-only.", masked: false },
+        { type: "BUSINESS_CONFIDENTIAL", title: "Confidential business data", desc: "Revenue, client lists, valuations and similar figures.", masked: false },
+        { type: "HEALTH", title: "Health / medical information", desc: "Diagnoses, medications, medical history.", masked: false },
+        { type: "LEGAL", title: "Legal / court information", desc: "Case details, privileged or court-related content.", masked: false },
+        { type: "IMMIGRATION", title: "Immigration / visa details", desc: "Visa status and immigration case information.", masked: false },
+      ],
+    },
+  ];
+
+  function applyTheme(light) {
+    document.body.classList.toggle("gd-light", light);
+  }
+  applyTheme(localStorage.getItem(THEME_KEY) === "light");
+
+  const groupsEl = document.getElementById("groups");
+
+  function render(disabledSet) {
+    groupsEl.innerHTML = "";
+    for (const group of GROUPS) {
+      const section = document.createElement("section");
+      section.className = "group";
+
+      const heading = document.createElement("div");
+      heading.className = "group__title";
+      heading.textContent = group.title;
+      section.appendChild(heading);
+
+      const list = document.createElement("div");
+      list.className = "group__list";
+
+      for (const cat of group.categories) {
+        const row = document.createElement("div");
+        row.className = "cat-row";
+        row.innerHTML =
+          `<div class="cat-row__text">` +
+          `<span class="cat-row__title">${escapeHtml(cat.title)}</span>` +
+          `<span class="cat-row__desc">${escapeHtml(cat.desc)}</span>` +
+          `<span class="cat-row__badge">${cat.masked ? "Auto-masked" : "Flagged only"}</span>` +
+          `</div>` +
+          `<label class="gd-switch" title="${cat.masked ? "Detect and auto-mask" : "Detect and flag"} ${escapeHtml(cat.title.toLowerCase())}">` +
+          `<input type="checkbox" data-type="${cat.type}" ${disabledSet.has(cat.type) ? "" : "checked"} />` +
+          `<span class="gd-slider"></span>` +
+          `</label>`;
+        list.appendChild(row);
+      }
+
+      section.appendChild(list);
+      groupsEl.appendChild(section);
+    }
+
+    groupsEl.querySelectorAll('input[type="checkbox"]').forEach((box) => {
+      box.addEventListener("change", persistFromCheckboxes);
+    });
+  }
+
+  /** Read every checkbox's current state and write the OFF list to storage. */
+  async function persistFromCheckboxes() {
+    const disabled = [];
+    groupsEl.querySelectorAll('input[type="checkbox"]').forEach((box) => {
+      if (!box.checked) disabled.push(box.getAttribute("data-type"));
+    });
+    await chrome.storage.local.set({ [STORAGE_KEY]: disabled });
+  }
+
+  function allTypes() {
+    return GROUPS.flatMap((g) => g.categories.map((c) => c.type));
+  }
+
+  document.getElementById("enable-all").addEventListener("click", async () => {
+    await chrome.storage.local.set({ [STORAGE_KEY]: [] });
+    render(new Set());
+  });
+  document.getElementById("disable-all").addEventListener("click", async () => {
+    const all = allTypes();
+    await chrome.storage.local.set({ [STORAGE_KEY]: all });
+    render(new Set(all));
+  });
+
+  document.getElementById("back-link").addEventListener("click", (e) => {
+    e.preventDefault();
+    window.close();
+  });
+
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Connect to your company.
+   *
+   * All of the network work lives in the background worker; this only asks it
+   * questions and renders the answers. The code is the whole of the employee
+   * side: no account, no password, and disconnecting is one click.
+   * ------------------------------------------------------------------ */
+  const companyEl = document.getElementById("company");
+
+  function setCompanyMsg(text, bad) {
+    const el = document.getElementById("company-msg");
+    if (!el) return;
+    el.textContent = text || "";
+    el.className = "company__msg" + (text ? " is-on" : "") + (bad ? " is-bad" : "");
+  }
+
+  function paintCompany(conn) {
+    if (!companyEl) return;
+    companyEl.classList.toggle("is-connected", Boolean(conn));
+    if (conn) {
+      document.getElementById("company-name").textContent = conn.companyName;
+    }
+  }
+
+  function askWorker(message) {
+    return new Promise((resolve) => {
+      try {
+        chrome.runtime.sendMessage(message, (res) => {
+          if (chrome.runtime.lastError) return resolve(null);
+          resolve(res);
+        });
+      } catch (_) {
+        resolve(null);
+      }
+    });
+  }
+
+  async function initCompany() {
+    if (!companyEl) return;
+    const res = await askWorker({ type: "GUARDAI_COMPANY_STATUS" });
+
+    // Nothing to offer if this build has no backend configured: hide the whole
+    // section rather than show a control that cannot work.
+    if (!res || !res.available) {
+      companyEl.style.display = "none";
+      return;
+    }
+    paintCompany(res.connection);
+
+    const input = document.getElementById("company-code");
+    const connectBtn = document.getElementById("company-connect");
+
+    connectBtn.addEventListener("click", async () => {
+      const code = input.value.trim();
+      if (!code) return setCompanyMsg("Enter your invite code.", true);
+
+      connectBtn.disabled = true;
+      connectBtn.textContent = "Connecting\u2026";
+      setCompanyMsg("");
+
+      const out = await askWorker({ type: "GUARDAI_COMPANY_CONNECT", code });
+      connectBtn.disabled = false;
+      connectBtn.textContent = "Connect";
+
+      if (!out || !out.ok) {
+        setCompanyMsg((out && out.error) || "Could not connect. Try again.", true);
+        return;
+      }
+      input.value = "";
+      setCompanyMsg("");
+      paintCompany(out.connection);
+    });
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") connectBtn.click();
+    });
+
+    document.getElementById("company-leave").addEventListener("click", async () => {
+      await askWorker({ type: "GUARDAI_COMPANY_DISCONNECT" });
+      paintCompany(null);
+      setCompanyMsg("");
+    });
+  }
+
+  initCompany();
+
+  (async function init() {
+    let disabled = [];
+    try {
+      const data = await chrome.storage.local.get([STORAGE_KEY]);
+      disabled = Array.isArray(data[STORAGE_KEY]) ? data[STORAGE_KEY] : [];
+    } catch (_) {
+      /* storage unavailable — render with everything on, the safe default */
+    }
+    render(new Set(disabled));
+  })();
+
+  // Live-refresh if the setting changes from elsewhere (e.g. this page open
+  // in two tabs, or the array being reset some other way).
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local" || !changes[STORAGE_KEY]) return;
+    const newVal = changes[STORAGE_KEY].newValue;
+    render(new Set(Array.isArray(newVal) ? newVal : []));
+  });
+})();

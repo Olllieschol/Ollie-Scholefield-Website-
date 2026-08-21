@@ -72,13 +72,19 @@
 
       <h2>What GuardAI does</h2>
       <p>
-        GuardAI is a browser extension that watches the message box on supported
-        AI chat websites (ChatGPT, Claude, Gemini and Microsoft Copilot). Before
-        you send a message it checks the text for sensitive information such as
-        phone numbers, emails, passwords, credit cards, Medicare/passport/TFN
-        numbers, addresses, names and confidential business data. It can warn
-        you, and optionally swap that data for realistic fake data so the AI
-        never sees the real thing.
+        GuardAI is a browser extension that watches the message box on
+        supported AI chat websites — including ChatGPT, Claude, Gemini,
+        Microsoft Copilot, Perplexity, Poe, Character.AI, Mistral / Le Chat,
+        Grok, Meta AI, Use.ai, DeepSeek, Qwen, HuggingChat, You.com, Bing Chat,
+        Cohere, Pi, Groq, and a number of smaller AI writing-assistant tools. Before
+        you send a message it checks the text for sensitive information such
+        as phone numbers, emails, passwords, credit cards, Medicare/passport/
+        TFN numbers, account and reference numbers, addresses, personal names,
+        company names and confidential business data. It can warn you, and
+        optionally swap that data for realistic fake data so the AI never sees
+        the real thing. Dollar amounts, dates and quantities are flagged but
+        deliberately left as they are, so calculations you ask the AI to do
+        stay correct; you can always mask one of those by hand if you want to.
       </p>
 
       <h2>What data we collect</h2>
@@ -119,7 +125,7 @@
         locally, so you read your real information but the AI never knew it.
       </p>
       <p class="muted">
-        Note: the AI provider (OpenAI, Anthropic, Google, Microsoft) still
+        Note: whichever AI provider you're using still
         receives whatever you choose to send and is governed by their own
         privacy policies. GuardAI's job is to help you avoid over-sharing.
       </p>
@@ -151,8 +157,10 @@
           session stats locally on your device.
         </li>
         <li>
-          Host access to the four supported AI sites — so the content script can
-          read the message box and scan it locally before you send.
+          Host access to the supported AI chat sites listed above — so the
+          content script can read the message box and scan it locally before
+          you send. GuardAI only requests access to sites it actively
+          protects; it does not request access to the rest of the web.
         </li>
       </ul>
       <p class="muted">

@@ -10,7 +10,7 @@
  *   1. Locate the chat input field (textarea or contenteditable).
  *   2. Intercept the "send" action (Enter key / send button) in capture phase.
  *   3. If masking is OFF and sensitive data is found -> show a non-blocking
- *      warning popup (Send anyway / Cancel / Mask & send).
+ *      warning popup (Mask & Send / Mask & Edit / Manual mask / Send anyway).
  *   4. If masking is ON -> replace real data with fakes in-place, then send.
  *   5. Watch the conversation for AI responses and swap fakes back to real
  *      data so the user only ever reads their real information.
@@ -22,6 +22,19 @@
   "use strict";
 
   const { Detector, NlpDetector, Masker } = window.GuardAI;
+
+  // Crisp brand mark used in every GuardAI surface's header (warning card,
+  // review panel, collapsed badge) in place of the old colour shield emoji.
+  // This is the actual brand mark (green shield + black
+  // "G", same artwork as icons/icon{16,48,128}.png) rather than a generic
+  // line-art glyph, so it's an <img> on a small embedded data URI instead of
+  // an inline currentColor SVG — the brand mark has fixed colours, it
+  // doesn't need to inherit surrounding text colour the way the old
+  // placeholder did. Still sized to 1em by the `__shield` CSS via the same
+  // `guardai-shield-svg` class, so no CSS changes were needed to swap it in.
+  const SHIELD_SVG =
+    '<img class="guardai-shield-svg" width="1em" height="1em" alt="" ' +
+    'src="data:image/png;base64,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" />';
 
   /* ------------------------------------------------------------------ *
    * Per-platform configuration.
@@ -64,9 +77,19 @@
       name: "Claude",
       editor: ['div[contenteditable="true"].ProseMirror', 'div[contenteditable="true"]'],
       sendButton: ['button[aria-label="Send message"]', 'button[aria-label*="Send"]'],
-      responseRoot: ["div.flex-1.flex.flex-col", "main"],
-      responseMessage: ['div.font-claude-message', '[data-testid="assistant-turn"]'],
-      userMessage: ['[data-testid="user-message"]', 'div.font-user-message'],
+      // role="feed" is the semantic conversation container and survives the
+      // Tailwind class churn that broke the old "div.flex-1.flex.flex-col"
+      // root (which still MATCHES on claude.ai but holds no messages at all).
+      // claude.ai has no <main>, so that fallback never fires here.
+      responseRoot: ['div[role="feed"]', "main", "div.flex-1.flex.flex-col"],
+      // Claude renamed the assistant bubble class font-claude-message ->
+      // font-claude-response; the old names are kept behind it as fallbacks.
+      responseMessage: [
+        "div.font-claude-response",
+        "div.font-claude-message",
+        '[data-testid="assistant-turn"]',
+      ],
+      userMessage: ['[data-testid="user-message"]', "div.font-user-message"],
       note: "Anthropic states consumer chats may be reviewed for safety; avoid sharing personal IDs.",
     },
     "gemini.google.com": {
@@ -113,20 +136,14 @@
     "jasper.ai": genericConfig("Jasper", GENERIC_NOTE),
     "copy.ai": genericConfig("Copy.ai", GENERIC_NOTE),
     "rytr.me": genericConfig("Rytr", GENERIC_NOTE),
-    "notion.so": genericConfig("Notion AI", GENERIC_NOTE),
     "pi.ai": genericConfig("Pi", GENERIC_NOTE),
     "inflection.ai": genericConfig("Inflection", GENERIC_NOTE),
     "cohere.com": genericConfig("Cohere", GENERIC_NOTE),
-    "playground.ai": genericConfig("Playground", GENERIC_NOTE),
     "phind.com": genericConfig("Phind", GENERIC_NOTE),
-    "together.ai": genericConfig("Together", GENERIC_NOTE),
-    "fireworks.ai": genericConfig("Fireworks", GENERIC_NOTE),
     "deepseek.com": genericConfig("DeepSeek", GENERIC_NOTE),
     "qwen.ai": genericConfig("Qwen", GENERIC_NOTE),
     "grok.com": genericConfig("Grok", GENERIC_NOTE),
-    "x.com": genericConfig("Grok", GENERIC_NOTE),
     "meta.ai": genericConfig("Meta AI", GENERIC_NOTE),
-    "llama.meta.com": genericConfig("Meta Llama", GENERIC_NOTE),
     "use.ai": genericConfig("Use.ai", GENERIC_NOTE),
   };
 
@@ -170,24 +187,51 @@
     enabled: true, // master on/off (synced from storage)
     maskingEnabled: false, // mask-before-send mode
     autoRestore: true, // auto-swap fakes -> real in AI responses (panel toggle)
+    autoOpenPanel: false, // pop the full side panel open after a deliberate
+    // Mask & Send. Default OFF — most users found the panel jumping open on
+    // every single send intrusive; the collapsed badge (always shown, via
+    // logActivity -> showReopen) is enough, and they can click it whenever
+    // they actually want to look. Mask & Edit / Manual mask are unaffected —
+    // those buttons exist specifically to open the panel for review, so
+    // opening it IS the requested action there, not an unwanted side effect.
     lastMaskedText: null, // the masked text we just typed in; lets the user's
     // own manual send pass through without re-scanning/re-masking.
+    disabledCategories: [], // finding TYPEs the user switched off in "What
+    // GuardAI masks" (settings.html). Empty by default — everything on.
   };
 
   /* ------------------------------------------------------------------ *
    * Storage sync — keep local state in step with the dashboard toggles.
    * ------------------------------------------------------------------ */
   async function loadSettings() {
-    const data = await chrome.storage.local.get([
-      "guardai_enabled",
-      "guardai_masking_enabled",
-      "guardai_auto_restore",
-      "guardai_theme",
-    ]);
-    state.enabled = data.guardai_enabled !== false; // default ON
-    state.maskingEnabled = data.guardai_masking_enabled === true; // default OFF
-    state.autoRestore = data.guardai_auto_restore !== false; // default ON
-    applyThemeToPage(data.guardai_theme === "light");
+    // `state` already has safe hardcoded defaults (enabled/maskingEnabled/
+    // autoRestore) set at its declaration. If storage is unavailable — e.g.
+    // "Extension context invalidated" after a reload/update while this
+    // content script is still injected on an open tab — this must degrade to
+    // those defaults rather than throw, since boot() awaits this and a thrown
+    // error here would otherwise skip every step after it, including
+    // startObserving() (no auto-restore, no response monitoring at all).
+    try {
+      const data = await chrome.storage.local.get([
+        "guardai_enabled",
+        "guardai_masking_enabled",
+        "guardai_auto_restore",
+        "guardai_autopanel_enabled",
+        "guardai_disabled_categories",
+        "guardai_theme",
+      ]);
+      state.enabled = data.guardai_enabled !== false; // default ON
+      state.maskingEnabled = data.guardai_masking_enabled === true; // default OFF
+      state.autoRestore = data.guardai_auto_restore !== false; // default ON
+      state.autoOpenPanel = data.guardai_autopanel_enabled === true; // default OFF
+      state.disabledCategories = Array.isArray(data.guardai_disabled_categories)
+        ? data.guardai_disabled_categories
+        : [];
+      detector.setDisabledTypes(state.disabledCategories);
+      applyThemeToPage(data.guardai_theme === "light");
+    } catch (err) {
+      console.warn("[GuardAI] could not read settings, using defaults:", err);
+    }
   }
 
   /** Add / remove html.guardai-light on the host page to switch all GuardAI
@@ -203,16 +247,77 @@
       state.enabled = changes.guardai_enabled.newValue !== false;
       applyEnabledState();
     }
-    if (changes.guardai_masking_enabled)
+    if (changes.guardai_masking_enabled) {
       state.maskingEnabled = changes.guardai_masking_enabled.newValue === true;
+      // Take the per-message toggle buttons away / put them back immediately,
+      // rather than leaving stale ones on screen until the next render.
+      if (state.maskingEnabled) removeMessageToggles();
+      else scheduleDecorate();
+    }
     if (changes.guardai_auto_restore) {
       state.autoRestore = changes.guardai_auto_restore.newValue !== false;
       syncAutoRestoreSwitch();
+    }
+    if (changes.guardai_autopanel_enabled) {
+      state.autoOpenPanel = changes.guardai_autopanel_enabled.newValue === true;
+    }
+    if (changes.guardai_disabled_categories) {
+      state.disabledCategories = Array.isArray(changes.guardai_disabled_categories.newValue)
+        ? changes.guardai_disabled_categories.newValue
+        : [];
+      detector.setDisabledTypes(state.disabledCategories);
+    }
+    if (changes.guardai_mapping) {
+      const newVal = changes.guardai_mapping.newValue;
+      if (!Array.isArray(newVal) || newVal.length === 0) {
+        // The mapping was cleared somewhere — most commonly the popup's
+        // "Clear" button, which can only touch storage, not this page's own
+        // masker instance directly. Without reacting here, this page kept
+        // masking/restoring with the very data the user just deleted, and
+        // the screen never visibly changed — indistinguishable from Clear
+        // having silently done nothing. Safe to run even when THIS page
+        // caused the change itself (clearSession already remasked + emptied
+        // the table): remaskVisiblePage() no-ops once masker.size is 0, and
+        // forgetInMemory() on an already-empty table is a no-op too.
+        remaskVisiblePage();
+        masker.forgetInMemory();
+      }
     }
     if (changes.guardai_theme) {
       applyThemeToPage(changes.guardai_theme.newValue === "light");
     }
   });
+
+  /**
+   * Tell the background worker which categories were just masked, so a company
+   * dashboard can count them.
+   *
+   * `items` deliberately does not cross this boundary. Every entry carries
+   * .real and .fake, and neither may ever leave the page, so this reads one
+   * field off each entry and builds a fresh array of strings. The background
+   * worker then rebuilds the request body from scratch again in
+   * src/company.js, which rejects anything that is not a known category.
+   *
+   * No-op unless the user has entered an invite code: the worker checks for a
+   * connection before it sends anything.
+   */
+  function reportCompanyCategories(items) {
+    if (!items || !items.length) return;
+    const categories = [];
+    for (const it of items) {
+      if (it && typeof it.type === "string") categories.push(it.type);
+    }
+    if (!categories.length) return;
+    try {
+      chrome.runtime.sendMessage({
+        type: "GUARDAI_COMPANY_EVENTS",
+        categories: categories,
+        site: HOST,
+      });
+    } catch (_) {
+      /* service worker asleep — non-fatal, the masking already happened */
+    }
+  }
 
   /** Tell the background worker to record a stat event. */
   function reportStats(payload) {
@@ -320,6 +425,24 @@
       el.dispatchEvent(new Event("input", { bubbles: true }));
       return true;
     }
+    // Newlines in a contenteditable must be inserted as a SOFT line break.
+    // On ChatGPT/Claude/Gemini a bare Enter submits, and execCommand("insertText","\n")
+    // is interpreted by their editors as a submit — which would fire the message
+    // mid-typing (sending only a partial multi-line message and bypassing the
+    // Mask & Edit review). insertLineBreak is the Shift+Enter equivalent and
+    // never submits.
+    if (ch === "\n") {
+      try {
+        if (document.execCommand("insertLineBreak")) return true;
+      } catch (_) {
+        /* fall through to <br> */
+      }
+      try {
+        return document.execCommand("insertHTML", false, "<br>");
+      } catch (_) {
+        return false;
+      }
+    }
     try {
       return document.execCommand("insertText", false, ch);
     } catch (_) {
@@ -327,104 +450,166 @@
     }
   }
 
-  /**
-   * Replace the editor contents with `text` by simulating typing. We clear,
-   * place the caret, then type char-by-char. If the editor refuses programmatic
-   * per-key inserts (some rich editors do), we fall back to a synthetic paste —
-   * ProseMirror/Lexical/Quill all honour their clipboard handler — and finally
-   * to a single execCommand insertText. Returns true once the editor really
-   * shows the text, so the masked value can never silently fail to land.
-   */
-  async function typeText(el, text) {
-    console.log("[GuardAI] typeText — clearing editor, el in DOM:", document.contains(el));
-    el.focus();
-    clearEditor(el);
-    await delay(20);
-
-    // React/ProseMirror can remount the editor node during the delay above.
-    // Re-resolve a fresh reference if the original is now detached so that
-    // subsequent operations don't throw NotFoundError.
-    if (!document.contains(el)) {
-      console.log("[GuardAI] typeText — editor detached after clear, re-finding...");
-      const fresh = findEditor();
-      if (!fresh) { console.error("[GuardAI] typeText — no fresh editor found"); return false; }
-      el = fresh;
-      el.focus();
-      console.log("[GuardAI] typeText — re-found editor:", el);
-    }
-
-    if (el.tagName === "TEXTAREA" || el.tagName === "INPUT") {
-      for (const ch of text) {
-        insertChar(el, ch);
-        await delay(3);
-      }
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-      if (normalize(getEditorText(el)).includes(normalize(text))) return true;
-      // Fallback: native setter for the whole value.
-      const proto =
-        el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-      Object.getOwnPropertyDescriptor(proto, "value").set.call(el, text);
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-      return normalize(getEditorText(el)).includes(normalize(text));
-    }
-
-    // contenteditable: type each character. We keep the caret at the end before
-    // every keystroke — ProseMirror occasionally moves/normalises the selection
-    // between programmatic inserts, and a stale selection makes the next
-    // execCommand silently no-op (that left the phone/email un-typed before).
-    // We do NOT break on a falsy return: some chars report false yet still
-    // insert, and a hard verify + fallback below guarantees the full text lands.
-    el.focus();
-    caretToEnd(el);
-    for (const ch of text) {
-      // If React unmounted the editor mid-loop, stop char-by-char and fall
-      // through to replaceAll which will re-find the editor.
-      if (!document.contains(el)) break;
-      caretToEnd(el);
-      insertChar(el, ch);
-      await delay(3);
-    }
-    el.dispatchEvent(new InputEvent("input", { bubbles: true }));
-    if (normalize(getEditorText(el)).includes(normalize(text))) return true;
-
-    // Char-by-char didn't fully land (possibly because the node was detached
-    // mid-loop). Re-find the editor before the whole-string fallback.
-    console.log("[GuardAI] typeText — char-by-char incomplete, falling back to replaceAll");
-    if (!document.contains(el)) {
-      const fresh = findEditor();
-      if (fresh) { console.log("[GuardAI] typeText — re-found editor for replaceAll"); el = fresh; }
-    }
-    return replaceAll(el, text);
+  /** Did the editor end up containing the WHOLE intended text? Whitespace is
+   * normalised because rich editors collapse runs of spaces/newlines. This is
+   * the single source of truth for "did the fill succeed" — every send path
+   * checks it before sending so a partial/split fill can never go out. */
+  function fullyLanded(el, text) {
+    return normalize(getEditorText(el)).includes(normalize(text));
   }
 
   /**
-   * Reliable whole-string replace for contenteditable. A single
-   * execCommand("insertText") over a full selection is honoured by ProseMirror,
-   * Lexical and Quill. A synthetic paste is tried only as a final fallback —
-   * Chrome forbids setting real clipboardData on synthetic events, so it's
-   * unreliable and must never be the primary path.
+   * Atomically place `text` into the editor as ONE block, exactly like a real
+   * user paste, and return true only once the WHOLE text is present.
+   *
+   * WHY PASTE-FIRST (this is the architectural fix for message-splitting):
+   * On ChatGPT/Claude (ProseMirror/Lexical) a real "\n" delivered through
+   * execCommand("insertText") is interpreted by the editor as a SUBMIT. The old
+   * char-by-char + execCommand fallback therefore fired the message mid-fill on
+   * long multi-line input — sending a leading fragment as message 1 and the rest
+   * as message 2 (and making Mask & Edit "auto-send"). A synthetic paste of the
+   * full block goes through the editor's clipboard handler, which inserts every
+   * newline as a soft break and NEVER submits — so the entire message stays
+   * atomic regardless of length (10 words or 10,000).
+   *
+   * Fallback order is deliberately submit-safe: paste (retried) -> char-by-char
+   * with insertLineBreak for newlines (slow but never submits). We NEVER fall
+   * back to execCommand("insertText") on text containing a newline.
    */
-  function replaceAll(el, text) {
-    const selectAll = () => {
-      el.focus();
-      const sel = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      sel.removeAllRanges();
-      sel.addRange(range);
+  async function typeText(el, text) {
+    console.log("[GuardAI] typeText — filling editor, el in DOM:", document.contains(el), "len:", text.length);
+    el.focus();
+
+    // Re-resolve if the node was detached by a React/ProseMirror remount.
+    const refresh = () => {
+      if (document.contains(el)) return true;
+      const fresh = findEditor();
+      if (!fresh) { console.error("[GuardAI] typeText — no editor found"); return false; }
+      el = fresh; el.focus();
+      console.log("[GuardAI] typeText — re-found editor after remount");
+      return true;
     };
 
-    // Primary: select all + single insertText.
-    selectAll();
-    try {
-      document.execCommand("insertText", false, text);
-    } catch (_) {
-      /* fall through */
+    // ---- TEXTAREA / INPUT: native value setter is already atomic & submit-safe.
+    if (el.tagName === "TEXTAREA" || el.tagName === "INPUT") {
+      const proto =
+        el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      const setValue = (v) => {
+        Object.getOwnPropertyDescriptor(proto, "value").set.call(el, v);
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      setValue("");
+      setValue(text);
+      return fullyLanded(el, text);
     }
-    if (normalize(getEditorText(el)).includes(normalize(text))) return Promise.resolve(true);
 
-    // Final fallback: synthetic paste, then re-verify.
-    selectAll();
+    // ---- contenteditable PRIMARY: per-line fill that YIELDS to the editor.
+    // This is the robust path and does NOT depend on synthetic paste (which the
+    // real ProseMirror/Lexical editors silently ignore because a paste event
+    // dispatched from a content script has isTrusted=false). For each line we
+    // call execCommand("insertText", line) — the line itself NEVER contains a
+    // newline, so it can never be interpreted as a submit — and between lines we
+    // call insertLineBreak (the Shift+Enter soft break) which also never submits.
+    //
+    // WHY WE AWAIT BETWEEN EVERY OP (the volume fix): ProseMirror/Lexical apply
+    // edits through an ASYNC transaction/flush cycle. If we fire all ~80 ops for a
+    // 15-record block synchronously, our caretToEnd() reads a DOM selection that
+    // the editor has not yet reconciled, so each insert lands at a stale position
+    // and the editor "corrects" it on its next flush — interleaving content
+    // between rows (duplicated names, a fake name landing in the wrong column,
+    // dropped records). Short input has too few ops for the drift to show; long
+    // input compounds it. Awaiting a microtask-sized delay after each op lets the
+    // editor flush so the NEXT caretToEnd reads the real end position.
+    const fillPerLine = async () => {
+      if (!refresh()) return false;
+      clearEditor(el);
+      await delay(10);
+      if (!refresh()) return false;
+      el.focus();
+      caretToEnd(el);
+      const lines = text.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        if (!refresh()) return false;
+        caretToEnd(el);
+        if (lines[i].length) {
+          try {
+            document.execCommand("insertText", false, lines[i]);
+          } catch (_) {
+            return false;
+          }
+          await delay(6); // let the editor reconcile before we move the caret
+        }
+        if (i < lines.length - 1) {
+          if (!refresh()) return false;
+          caretToEnd(el);
+          // Shift+Enter equivalent — soft break, never submits.
+          try {
+            if (!document.execCommand("insertLineBreak")) {
+              document.execCommand("insertHTML", false, "<br>");
+            }
+          } catch (_) {
+            try { document.execCommand("insertHTML", false, "<br>"); } catch (_) { return false; }
+          }
+          await delay(6);
+        }
+      }
+      el.dispatchEvent(new InputEvent("input", { bubbles: true }));
+      return true;
+    };
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (!(await fillPerLine())) break;
+      await delay(40);
+      if (fullyLanded(el, text)) {
+        console.log("[GuardAI] typeText — per-line fill landed on attempt", attempt + 1, "editorLen:", getEditorText(el).length, "wantLen:", text.length);
+        return true;
+      }
+      console.warn("[GuardAI] typeText — per-line attempt", attempt + 1, "did not fully land. editorText:", JSON.stringify(getEditorText(el).slice(0, 200)));
+    }
+
+    // ---- Fallback 1: ONE synthetic paste of the whole block. Works in editors
+    // that DO honour synthetic paste; submit-safe (clipboard handler inserts
+    // newlines as soft breaks).
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (!refresh()) return false;
+      clearEditor(el);
+      await delay(20);
+      if (!refresh()) return false;
+      pasteInto(el, text);
+      await delay(60);
+      if (fullyLanded(el, text)) {
+        console.log("[GuardAI] typeText — paste fallback landed on attempt", attempt + 1);
+        return true;
+      }
+    }
+
+    // ---- Fallback 2: char-by-char (newlines via insertLineBreak, never submits).
+    console.log("[GuardAI] typeText — per-line + paste failed, falling back to safe char-by-char");
+    if (!refresh()) return false;
+    clearEditor(el);
+    await delay(20);
+    if (!refresh()) return false;
+    el.focus();
+    caretToEnd(el);
+    for (const ch of text) {
+      if (!refresh()) return false;
+      caretToEnd(el);
+      insertChar(el, ch); // "\n" -> insertLineBreak / <br>, never a submitting insertText
+      await delay(2);
+    }
+    el.dispatchEvent(new InputEvent("input", { bubbles: true }));
+    return fullyLanded(el, text);
+  }
+
+  /** Dispatch a single synthetic paste of `text` over the full selection.
+   * Replaces the whole editor contents in one atomic, submit-safe operation. */
+  function pasteInto(el, text) {
+    el.focus();
+    const sel = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    sel.removeAllRanges();
+    sel.addRange(range);
     try {
       const dt = new DataTransfer();
       dt.setData("text/plain", text);
@@ -432,11 +617,9 @@
         new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true })
       );
     } catch (_) {
-      /* DataTransfer/ClipboardEvent unavailable */
+      /* DataTransfer/ClipboardEvent unavailable — caller's verify will fail and
+         the char-by-char fallback takes over. */
     }
-    return new Promise((resolve) => {
-      setTimeout(() => resolve(normalize(getEditorText(el)).includes(normalize(text))), 80);
-    });
   }
 
   /* ------------------------------------------------------------------ *
@@ -483,14 +666,26 @@
    */
   async function buildReviewModel(editor, original, findings) {
     await masker.load();
+    // DIAGNOSTIC: log exactly what text the detector scanned (what the editor
+    // handed back). If this differs from what was pasted, indices/masking are
+    // computed against a reformatted string — capture this from the real site.
+    console.log("[GuardAI] buildReviewModel — original captured (len " + (original || "").length + "):", JSON.stringify((original || "").slice(0, 300)));
+    console.log("[GuardAI] buildReviewModel — findings:", findings.map((f) => `${f.type}@${f.index}:${JSON.stringify(f.value)}`).join(" | "));
     const fakeByReal = new Map();
+    // Every distinct fake we've assigned in THIS batch. Seeded as we go so the
+    // next previewFake() avoids colliding with a fake already given to a
+    // different real value in the same message (the masker's own table only
+    // knows about committed pairs, not in-flight batch ones).
+    const usedFakes = new Set();
     const items = [];
     for (const f of findings) {
       if (!masker.isMaskable(f.type)) continue;
+      // Same real value -> same fake (same person/number stays coherent).
       let fake = fakeByReal.get(f.value);
       if (!fake) {
-        fake = masker.previewFake(f.type, f.value);
+        fake = masker.previewFake(f.type, f.value, usedFakes);
         fakeByReal.set(f.value, fake);
+        usedFakes.add(fake);
       }
       items.push({
         start: f.index,
@@ -500,6 +695,29 @@
         manual: false,
         fake,
       });
+    }
+    // Safety net: explicitly verify no two DISTINCT real values share a fake.
+    // Generation already avoids this via `usedFakes`, but a final pass guarantees
+    // it so unmasking can never restore the wrong identity to the wrong row.
+    const fakeOwner = new Map(); // fake -> first real value that claimed it
+    for (const it of items) {
+      const owner = fakeOwner.get(it.fake);
+      if (owner === undefined) {
+        fakeOwner.set(it.fake, it.value);
+        continue;
+      }
+      if (owner === it.value) continue; // same real value legitimately reuses its fake
+      // Collision between two different reals — regenerate a unique fake.
+      let regenerated = masker.previewFake(it.type, it.value, usedFakes);
+      let guard = 0;
+      while ((usedFakes.has(regenerated) || fakeOwner.has(regenerated)) && guard < 100) {
+        regenerated = masker.previewFake(it.type, it.value + ":retry" + guard, usedFakes);
+        guard++;
+      }
+      it.fake = regenerated;
+      fakeByReal.set(it.value, regenerated);
+      usedFakes.add(regenerated);
+      fakeOwner.set(regenerated, it.value);
     }
     items.sort((a, b) => a.start - b.start);
     review = { editor, original, items, fakeByReal };
@@ -511,15 +729,37 @@
     if (!review) return "";
     let masked = review.original;
     const ordered = review.items
-      .filter((it) => it.start >= 0)
+      .filter((it) => it.start >= 0 && it.value)
       .sort((a, b) => a.start - b.start);
-    for (let i = ordered.length - 1; i >= 0; i--) {
-      const it = ordered[i];
+
+    // Never apply two items whose spans overlap: the second replacement would
+    // cut into the fake written by the first and mangle both. resolveOverlaps()
+    // in the detector should already guarantee this — this is the last line of
+    // defence before any text is actually rewritten.
+    const applied = [];
+    for (const it of ordered) {
+      if (applied.length && it.start < applied[applied.length - 1].end) continue;
+      applied.push(it);
+    }
+
+    // End -> start, so each replacement leaves the indices of the ones before
+    // it untouched.
+    for (let i = applied.length - 1; i >= 0; i--) {
+      const it = applied[i];
       if (masked.slice(it.start, it.end) === it.value) {
         masked = masked.slice(0, it.start) + it.fake + masked.slice(it.end);
-      } else {
-        masked = masked.split(it.value).join(it.fake);
+        continue;
       }
+      // The recorded index drifted (the editor reformatted the text after the
+      // scan). Fall back to the SINGLE occurrence nearest that index — never a
+      // global replace. `split(value).join(fake)` rewrote every occurrence
+      // anywhere in the message, including matches inside longer words, which
+      // is precisely the "masking changed text it was never asked to touch"
+      // failure this function must never produce.
+      let at = masked.indexOf(it.value, Math.max(0, it.start - 40));
+      if (at === -1) at = masked.indexOf(it.value);
+      if (at === -1) continue; // genuinely not present — leave the text alone
+      masked = masked.slice(0, at) + it.fake + masked.slice(at + it.value.length);
     }
     return masked;
   }
@@ -529,6 +769,42 @@
     if (!review) return;
     for (const it of review.items) masker.registerManual(it.value, it.fake, it.type);
     await masker.save();
+  }
+
+  /**
+   * Hide the chat box's CONTENTS while silent mode swaps the user's text for
+   * the masked version, so the swap is never visible. The fill is a per-line
+   * execCommand sequence that yields to the editor between ops (see typeText),
+   * which reads as a visible re-type — exactly the "I can see it working" tell
+   * that silent mode is supposed to eliminate.
+   *
+   * opacity, not visibility/display: a hidden element can't hold focus or a
+   * selection, and the whole fill depends on both. Set with `important` so a
+   * host site's own rule can't win, and restored to the element's exact prior
+   * inline value (usually: none at all).
+   *
+   * Covers multiple nodes because typeText may re-resolve a fresh editor
+   * mid-fill after a React/ProseMirror remount.
+   */
+  function cloakEditor() {
+    const saved = new Map();
+    return {
+      cover(el) {
+        if (!el || !el.style || saved.has(el)) return;
+        saved.set(el, [
+          el.style.getPropertyValue("opacity"),
+          el.style.getPropertyPriority("opacity"),
+        ]);
+        el.style.setProperty("opacity", "0", "important");
+      },
+      release() {
+        for (const [el, [value, priority]] of saved) {
+          if (value) el.style.setProperty("opacity", value, priority);
+          else el.style.removeProperty("opacity");
+        }
+        saved.clear();
+      },
+    };
   }
 
   /** Re-resolve a live editor (the stored node may have been detached by React). */
@@ -542,9 +818,45 @@
    * "Mask & Send": mask everything detected, type it into the input, log it,
    * surface the MESSAGE tab, then send immediately — no editing step.
    */
-  async function doMaskAndSend(editor, original, findings) {
+  /**
+   * @param {object} [opts]
+   * @param {boolean} [opts.silent] - Silent mode (the "Masking mode" toggle):
+   *   mask and send with NO visible UI on the happy path — no warning card,
+   *   no panel popping open, no error toast. Activity is still logged (the
+   *   badge/panel update quietly) and the one-time first-mask explainer still
+   *   fires, just nothing interrupts the user. On any failure we do NOT
+   *   silently give up or silently show our own recovery screen — we return
+   *   `false` so the caller falls back to the normal, fully-visible warning
+   *   card, since staying silent through an uncertain/failed send is exactly
+   *   the kind of surprise this mode must never produce.
+   * @returns {Promise<boolean|undefined>} Only meaningful when opts.silent:
+   *   true = sent successfully and silently; false = failed, caller should
+   *   fall back to showWarning(). Non-silent callers ignore the return value
+   *   (unchanged from before).
+   */
+  async function doMaskAndSend(editor, original, findings, opts) {
+    const silent = !!(opts && opts.silent);
     console.log("[GuardAI] doMaskAndSend — building review model");
+    // Guard up front: if we can't resolve a chat box at all, bail cleanly with a
+    // clear message instead of operating on a null editor later.
+    if (!editor && !findEditor()) {
+      console.error("[GuardAI] doMaskAndSend — no chat box found at entry");
+      if (silent) return false;
+      showErrorToast("Couldn't find the chat box — try reloading the page, then send again.");
+      return;
+    }
     await buildReviewModel(editor, original, findings);
+    // Capture the review model in a local ref. handleSoftNav() can null the
+    // global `review` during any await below (a stray history.replaceState from
+    // the host site); operating on this captured ref means a concurrent clear
+    // can never null-deref. We re-attach it to the global before rendering/send.
+    const model = review;
+    if (!model) {
+      console.error("[GuardAI] doMaskAndSend — review model missing after build");
+      if (silent) return false;
+      showErrorToast("Something interrupted masking — please try again.");
+      return;
+    }
     await registerReviewItems();
     const masked = computeMasked();
     console.log("[GuardAI] doMaskAndSend — masked text:", masked);
@@ -556,37 +868,123 @@
     }
     if (!live) {
       console.error("[GuardAI] doMaskAndSend — no editor found");
+      if (silent) return false;
       showErrorToast("Could not find the chat input — please click in the chat box and try again.");
       return;
     }
     console.log("[GuardAI] doMaskAndSend — typing into editor:", live);
-    review.editor = live;
-    const ok = await typeText(live, masked);
+    model.editor = live;
+    // Suppress all sends during the fill so a long multi-line block can never be
+    // submitted mid-fill (the message-splitting bug). We clear it only just before
+    // the single intentional triggerSend below.
+    suppressSends = true;
+    // Silent mode: hide the swap itself, not just the UI around it.
+    const cloak = silent ? cloakEditor() : null;
+    if (cloak) cloak.cover(live);
+    let ok;
+    try {
+      ok = await typeText(live, masked);
+    } catch (err) {
+      suppressSends = false;
+      if (cloak) cloak.release();
+      throw err;
+    }
     // typeText may have re-found a fresh editor node; re-resolve so triggerSend
     // dispatches to the element that is actually in the DOM right now.
     live = liveEditor();
-    review.editor = live;
-    console.log("[GuardAI] doMaskAndSend — typeText ok:", ok, "— triggering send");
+    if (cloak) cloak.cover(live); // in case typeText remounted onto a new node
+    model.editor = live;
+    // Restore the global review if a soft-nav cleared it mid-fill. Safe because
+    // the fullyLanded() gate below refuses to send into a navigated-away editor.
+    review = model;
+    console.log("[GuardAI] doMaskAndSend — typeText ok:", ok);
+    // HARD GATE: never send unless the WHOLE masked text is in the box. If the
+    // fill came up short we must NOT trigger a send — doing so would dispatch a
+    // partial/split message (the exact corruption we're fixing). Surface the
+    // panel for review instead so the user can see/recover, and warn loudly.
+    if (!ok || !live || !fullyLanded(live, masked)) {
+      console.error("[GuardAI] doMaskAndSend — masked text did not fully land; aborting send");
+      suppressSends = false; // abort path: re-enable normal sending for recovery
+      state.lastMaskedText = null;
+      // Uncover immediately: the fallback below hands the box back to the user,
+      // and they must be able to see whatever is sitting in it.
+      if (cloak) cloak.release();
+      if (silent) {
+        // Never send on an uncertain/failed fill, silent or not — but silent
+        // mode must not invent its own recovery UI either. Hand back to the
+        // caller so the NORMAL, fully-visible warning card takes over, same
+        // as if silent mode had never been on for this message.
+        return false;
+      }
+      showErrorToast("The masked message didn't fully load into the chat box, so it was NOT sent. Your text is in the box for review — please check it and send manually.");
+      editMode = true; // keep the review panel + footer Send available for recovery
+      panelClosed = false;
+      ensurePanel();
+      if (reopenEl) reopenEl.style.display = "none";
+      renderMessageTab();
+      renderPanel();
+      setActiveTab("message");
+      updateFooter();
+      if (live) live.focus();
+      return;
+    }
+    console.log("[GuardAI] doMaskAndSend — full text landed, triggering send");
     state.lastMaskedText = masked;
     const replacements = review.items.map((it) => ({
       type: it.type,
       real: it.value,
       fake: it.fake,
     }));
-    logActivity("mask", replacements);
-    if (ok) reportStats({ masked: replacements.length });
+    logActivity("mask", replacements); // still logs quietly + fires the one-time first-mask explainer, even when silent
+    reportStats({ masked: replacements.length });
     // Snapshot the review so the Message tab stays populated after the soft-nav
     // that follows a successful send (handleSoftNav clears `review` but not this).
     sentReview = review;
     editMode = false;
-    panelClosed = false;
-    ensurePanel();
-    if (reopenEl) reopenEl.style.display = "none";
-    renderMessageTab();
-    renderPanel();
-    updateFooter();
-    if (live) live.focus();
+    if (!silent && state.autoOpenPanel) {
+      // Opt-in only (state.autoOpenPanel, default OFF — see its declaration):
+      // most users found the panel popping open on every single send
+      // intrusive. Off (the default) behaves the same as silent mode here —
+      // logActivity() above already updated the collapsed badge quietly.
+      panelClosed = false;
+      ensurePanel();
+      if (reopenEl) reopenEl.style.display = "none";
+      renderMessageTab();
+      renderPanel();
+    }
+    if (!silent) {
+      updateFooter();
+      if (live) live.focus();
+    }
+    // Re-enable sending for the ONE intentional send below. triggerSend sets
+    // bypassNext so it passes our own interceptors cleanly.
+    suppressSends = false;
     triggerSend(live);
+    if (cloak) {
+      // Stay covered a beat past the send: the site clears the box a tick or
+      // two after it accepts the message, and uncovering before that would
+      // flash the masked text — the one thing the cloak exists to prevent.
+      // Safety-netted so a send the site never consumes can't leave the box
+      // permanently invisible.
+      const done = () => cloak.release();
+      const t = setTimeout(done, 1500);
+      const emptied = () => {
+        try {
+          return !getEditorText(live).trim();
+        } catch (_) {
+          return true; // node gone / unreadable — don't hold the cover open
+        }
+      };
+      const poll = setInterval(() => {
+        if (emptied()) {
+          clearTimeout(t);
+          clearInterval(poll);
+          done();
+        }
+      }, 40);
+      setTimeout(() => clearInterval(poll), 1500);
+    }
+    if (silent) return true;
   }
 
   /**
@@ -596,7 +994,20 @@
    */
   async function doMaskAndEdit(editor, original, findings) {
     console.log("[GuardAI] doMaskAndEdit — building review model");
+    if (!editor && !findEditor()) {
+      console.error("[GuardAI] doMaskAndEdit — no chat box found at entry");
+      showErrorToast("Couldn't find the chat box — try reloading the page, then try again.");
+      return;
+    }
     await buildReviewModel(editor, original, findings);
+    // Capture the model locally (see doMaskAndSend) so a stray soft-nav that
+    // nulls the global `review` mid-fill can never null-deref here.
+    const model = review;
+    if (!model) {
+      console.error("[GuardAI] doMaskAndEdit — review model missing after build");
+      showErrorToast("Something interrupted masking — please try again.");
+      return;
+    }
     await registerReviewItems();
     const masked = computeMasked();
     console.log("[GuardAI] doMaskAndEdit — masked text:", masked);
@@ -612,12 +1023,21 @@
       return;
     }
     console.log("[GuardAI] doMaskAndEdit — typing into editor:", live);
-    review.editor = live;
-    const ok = await typeText(live, masked);
+    model.editor = live;
+    // Mask & Edit must NEVER send. Suppress every send pathway for the whole fill;
+    // clear it once the fill is done (the panel, not a send, is the next step).
+    suppressSends = true;
+    let ok;
+    try {
+      ok = await typeText(live, masked);
+    } finally {
+      suppressSends = false;
+    }
     // Re-resolve in case typeText found a fresh editor node during re-render.
     live = liveEditor();
-    review.editor = live;
-    console.log("[GuardAI] doMaskAndEdit — typeText ok:", ok, "— opening panel");
+    model.editor = live;
+    review = model; // restore global if a soft-nav cleared it mid-fill
+    console.log("[GuardAI] doMaskAndEdit — typeText ok:", ok, "— opening panel for review (NO send)");
     state.lastMaskedText = masked;
     const replacements = review.items.map((it) => ({
       type: it.type,
@@ -626,6 +1046,14 @@
     }));
     logActivity("mask", replacements);
     if (ok) reportStats({ masked: replacements.length });
+    // Mask & Edit ALWAYS pauses for review — it never sends here. If the fill came
+    // up short, warn so the user knows the box may not match the full masked text
+    // before they edit/send. The "What AI sees" tab still shows the full masked
+    // text from the review model regardless.
+    if (!ok || !live || !fullyLanded(live, masked)) {
+      console.warn("[GuardAI] doMaskAndEdit — masked text did not fully land in the chat box");
+      showErrorToast("Heads up: the masked text may not have fully loaded into the chat box. Review it in the panel and use the panel's Send button.");
+    }
     editMode = true;
     panelClosed = false;
     ensurePanel();
@@ -760,6 +1188,8 @@
   let markTipFor = null; // the mark element the tip currently belongs to
   let markTipHideT = null; // delayed-hide timer for the mark tooltip
   let maskPromptEl = null; // the "Mask & Send / Mask & Edit" bar above the input
+  const FIRST_MASK_KEY = "guardai_first_mask_seen";
+  let firstMaskExplainerEl = null;
 
   async function loadActivity() {
     try {
@@ -777,7 +1207,12 @@
   function persistActivity() {
     if (activityLog.length > ACTIVITY_CAP) activityLog = activityLog.slice(-ACTIVITY_CAP);
     try {
-      chrome.storage.local.set({ [ACTIVITY_KEY]: activityLog });
+      // chrome.storage.local.set() can REJECT asynchronously (quota exceeded,
+      // extension context invalidated, etc.) — a bare try/catch only catches a
+      // SYNCHRONOUS throw, so .catch() is needed too or this becomes an
+      // unhandled promise rejection. Either way, storage failing here must
+      // never break anything: the in-memory log still works for this page.
+      chrome.storage.local.set({ [ACTIVITY_KEY]: activityLog }).catch(() => {});
     } catch {
       /* storage may be unavailable; the in-memory log still works */
     }
@@ -809,15 +1244,80 @@
     }
     if (!added) return;
     persistActivity();
-    if (!panelClosed) {
-      ensurePanel();
+    // Never pop the panel open on its own — only keep it live if the user
+    // already has it open right now. Otherwise just update the collapsed
+    // badge's count, so passive activity (e.g. auto-restore on a response
+    // you didn't explicitly ask to review) never yanks the panel over the
+    // page. Deliberate actions (Mask & Send / Mask & Edit) force the panel
+    // open themselves right after calling this, independent of this check.
+    if (panelEl && panelEl.style.display !== "none") {
       renderPanel();
     } else {
-      showReopen(); // keep the badge count current while collapsed
+      showReopen();
+    }
+    // The very first time GuardAI actually masks something for a new user,
+    // their own text visibly changes — explain what just happened so that
+    // moment builds trust instead of alarm.
+    if (kind === "mask") {
+      reportCompanyCategories(items);
+      maybeShowFirstMaskExplainer();
     }
   }
 
+  /**
+   * One-time, lightweight explainer shown the first time real data is masked.
+   * Anchored bottom-left (out of the way of the panel bottom-right), auto-
+   * dismisses, and remembers it's been seen in chrome.storage.local so it
+   * never shows again. Fails open: if the flag can't be read, we simply don't
+   * nag (better than showing it every time).
+   */
+  function maybeShowFirstMaskExplainer() {
+    if (firstMaskExplainerEl) return;
+    let done = false;
+    const show = () => {
+      if (done || firstMaskExplainerEl) return;
+      done = true;
+      const el = document.createElement("div");
+      el.className = "guardai-firstrun";
+      el.setAttribute("role", "status");
+      el.innerHTML =
+        `<div class="guardai-firstrun__head">` +
+        `<span class="guardai-firstrun__shield">${SHIELD_SVG}</span>` +
+        `<span class="guardai-firstrun__title">Your data was just masked</span>` +
+        `<button class="guardai-firstrun__close" aria-label="Dismiss">&times;</button>` +
+        `</div>` +
+        `<p class="guardai-firstrun__body">GuardAI replaced your sensitive details with realistic ` +
+        `fakes before sending, so the AI never sees the real thing. When it replies, ` +
+        `GuardAI swaps your real data back in — only you ever see it. Manage everything ` +
+        `from the GuardAI panel.</p>` +
+        `<button class="guardai-firstrun__ok">Got it</button>`;
+      document.body.appendChild(el);
+      firstMaskExplainerEl = el;
+      const dismiss = () => {
+        if (el._t) clearTimeout(el._t);
+        el.remove();
+        if (firstMaskExplainerEl === el) firstMaskExplainerEl = null;
+      };
+      el.querySelector(".guardai-firstrun__close").onclick = dismiss;
+      el.querySelector(".guardai-firstrun__ok").onclick = dismiss;
+      el._t = setTimeout(dismiss, 14000);
+      try {
+        chrome.storage.local.set({ [FIRST_MASK_KEY]: true }).catch(() => {});
+      } catch (_) { /* non-fatal */ }
+    };
+    try {
+      chrome.storage.local.get([FIRST_MASK_KEY]).then((d) => {
+        if (!d || !d[FIRST_MASK_KEY]) show();
+      }).catch(() => { /* storage unreadable — don't nag */ });
+    } catch (_) { /* storage unavailable — don't nag */ }
+  }
+
   function ensurePanel() {
+    // Never show the panel while GuardAI is switched off, no matter which
+    // code path got here (boot/soft-nav restoring a saved log, a stray
+    // in-flight unmask pass finishing after the toggle, etc.) — the master
+    // toggle must mean everything visibly goes away, not just new activity.
+    if (!state.enabled) return;
     if (panelEl) {
       panelEl.style.display = "";
       if (reopenEl) reopenEl.style.display = "none";
@@ -827,7 +1327,7 @@
     panelEl.className = "guardai-panel";
     panelEl.innerHTML =
       `<div class="guardai-panel__header">` +
-      `<span class="guardai-panel__shield">&#128737;</span>` +
+      `<span class="guardai-panel__shield">${SHIELD_SVG}</span>` +
       `<span class="guardai-panel__title">GuardAI</span>` +
       `<button class="guardai-panel__close" title="Close" aria-label="Close">&times;</button>` +
       `</div>` +
@@ -861,7 +1361,7 @@
       `</div>` +
       `<div class="guardai-panel__footer">` +
       `<button class="guardai-panel__send" style="display:none">Send</button>` +
-      `<button class="guardai-panel__clear">Clear session</button>` +
+      `<button class="guardai-panel__clear">Clear all data</button>` +
       `</div>`;
     document.body.appendChild(panelEl);
     maskedListEl = panelEl.querySelector(".guardai-panel__list");
@@ -904,7 +1404,15 @@
       tab.onclick = () => setActiveTab(tab.getAttribute("data-tab"));
     });
     footerSendEl.onclick = panelSend;
-    panelEl.querySelector(".guardai-panel__clear").onclick = clearSession;
+    panelEl.querySelector(".guardai-panel__clear").onclick = () => {
+      // Deliberately a plain confirm(), not our own styled dialog: this is
+      // the one moment where matching the browser's own unmistakable native
+      // prompt is more useful than staying on-brand — it can't be missed or
+      // misread as just another GuardAI card.
+      if (window.confirm("Clear all GuardAI data? This forgets every real<->fake pairing and the activity log. This can't be undone.")) {
+        clearSession();
+      }
+    };
     // Delegate "Reveal real data" clicks for pending rows.
     maskedListEl.addEventListener("click", (e) => {
       const btn = e.target.closest(".guardai-panel__reveal");
@@ -916,6 +1424,13 @@
         persistActivity();
         renderPanel();
       }
+    });
+    // Delegate per-item "forget this one" clicks — the alternative to
+    // all-or-nothing Clear session.
+    maskedListEl.addEventListener("click", (e) => {
+      const btn = e.target.closest(".guardai-panel__itemdel");
+      if (!btn) return;
+      forgetOneItem(Number(btn.getAttribute("data-id")));
     });
     syncAutoRestoreSwitch();
     setActiveTab(activeTab);
@@ -943,7 +1458,7 @@
   function setAutoRestore(on) {
     state.autoRestore = on;
     try {
-      chrome.storage.local.set({ guardai_auto_restore: on });
+      chrome.storage.local.set({ guardai_auto_restore: on }).catch(() => {});
     } catch {
       /* non-fatal */
     }
@@ -955,23 +1470,39 @@
     scheduleUnmask();
   }
 
-  /** Clear the visible activity log only (mapping stays, so restores keep working). */
-  function clearActivityLog() {
-    activityLog = [];
-    loggedKeys.clear();
-    announcedSwaps.clear();
-    try {
-      chrome.storage.local.set({ [ACTIVITY_KEY]: [] });
-    } catch {
-      /* non-fatal */
-    }
-    renderPanel();
-    if (reopenEl) reopenEl.querySelector(".guardai-reopen__count").textContent = "0";
+  /* Deleting the user's history must have exactly one reachable trigger: the
+   * "Clear session" button below. A second, unreferenced clearActivityLog()
+   * used to sit here — dead code whose only effect was wiping stored activity,
+   * one stray call site away from becoming a data-loss bug. Removed rather
+   * than left lying around; git has it if a "clear log but keep the mapping"
+   * feature is ever actually wanted. */
+
+  /**
+   * Flip every currently-restored real value on the page back to its fake
+   * stand-in, using the mapping as it stands RIGHT NOW — must run BEFORE the
+   * mapping that backs those values is dropped, or there's nothing left to
+   * build the swap from. This is the visible proof that clearing actually
+   * did something: without it, the page just kept showing whatever it was
+   * already showing (usually the restored real data), so a mapping clear
+   * looked like it silently did nothing, even though the storage/table really
+   * was wiped underneath it.
+   */
+  function remaskVisiblePage() {
+    if (masker.size === 0) return; // nothing currently mapped to remask
+    const root = findResponseRoot();
+    applyRules(root, buildSwapRules("remask"));
+    // The mapping backing them is going away, so the toggle buttons (which
+    // only make sense when there's a real fake<->real pair to flip between)
+    // and any "always show me the real value" pins are now stale.
+    removeMessageToggles();
+    root.querySelectorAll("[data-guardai-lock]").forEach((el) => el.removeAttribute("data-guardai-lock"));
   }
 
-  /** Full reset: wipe the fake<->real mapping AND the log so the user starts fresh. */
+  /** Full reset: wipe the fake<->real mapping AND the log so the user starts fresh.
+   * The ONLY code path in the extension that deletes activity history. */
   function clearSession() {
-    masker.clear(); // drops the mapping + its storage key
+    remaskVisiblePage(); // show the fake values as visible proof, before the mapping goes
+    masker.clear().catch(() => {}); // drops the mapping + its storage key
     activityLog = [];
     loggedKeys.clear();
     announcedSwaps.clear();
@@ -979,12 +1510,39 @@
     review = null;
     sentReview = null;
     try {
-      chrome.storage.local.set({ [ACTIVITY_KEY]: [] });
+      chrome.storage.local.set({ [ACTIVITY_KEY]: [] }).catch(() => {});
     } catch {
       /* non-fatal */
     }
     renderPanel();
     if (reopenEl) reopenEl.querySelector(".guardai-reopen__count").textContent = "0";
+  }
+
+  /**
+   * Forget exactly ONE previously-masked item — the "pick which ones to
+   * delete" alternative to the all-or-nothing Clear session. Mirrors
+   * clearSession()'s "remask before forgetting" order on a single value:
+   * flips it back to fake anywhere it's currently shown as real, THEN drops
+   * the pairing that made that swap possible, then removes every log row
+   * for that pair (not just the "Masked" row clicked — its "Restored"/
+   * "Revealed" echoes reference a mapping that's about to stop existing).
+   */
+  function forgetOneItem(id) {
+    const entry = activityLog.find((x) => x.id === id && x.kind === "mask");
+    if (!entry) return;
+    const { real, fake } = entry;
+    const mapped = masker.realToFake.get(real);
+    if (mapped && mapped.fake === fake) {
+      const tokens = real.split(/\s+/).filter(Boolean).map(escapeRegExp);
+      const re = new RegExp("(?<![A-Za-z0-9])" + tokens.join("[\\s,]+") + "(?![A-Za-z0-9])", "g");
+      applyRules(findResponseRoot(), [{ key: real, to: fake, entry: mapped, multi: tokens.length > 1, re }]);
+      masker.unregister(real);
+      masker.save().catch(() => {});
+    }
+    activityLog = activityLog.filter((x) => !(x.fake === fake && x.real === real));
+    for (const kind of ["mask", "unmask", "pending"]) loggedKeys.delete(kind + "|" + fake + "|" + real);
+    persistActivity();
+    renderPanel();
   }
 
   function closePanel() {
@@ -994,12 +1552,15 @@
   }
 
   function showReopen() {
+    // Same invariant as ensurePanel(): the collapsed badge must never appear
+    // while GuardAI is off.
+    if (!state.enabled) return;
     if (!reopenEl) {
       reopenEl = document.createElement("button");
       reopenEl.className = "guardai-reopen";
       reopenEl.setAttribute("aria-label", "Open GuardAI activity");
       reopenEl.innerHTML =
-        `<span class="guardai-reopen__shield">&#128737;</span>` +
+        `<span class="guardai-reopen__shield">${SHIELD_SVG}</span>` +
         `<span class="guardai-reopen__count"></span>`;
       reopenEl.onclick = () => {
         panelClosed = false;
@@ -1051,11 +1612,26 @@
         const cls = isMask
           ? "guardai-panel__row--mask"
           : "guardai-panel__row--unmask";
+        // "Restored" gets its own modifier class so it (and only it, not the
+        // "Revealed" tag that shares the same row/kind styling) can be
+        // coloured green — a quick-scan signal that a swap was successfully
+        // protected and restored.
+        const tagCls = tag === "Restored" ? "guardai-panel__tag guardai-panel__tag--restored" : "guardai-panel__tag";
+        // Only a "Masked" row represents one independently-forgettable piece
+        // of data (a live real<->fake pair); "Restored"/"Revealed" rows are
+        // just log echoes of that same pair being unmasked elsewhere, not a
+        // separate thing to delete. Deleting the Masked row is what actually
+        // makes GuardAI forget that value — this is the answer to "let me
+        // pick which ones to delete" instead of only an all-or-nothing Clear.
+        const delBtn = isMask
+          ? `<button class="guardai-panel__itemdel" data-id="${it.id}" title="Forget this item" aria-label="Forget this item">&times;</button>`
+          : "";
         return (
           `<div class="guardai-panel__row ${cls}">` +
           `<div class="guardai-panel__rowhead">` +
-          `<span class="guardai-panel__tag">${tag}</span>` +
+          `<span class="${tagCls}">${tag}</span>` +
           `<span class="guardai-panel__type">${escapeHtml(it.type || "")}</span>` +
+          delBtn +
           `</div>` +
           `<div class="guardai-panel__swap">` +
           `<span class="guardai-panel__from">${escapeHtml(from)}</span>` +
@@ -1079,6 +1655,21 @@
 
   let bypassNext = false; // set true to allow the very next send through untouched
 
+  // HARD send-suppression for the mask flow. While true, NO message can leave the
+  // page through ANY pathway — raw Enter, send-button click, <form> submit, OR an
+  // editor that turns a beforeinput "insertParagraph" into a submit. This is the
+  // definitive block for two bugs: (1) a long multi-line fill splitting into
+  // several messages because the editor submits mid-fill, and (2) Mask & Edit
+  // "auto-sending" because a fill operation tripped the editor's submit even
+  // though doMaskAndEdit never calls triggerSend. It is set ONLY around the fill
+  // and cleared the instant the fill is done (Mask & Send clears it just before
+  // its single intentional send), so it can never lock the user out of sending.
+  let suppressSends = false;
+
+  function diag(...args) {
+    console.log("[GuardAI][diag]", ...args);
+  }
+
   async function handleSendAttempt(editor) {
     if (!state.enabled) return true; // extension off -> allow
 
@@ -1100,9 +1691,23 @@
 
     reportStats({ detected: findings.length });
 
+    // "Masking mode" (silent mode): skip the warning card entirely and mask +
+    // send automatically, with no visible interruption on the happy path.
+    // Any failure/uncertainty still falls back to the normal, fully-visible
+    // warning card below — silent mode only ever silences a CONFIRMED-safe
+    // send, never an uncertain one.
+    if (state.maskingEnabled) {
+      const ok = await doMaskAndSend(editor, text, findings, { silent: true });
+      if (ok === false) {
+        showWarning(editor, text, findings, makeResender(editor));
+      }
+      return false;
+    }
+
     // Educate first: show the warning popup listing each detected item, the
     // category, and WHY it's risky on this platform. From there the user picks
-    // Cancel, Send anyway, Mask & Send, or Mask & Edit. We block this raw send.
+    // Mask & Send, Mask & Edit, Manual mask, or Send anyway (or the × to
+    // dismiss without sending). We block this raw send.
     showWarning(editor, text, findings, makeResender(editor));
     return false;
   }
@@ -1116,12 +1721,58 @@
     };
   }
 
+  // ---- beforeinput guard (capture phase) — the key fix for split/auto-send ----
+  // ProseMirror/Lexical apply our execCommand edits via beforeinput. A soft line
+  // break we insert shows up as inputType "insertLineBreak" (safe). A SUBMIT —
+  // whether from a real Enter mid-fill or the editor translating something into a
+  // paragraph — shows up as "insertParagraph". While the mask flow is filling, we
+  // block ONLY "insertParagraph": this stops the message ever being submitted
+  // mid-fill (no split, no Mask & Edit auto-send) while leaving our soft line
+  // breaks intact so the table formatting is preserved.
+  document.addEventListener(
+    "beforeinput",
+    (e) => {
+      if (!suppressSends) return;
+      diag("beforeinput during fill — inputType:", e.inputType, "isTrusted:", e.isTrusted);
+      if (e.inputType === "insertParagraph") {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        diag("BLOCKED insertParagraph (would submit) during mask flow");
+      }
+    },
+    true
+  );
+
+  // ---- <form> submit guard (capture phase) ----
+  // Belt-and-suspenders: if the editor's composer is wrapped in a form and tries
+  // to submit during the fill, stop it. The single intentional send happens only
+  // after suppressSends is cleared.
+  document.addEventListener(
+    "submit",
+    (e) => {
+      if (!suppressSends) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      diag("BLOCKED form submit during mask flow");
+    },
+    true
+  );
+
   // ---- Enter key interception (capture phase) ----
   document.addEventListener(
     "keydown",
     async (e) => {
       if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
       if (!state.enabled) return; // master off — never intercept the send
+      // During the mask flow's fill, block EVERY Enter outright (a stray user
+      // Enter mid-fill must not submit a partial message). Cleared as soon as the
+      // fill is done, so this never blocks a normal send.
+      if (suppressSends && !bypassNext) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        diag("BLOCKED Enter during mask flow");
+        return;
+      }
       // Never intercept keystrokes from inside GuardAI's own panel or overlays.
       if (e.target && typeof e.target.closest === "function" &&
           e.target.closest(".guardai-panel, .guardai-prompt, .guardai-msgpop, .guardai-marktip")) return;
@@ -1157,6 +1808,13 @@
       if (!state.enabled) return; // master off — never intercept the send
       // Never intercept clicks inside GuardAI's own UI.
       if (btn.closest(".guardai-panel, .guardai-prompt")) return;
+      // During the mask flow's fill, block site send-button clicks too.
+      if (suppressSends && !bypassNext) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        diag("BLOCKED send-button click during mask flow");
+        return;
+      }
 
       if (bypassNext) {
         bypassNext = false;
@@ -1209,6 +1867,7 @@
    * ------------------------------------------------------------------ */
   const MARK_STYLE = {
     NAME_PII: { label: "Name", color: "#6B9FFF" },
+    ORG: { label: "Company", color: "#4DD0E1" },
     PHONE: { label: "Phone", color: "#FF8C42" },
     EMAIL: { label: "Email", color: "#4CAF82" },
     ADDRESS: { label: "Address", color: "#B06FFF" },
@@ -1220,11 +1879,13 @@
     CREDIT_CARD: { label: "Card number", color: "#FF6B6B" },
     BSB: { label: "BSB", color: "#FF6B6B" },
     BANK_ACCOUNT: { label: "Bank account", color: "#FF6B6B" },
+    REF_CODE: { label: "Account / reference", color: "#FF6B6B" },
     MONEY: { label: "Amount", color: "#FFD166" },
     GPS: { label: "GPS", color: "#B06FFF" },
     ABN: { label: "ABN", color: "#FF6B6B" },
     ACN: { label: "ACN", color: "#FF6B6B" },
     PASSWORD: { label: "Password", color: "#FF6B6B" },
+    USERNAME: { label: "Username", color: "#FFA94D" },
   };
   const MARK_DEFAULT = { label: "Sensitive", color: "#FFD166" };
   const MARK_MANUAL = { label: "Manual", color: "#FF8FB1" };
@@ -1247,8 +1908,9 @@
   /* ---- Educational warning popup above the input ----
    * The first thing the user sees on detection. It lists each detected item by
    * category, explains in plain English WHY each is risky on this platform, and
-   * offers four choices: Cancel, Send anyway, Mask & Send, Mask & Edit. This is
-   * the teaching moment that makes GuardAI useful for non-technical users. */
+   * offers four choices: Mask & Send, Mask & Edit, Manual mask, Send anyway
+   * (plus the × in the header to dismiss without sending). This is the
+   * teaching moment that makes GuardAI useful for non-technical users. */
 
   function showWarning(editor, text, findings, resend) {
     dismissMaskPrompt();
@@ -1288,7 +1950,7 @@
     wrap.innerHTML =
       `<div class="guardai-prompt__grip" title="Drag to move" aria-label="Drag to move"></div>` +
       `<div class="guardai-prompt__head">` +
-      `<span class="guardai-prompt__shield">&#128737;</span>` +
+      `<span class="guardai-prompt__shield">${SHIELD_SVG}</span>` +
       `<span class="guardai-prompt__text">GuardAI detected sensitive data</span>` +
       `<button class="guardai-prompt__close" aria-label="Dismiss">&times;</button>` +
       `</div>` +
@@ -1303,19 +1965,12 @@
       `<div class="guardai-prompt__btns guardai-prompt__btns--secondary">` +
       `<button class="guardai-prompt__btn guardai-prompt__btn--ghost guardai-prompt__btn--manual">Manual mask</button>` +
       `<button class="guardai-prompt__btn guardai-prompt__btn--ghost guardai-prompt__btn--anyway">Send anyway</button>` +
-      `<button class="guardai-prompt__btn guardai-prompt__btn--ghost guardai-prompt__btn--cancel">Cancel</button>` +
       `</div>`;
     document.body.appendChild(wrap);
     maskPromptEl = wrap;
 
     wrap.querySelector(".guardai-prompt__close").onclick = () => {
       console.log("[GuardAI] ✕ Close clicked — dismissing popup");
-      dismissMaskPrompt();
-      const live = editor && document.contains(editor) ? editor : findEditor();
-      if (live) live.focus();
-    };
-    wrap.querySelector(".guardai-prompt__btn--cancel").onclick = () => {
-      console.log("[GuardAI] Cancel clicked — dismissing popup, restoring focus");
       dismissMaskPrompt();
       const live = editor && document.contains(editor) ? editor : findEditor();
       if (live) live.focus();
@@ -1362,8 +2017,30 @@
       if (!wrap._dragged) centrePrompt(wrap);
     };
     window.addEventListener("resize", reposition, true);
+
+    // Keyboard support: Escape dismisses (same as the × close button), and the safe primary
+    // action (Mask & Send) is focused on open so a keyboard user can accept the
+    // common case with a single Enter. Tab cycles the buttons natively.
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        dismissMaskPrompt();
+        const live = editor && document.contains(editor) ? editor : findEditor();
+        if (live) live.focus();
+      }
+    };
+    wrap.addEventListener("keydown", onKey);
+    // Focus the primary button after layout settles (rAF avoids the browser
+    // scrolling the page to the freshly-inserted node before it's positioned).
+    requestAnimationFrame(() => {
+      const primary = wrap.querySelector(".guardai-prompt__btn--send");
+      if (primary) primary.focus({ preventScroll: true });
+    });
+
     wrap._cleanup = () => {
       window.removeEventListener("resize", reposition, true);
+      wrap.removeEventListener("keydown", onKey);
     };
   }
 
@@ -1803,17 +2480,123 @@
   function msgAutoReplace() {
     if (!msgPending) return;
     const value = msgPending.value.trim();
-    let type = "NAME_PII"; // a realistic AU name is the generic fallback
-    try {
-      const fs = detector.scan(value);
-      const whole = fs.find((f) => masker.isMaskable(f.type) && f.value.trim() === value);
-      const any = whole || fs.find((f) => masker.isMaskable(f.type));
-      if (any) type = any.type;
-    } catch {
-      /* fall back to NAME_PII */
-    }
+    const type = inferSelectionType(value);
     msgReplaceSelection(masker.previewFake(type, value), type);
   }
+
+  /**
+   * Decide the fake TYPE for a manually-highlighted selection so auto-replace
+   * substitutes a value of the SAME kind (TFN->fake TFN, phone->fake phone,
+   * address->fake address, etc.) instead of always defaulting to a name.
+   *
+   * Why the old code defaulted to a name: it ran detector.scan() on the bare
+   * selection. Most detectors (TFN, Medicare, DOB, money, address) only fire when
+   * a context keyword sits nearby; scanning the isolated selection strips that
+   * context, so nothing matched and it fell back to NAME_PII. We fix this in
+   * three layers, then a non-name generic fallback.
+   */
+  function inferSelectionType(value) {
+    const v = value.trim();
+    // 1) Already auto-detected in THIS message? Reuse that type — it was found
+    //    with full surrounding context, so it's the most reliable signal.
+    if (review && Array.isArray(review.items)) {
+      const exact = review.items.find((it) => it.value.trim() === v);
+      if (exact) return exact.type;
+      const overlap = review.items.find((it) => it.value.includes(v) || v.includes(it.value));
+      if (overlap) return overlap.type;
+    }
+    // 2) Re-scan the WHOLE original text and find the finding covering this
+    //    selection, so context-dependent detectors work even if the item wasn't
+    //    in the review model (e.g. user highlighted something we under-detected).
+    try {
+      if (review && review.original) {
+        const idx = review.original.indexOf(v);
+        if (idx >= 0) {
+          const fs = detector.scan(review.original);
+          const hit = fs.find(
+            (f) => masker.isMaskable(f.type) && f.index < idx + v.length && f.index + f.value.length > idx
+          );
+          if (hit) return hit.type;
+        }
+      }
+    } catch (_) { /* fall through */ }
+    // 3) Context-free structural inference for data the auto-detector never
+    //    caught at all (e.g. a leaked licence or address the user spotted).
+    const structural = inferTypeStructural(v);
+    if (structural) return structural;
+    // 4) Unknown -> generic redaction. NEVER a fake name for non-name data.
+    return "CUSTOM";
+  }
+
+  /** Classify a value by SHAPE alone (no surrounding context). Returns a GuardAI
+   * finding type or null. Order matters: most specific shapes first. */
+  function inferTypeStructural(v) {
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return "EMAIL";
+    // AU driver licence: state code + 6-9 digits.
+    if (/^(?:NSW|VIC|QLD|WA|SA|TAS|ACT|NT)\s?\d{6,9}$/i.test(v)) return "LICENCE";
+    // AU mobile / landline. The 0 / +61 prefix is REQUIRED here: without it a
+    // bare 9-digit group like "234 567 891" (a TFN) would read as a landline.
+    if (/^(?:\+?61[\s-]?4|04)(?:[\s-]?\d){8}$/.test(v) || /^(?:\+?61[\s-]?|0)[2-9](?:[\s-]?\d){8}$/.test(v)) return "PHONE";
+    // date dd/mm/yyyy (optionally prefixed with a DOB label the user included).
+    if (/(0?[1-9]|[12]\d|3[01])[\/.\-](0?[1-9]|1[0-2])[\/.\-](?:19|20)\d\d/.test(v)) return "DOB";
+    // money.
+    if (/\$\s?\d/.test(v)) return "MONEY";
+    // account / reference code: 2-4 letters, dash, 4-6 digits (BW-44192).
+    // Checked before the digit-count rules below, which would otherwise see
+    // only the 5 digits and call it a TFN.
+    if (/^[A-Za-z]{2,4}-\d{4,6}$/.test(v)) return "REF_CODE";
+    const digits = v.replace(/\D/g, "");
+    // Medicare: 10-11 digits in 4-5-1(-1) shape.
+    if (/^[1-9]\d{3}\s?\d{5}\s?\d(?:\s?\d)?$/.test(v) && (digits.length === 10 || digits.length === 11)) return "MEDICARE";
+    // BSB.
+    if (/^\d{3}-\d{3}$/.test(v)) return "BSB";
+    // credit card 13-19 digits.
+    if (digits.length >= 13 && digits.length <= 19) return "CREDIT_CARD";
+    // TFN 8-9 digits.
+    if (digits.length === 8 || digits.length === 9) return "TFN";
+    // address: number + optional words + a street type.
+    if (/^\d{1,5}[A-Za-z]?(?:[-/]\d{1,4})?\s+(?:[A-Z][a-zA-Z]+\s+){0,3}(?:St|Street|Rd|Road|Ave|Avenue|Dr|Drive|Ln|Lane|Ct|Court|Pl|Place|Cres|Crescent|Blvd|Boulevard|Hwy|Highway|Pde|Parade|Tce|Terrace|Way|Cl|Close|Esplanade|Esp|Pkwy|Parkway|Cct|Circuit|Cir|Circle|Mews|Walk|Row|Grove|Grv|Quay|Cove|Glade|Gardens|Gdns|Loop|Rise|Vista|Mall)\b/i.test(v)) return "ADDRESS";
+    // company name: capitalised words ending in a legal designator or an
+    // industry descriptor. Must be tested BEFORE the full-name rule below,
+    // which would otherwise claim "Bellweather Logistics" as a person and
+    // substitute a fake HUMAN name for a business.
+    if (
+      /\s(?:(?:Pty\.?\s+)?Ltd\.?|(?:Pty\.?\s+)?Limited|Pty\.?|Incorporated|Inc\.?|L\.L\.C\.?|LLC|LLP|PLC|P\/L|Corporation|Corp\.?|GmbH|Group|Holdings|Partners|Partnership|Enterprises|Industries|Solutions|Services|Systems|Technologies|Consulting|Consultancy|Consultants|Logistics|Trading|Ventures|Associates|Agency|Studios|Studio|Laboratories|Labs|Foundation|Institute|Company|Contractors|Constructions|Developments|Investments|Removals|Freight|Transport|Supplies|Distribution|Manufacturing|Engineering|Motors)\.?$/i.test(v)
+    ) {
+      return "ORG";
+    }
+    // full name: 2-3 capitalised words (allows hyphen/apostrophe).
+    if (/^[A-Z][a-z]+(?:[-'][A-Z][a-z]+)?(?:\s+[A-Z][a-zA-Z'-]+){1,2}$/.test(v)) return "NAME_PII";
+    return null;
+  }
+
+  // Test hook: lets the Node test suite exercise the auto-replace type
+  // inference (pure logic, no UI state needed). Not used by the extension.
+  window.GuardAI._selectionTypeHooks = { inferSelectionType, inferTypeStructural };
+  // Test hook: exposes the restore-path internals (and the module's own
+  // masker/detector instances) so tests can drive the REAL applyRules /
+  // buildSwapRules against a synthetic DOM instead of reimplementing them.
+  window.GuardAI._restoreHooks = { buildSwapRules, applyRules, swapAcrossNodes, matchNodeValue, masker, detector };
+  // Test hook: exercises the real logActivity()/panel-visibility logic (the
+  // "never auto-open, just badge, unless already visibly open" behavior)
+  // without needing to drive a full mutation-observer + response cycle.
+  window.GuardAI._panelHooks = {
+    logActivity,
+    isPanelVisible: () => !!(panelEl && panelEl.style.display !== "none"),
+    isReopenVisible: () => !!(reopenEl && reopenEl.style.display !== "none"),
+    getActivityLog: () => activityLog,
+  };
+  // Test hook: run the real per-message decoration pass on demand, instead of
+  // waiting out the scroll/mutation debounce, so tests can assert that silent
+  // mode leaves no toggle buttons on the page.
+  window.GuardAI._decorateHooks = {
+    decorateMessages,
+    findResponseRoot,
+    messageElements,
+    discoverMessages,
+    growToBubble,
+    buildSwapRules,
+  };
 
   /** Swap the popup for a small input so the user can type their own fake. */
   function msgCustomReplaceUI() {
@@ -1905,7 +2688,12 @@
     }
     if (review) review.editor = live;
     let finalText = msgEditableEl.innerText.replace(/\u00a0/g, " ").replace(/\s+$/, "");
-    await typeText(live, finalText);
+    const ok = await typeText(live, finalText);
+    if (!ok || !fullyLanded(live, finalText)) {
+      showErrorToast("The text didn't fully load into the chat box. Please try Apply again.");
+      state.lastMaskedText = null;
+      return false;
+    }
     state.lastMaskedText = finalText;
     return true;
   }
@@ -1957,11 +2745,20 @@
     const live = liveEditor();
     if (!live) {
       console.error("[GuardAI] No editor found to send from.");
+      showErrorToast("Could not find the chat input — click in the chat box and try Send again.");
       return;
     }
     let finalText = msgEditableEl ? msgEditableEl.innerText : "";
     finalText = finalText.replace(/\u00a0/g, " ").replace(/\s+$/, "");
-    await typeText(live, finalText);
+    const ok = await typeText(live, finalText);
+    // HARD GATE: only send if the full text landed atomically. Refuse to dispatch
+    // a partial/split message; keep the panel open so the user can retry Send.
+    if (!ok || !fullyLanded(live, finalText)) {
+      console.error("[GuardAI] panelSend — text did not fully land; aborting send");
+      showErrorToast("The message didn't fully load into the chat box, so it was NOT sent. Please review it and press Send again.");
+      state.lastMaskedText = null;
+      return;
+    }
     state.lastMaskedText = finalText;
     // Snapshot review so the Message tab stays populated after the soft-nav
     // that follows a successful send (handleSoftNav clears `review` but not this).
@@ -1979,6 +2776,7 @@
     dismissMaskPrompt();
     review = null;
     editMode = false;
+    suppressSends = false; // never leave the user locked out of sending
     renderMessageTab();
     updateFooter();
   }
@@ -2037,6 +2835,35 @@
   function buildSwapRules(direction) {
     const toReal = direction === "unmask";
     const raw = [];
+
+    // Name entries only, gathered first so we can tell which individual
+    // tokens (first-name-alone, last-name-alone) are AMBIGUOUS before we
+    // decide to alias them. The fake-name pool is small (16 first names x 14
+    // last names), so with enough people in one conversation it's common for
+    // two different real people to share a fake first OR last name — e.g.
+    // "Mia Clarke" and "Mia Fletcher" both use "Mia". A per-token alias for
+    // "Mia" can only point at ONE real name, so if we always create it,
+    // whichever entry happened to be masked first "wins" globally and every
+    // other person who also got "Mia" silently gets THAT stranger's real name
+    // stitched onto their row — a wrong-person data leak, not just a missed
+    // restore. We'd rather leave an ambiguous lone token unrestored (still
+    // shows the fake) than guess and hand back the wrong real person's data.
+    const nameEntries = [];
+    for (const [, entry] of masker.fakeToReal) {
+      if (entry.type === "NAME_PII" && /\s/.test(entry.fake) && /\s/.test(entry.real)) {
+        nameEntries.push(entry);
+      }
+    }
+    const tokenOwners = new Map(); // token (fake, toRealDirection-agnostic) -> Set of entries
+    for (const entry of nameEntries) {
+      const from = toReal ? entry.fake : entry.real;
+      for (const part of from.split(/\s+/)) {
+        if (part.length < 2) continue;
+        if (!tokenOwners.has(part)) tokenOwners.set(part, new Set());
+        tokenOwners.get(part).add(entry);
+      }
+    }
+
     for (const [, entry] of masker.fakeToReal) {
       const from = toReal ? entry.fake : entry.real;
       const to = toReal ? entry.real : entry.fake;
@@ -2046,9 +2873,10 @@
         const toParts = to.split(/\s+/);
         if (fromParts.length === toParts.length) {
           for (let i = 0; i < fromParts.length; i++) {
-            if (fromParts[i].length >= 2) {
-              raw.push({ key: fromParts[i], from: fromParts[i], to: toParts[i], entry });
-            }
+            if (fromParts[i].length < 2) continue;
+            const owners = tokenOwners.get(fromParts[i]);
+            if (owners && owners.size > 1) continue; // ambiguous — do not alias
+            raw.push({ key: fromParts[i], from: fromParts[i], to: toParts[i], entry });
           }
         }
       }
@@ -2089,11 +2917,74 @@
   }
 
   /**
+   * Find every rule match in ONE node's ORIGINAL text and apply them all in a
+   * single simultaneous pass. Deliberately does NOT chain: every rule is
+   * tested against the pristine input, never against another rule's output.
+   *
+   * Sequentially testing rules and re-testing against the progressively
+   * mutated string (the old approach) lets one rule's REPLACEMENT text
+   * accidentally become another rule's MATCH input in the same pass. E.g. if
+   * fake "Emma Dawson" restores to real "Grace Tomlinson" (alias "Emma"
+   * -> "Grace") while a DIFFERENT person's fake "Grace Walker" restores to
+   * "Daniel Okafor" (alias "Grace" -> "Daniel"), a chained pass on a lone
+   * "Emma" node first turns it into "Grace" and then, still in the same
+   * pass, matches the SECOND rule against that just-inserted "Grace" and
+   * turns it into "Daniel" — corrupting an already-correct restore. Matching
+   * everything against the untouched original and resolving overlaps once
+   * (longest match wins, so a full multi-word match beats any single-token
+   * alias it overlaps) makes that impossible: a rule can only ever match text
+   * that was actually there before any restoring happened.
+   */
+  function matchNodeValue(value, rules) {
+    const candidates = [];
+    for (const rule of rules) {
+      rule.re.lastIndex = 0;
+      let m;
+      while ((m = rule.re.exec(value))) {
+        candidates.push({ start: m.index, end: m.index + m[0].length, to: rule.to, key: rule.key, entry: rule.entry });
+        if (rule.re.lastIndex === m.index) rule.re.lastIndex++; // zero-length guard
+      }
+      rule.re.lastIndex = 0;
+    }
+    if (!candidates.length) return { value, used: [] };
+    candidates.sort((a, b) => (b.end - b.start) - (a.end - a.start) || a.start - b.start);
+    const kept = [];
+    for (const c of candidates) {
+      if (!kept.some((k) => c.start < k.end && c.end > k.start)) kept.push(c);
+    }
+    kept.sort((a, b) => b.start - a.start); // right-to-left so earlier offsets stay valid
+    let out = value;
+    const used = [];
+    for (const k of kept) {
+      out = out.slice(0, k.start) + k.to + out.slice(k.end);
+      used.push({ key: k.key, entry: k.entry });
+    }
+    return { value: out, used };
+  }
+
+  /**
    * Apply a set of swap rules to the text nodes inside `rootEl`. Returns the Map
    * of key -> entry actually swapped (for logging). Used both by the per-message
    * toggle and as the core of the auto-restore pass.
+   *
+   * Cross-node matching runs FIRST, against untouched text, so a full value
+   * split across DOM nodes (e.g. a table with the first and last name in
+   * separate cells) gets resolved as one whole unit before anything else
+   * touches those nodes. The per-node pass below then SKIPS any node
+   * cross-node matching already wrote to — otherwise an unrelated alias can
+   * match INSIDE the real value that was just correctly restored there (e.g.
+   * a real surname that happens to equal a different person's fake surname).
+   * The per-node pass only ever sees nodes cross-node matching had no full
+   * match for: real values that were never fake, or genuinely isolated
+   * tokens (partial echoes) with no partner to combine with. Running it the
+   * other way around let an alias mutate one half of a split name before
+   * cross-node could see the pair together, which is how two different
+   * people's fake first/last names ended up stitched into one wrong "real"
+   * name (see buildSwapRules for how ambiguous tokens are also excluded from
+   * aliasing entirely).
    */
   function applyRules(rootEl, rules) {
+    const { swapped, touchedNodes } = swapAcrossNodes(rootEl, rules);
     const editor = findEditor();
     const walker = document.createTreeWalker(rootEl, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
@@ -2104,27 +2995,16 @@
       },
     });
     const edits = [];
-    const swapped = new Map();
     let n;
     while ((n = walker.nextNode())) {
-      const original = n.nodeValue;
-      let value = original;
-      for (const rule of rules) {
-        if (rule.re.test(value)) {
-          rule.re.lastIndex = 0;
-          value = value.replace(rule.re, rule.to);
-          swapped.set(rule.key, rule.entry);
-        }
-        rule.re.lastIndex = 0;
+      if (touchedNodes.has(n)) continue; // already finalized by cross-node matching
+      const { value, used } = matchNodeValue(n.nodeValue, rules);
+      if (used.length) {
+        edits.push([n, value]);
+        for (const u of used) swapped.set(u.key, u.entry);
       }
-      if (value !== original) edits.push([n, value]);
     }
     for (const [node, value] of edits) node.nodeValue = value;
-    // Multi-word values (e.g. addresses) the AI split across separate text nodes
-    // (street on one line, suburb on the next) can't be caught node-by-node, so
-    // run a second pass that matches across node boundaries.
-    const crossed = swapAcrossNodes(rootEl, rules);
-    for (const [k, v] of crossed) swapped.set(k, v);
     return swapped;
   }
 
@@ -2134,11 +3014,21 @@
    * separators match), find any rule whose match crosses a node boundary, and
    * rewrite it in place: the full replacement goes into the first node of the
    * span and the remainder of the matched text is removed from the others.
+   *
+   * Returns { swapped, touchedNodes }. `touchedNodes` lists every node this
+   * function wrote to (the one that received the replacement text AND any
+   * node it emptied out) — the caller's per-node pass must skip all of them,
+   * not just avoid re-adding the same rule. Without that, an unrelated
+   * single-token alias can match INSIDE the real value that was just
+   * correctly written here (common names are common: a real surname can
+   * easily equal a different masked person's fake surname), quietly
+   * corrupting a restore that already succeeded.
    */
   function swapAcrossNodes(rootEl, rules) {
     const swapped = new Map();
+    const touchedNodes = new Set();
     const multi = rules.filter((r) => r.multi);
-    if (!multi.length) return swapped;
+    if (!multi.length) return { swapped, touchedNodes };
 
     const editor = findEditor();
     const nodes = [];
@@ -2152,7 +3042,7 @@
     });
     let n;
     while ((n = walker.nextNode())) nodes.push(n);
-    if (nodes.length < 2) return swapped; // need a boundary to span
+    if (nodes.length < 2) return { swapped, touchedNodes }; // need a boundary to span
 
     let combined = "";
     const spans = []; // {node, start, end} positions within `combined`
@@ -2169,7 +3059,7 @@
       let m;
       while ((m = rule.re.exec(combined))) {
         // Only handle matches that actually cross a boundary; within-node
-        // matches were already done by the caller's per-node pass.
+        // matches are left to the caller's per-node pass.
         if (m[0].indexOf("\n") !== -1) {
           edits.push({ start: m.index, end: m.index + m[0].length, to: rule.to, rule });
         }
@@ -2177,7 +3067,7 @@
       }
       rule.re.lastIndex = 0;
     }
-    if (!edits.length) return swapped;
+    if (!edits.length) return { swapped, touchedNodes };
 
     // Drop overlapping matches, then apply from last to first so earlier
     // offsets stay valid as node values change.
@@ -2192,16 +3082,19 @@
     }
     for (let i = kept.length - 1; i >= 0; i--) {
       const e = kept[i];
-      applyCombinedReplacement(spans, e.start, e.end - e.start, e.to);
+      const written = applyCombinedReplacement(spans, e.start, e.end - e.start, e.to);
+      for (const node of written) touchedNodes.add(node);
       swapped.set(e.rule.key, e.rule.entry);
     }
-    return swapped;
+    return { swapped, touchedNodes };
   }
 
-  /** Write `replacement` across the text nodes covered by [start, start+length). */
+  /** Write `replacement` across the text nodes covered by [start, start+length).
+   * Returns the list of nodes actually written to (placed + emptied). */
   function applyCombinedReplacement(spans, start, length, replacement) {
     const end = start + length;
     let placed = false;
+    const written = [];
     for (const sp of spans) {
       if (sp.end <= start || sp.start >= end) continue; // node outside the span
       const localStart = Math.max(0, start - sp.start);
@@ -2209,8 +3102,10 @@
       const before = sp.node.nodeValue.slice(0, localStart);
       const after = sp.node.nodeValue.slice(localEnd);
       sp.node.nodeValue = placed ? before + after : before + replacement + after;
+      written.push(sp.node);
       placed = true;
     }
+    return written;
   }
 
   /* ------------------------------------------------------------------ *
@@ -2222,19 +3117,59 @@
     // Decorate and keep in sync BOTH the AI's response bubbles and the user's
     // own sent bubbles, so each can flip between real data and the masked text
     // the AI actually saw.
+    //
+    // These are the HAND-TUNED selectors only, and most supported platforms
+    // have none: every genericConfig() site (Copilot, Perplexity, Poe,
+    // Mistral, HuggingFace and ~18 others) returns an empty list here. That
+    // used to mean those sites simply never got the toggle — masking worked,
+    // but "Show what AI sees" never appeared. discoverMessages() below is the
+    // selector-free fallback that covers them, and it also rescues a
+    // configured platform whose selectors have gone stale after a redesign.
     const sels = [];
     if (CONFIG.responseMessage) sels.push(...CONFIG.responseMessage);
-    else sels.push('[data-message-author-role="assistant"]');
     if (CONFIG.userMessage) sels.push(...CONFIG.userMessage);
     return sels;
   }
 
+  /**
+   * The subtree we scan for AI responses (auto-restore) and decorate with
+   * per-message toggles.
+   *
+   * A configured root only counts if it actually CONTAINS messages. Sites
+   * rebuild their DOM constantly, and the failure that motivated this check
+   * is nastier than a selector simply going stale: on claude.ai the old
+   * "div.flex-1.flex.flex-col" root kept on matching an element that no
+   * longer held any part of the conversation, so we silently scanned an empty
+   * subtree — auto-restore and the toggle buttons both quietly did nothing,
+   * with no error anywhere. A root that matches but is empty is WORSE than no
+   * match at all, because the plain `if (el) return el` above treated it as a
+   * success and never tried the remaining fallbacks.
+   *
+   * So: prefer the first configured root that contains a known message
+   * element; if a selector matches but holds no messages, keep looking. Fall
+   * back to the first bare match (platforms with no message selectors
+   * configured, where "contains messages" is unknowable), then document.body.
+   */
   function findResponseRoot() {
+    const msgSel = messageSelectors().join(",");
+    let firstMatch = null;
     for (const sel of CONFIG.responseRoot) {
-      const el = document.querySelector(sel);
-      if (el) return el;
+      let el;
+      try {
+        el = document.querySelector(sel);
+      } catch {
+        continue; // malformed selector — skip rather than break the pass
+      }
+      if (!el) continue;
+      if (!firstMatch) firstMatch = el;
+      if (!msgSel) continue; // nothing to verify against on this platform
+      try {
+        if (el.querySelector(msgSel)) return el;
+      } catch {
+        /* malformed message selector — fall through to the bare match */
+      }
     }
-    return document.body;
+    return firstMatch || document.body;
   }
 
   function setToggleLabel(btn, msgEl) {
@@ -2267,14 +3202,9 @@
    */
   function syncMessageViewsToDefault() {
     const root = findResponseRoot();
-    let msgs;
-    try {
-      msgs = root.querySelectorAll(messageSelectors().join(","));
-    } catch {
-      return;
-    }
     const def = state.autoRestore ? "real" : "fake";
     const rules = buildSwapRules(state.autoRestore ? "unmask" : "remask");
+    const msgs = messageElements(root, buildSwapRules("unmask").concat(buildSwapRules("remask")));
     msgs.forEach((el) => {
       if (el.getAttribute("data-guardai-lock")) return; // user pinned this one
       el.setAttribute("data-guardai-view", def);
@@ -2284,17 +3214,248 @@
     });
   }
 
-  /** Add a toggle button to any assistant message that doesn't have one yet. */
-  function decorateMessages(root) {
-    const sel = messageSelectors().join(",");
-    let msgs;
-    try {
-      msgs = root.querySelectorAll(sel);
-    } catch {
-      return;
+  /** Remove every per-message toggle button we've injected. */
+  function removeMessageToggles() {
+    document.querySelectorAll(".guardai-msgtoggle").forEach((el) => el.remove());
+  }
+
+  /** True if `rules` matches anywhere in `text` — cheap existence probe, no
+   * replacement/positions computed (unlike matchNodeValue, which builds the
+   * full result). Used to decide whether a message has anything to toggle
+   * at all before we bother giving it a button. */
+  function anyRuleMatches(text, rules) {
+    for (const rule of rules) {
+      rule.re.lastIndex = 0;
+      const hit = rule.re.test(text);
+      rule.re.lastIndex = 0;
+      if (hit) return true;
     }
+    return false;
+  }
+
+  /**
+   * A message only gets the "Show what AI sees"/"Show real data" button if it
+   * actually contains something masked/maskable — otherwise the button is
+   * noise on every ordinary reply that has nothing to do with the feature.
+   * Checked against BOTH directions' rules because the message may currently
+   * be displaying either the fake text (unmask rules would fire) or the real
+   * text (remask rules would fire), depending on auto-restore/pin state.
+   *
+   * Checked per TEXT NODE, not against msgEl.textContent as one concatenated
+   * string — textContent glues adjacent nodes together with no separator, so
+   * a value sitting right next to other text (most commonly a table cell:
+   * "PHONE" immediately followed by "0423 990 894" with no space between
+   * them) loses the word-boundary regex has to see right at that seam, and
+   * a real match gets missed. Each individual text node's own content still
+   * has clean boundaries at its own start/end, which is exactly how the real
+   * restore logic (matchNodeValue) already looks at it — this just mirrors
+   * that so detection and restoration agree on what counts as a match.
+   */
+  function hasSwappableData(msgEl, unmaskRules, remaskRules) {
+    const walker = document.createTreeWalker(msgEl, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        return node.nodeValue && node.nodeValue.trim()
+          ? NodeFilter.FILTER_ACCEPT
+          : NodeFilter.FILTER_REJECT;
+      },
+    });
+    let n;
+    while ((n = walker.nextNode())) {
+      if (anyRuleMatches(n.nodeValue, unmaskRules) || anyRuleMatches(n.nodeValue, remaskRules)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Finding message bubbles WITHOUT per-platform selectors.
+   *
+   * Only a handful of platforms have hand-tuned responseMessage/userMessage
+   * selectors. For everything else there is no "message bubble" class we can
+   * know in advance, so we work backwards from the thing we DO know: the
+   * masked/real values themselves. A text node that a swap rule matches is
+   * sitting inside exactly one message, so the message can be found by
+   * climbing out of it.
+   *
+   * The climb stops at two things, neither of which needs any knowledge of a
+   * site's DOM: an ancestor that reaches into a DIFFERENT match (so it is the
+   * conversation, not a message), and an ancestor that is much taller than
+   * what we already have (same conclusion, by geometry, for the case where the
+   * rest of the conversation happens to hold no matches at all).
+   * ------------------------------------------------------------------ */
+
+  /** Marks an element we identified generically, so later passes recognise the
+   * same bubble again without re-deriving it (and after it has been rewritten
+   * to the fake text, where the "real" rules may no longer match). */
+  const MSG_ATTR = "data-guardai-msg";
+
+  /** Things a message bubble is definitely not, and must never be grown into:
+   * GuardAI's own UI (the panel lists real AND fake values, so it matches
+   * every rule), and the composer (rewriting the box the user is typing in
+   * would corrupt their draft). */
+  const NOT_A_MESSAGE =
+    '[contenteditable="true"], textarea, input, form, .guardai-panel, .guardai-reopen, .guardai-msgtoggle';
+
+  /** Inline elements are not messages. A value split across <b>/<span> pieces
+   * inside one paragraph must resolve to that one paragraph, or the same
+   * message ends up with a button per fragment. */
+  function blockAncestor(el, root) {
+    let cur = el;
+    while (cur && cur !== root && cur.parentElement) {
+      let display = "";
+      try {
+        display = (window.getComputedStyle(cur).display || "").toLowerCase();
+      } catch {
+        display = "";
+      }
+      if (display && display !== "inline" && display !== "inline-block" && display !== "contents") {
+        return cur;
+      }
+      cur = cur.parentElement;
+    }
+    return cur || el;
+  }
+
+  /**
+   * Grow a seed outwards to the element that behaves like the whole message
+   * bubble. Stops below `root`, at GuardAI's own UI, at the composer, at an
+   * ancestor that reaches into another match, and at a big height jump.
+   *
+   * Erring small is deliberate. A message split across two toggles is untidy;
+   * a single toggle spanning two messages rewrites text the user never pointed
+   * at, which is the failure worth avoiding.
+   */
+  function growToBubble(seed, root, seeds) {
+    let el = seed;
+    if (!el || el === root || !root.contains(el)) return null;
+    let h = el.getBoundingClientRect().height;
+    while (el.parentElement && el.parentElement !== root && el.parentElement !== document.body) {
+      const p = el.parentElement;
+      try {
+        if (p.querySelector(NOT_A_MESSAGE)) break; // composer / our own UI inside
+      } catch {
+        break;
+      }
+      // Reaches into a match that is not ours: that is another message.
+      if (seeds && seeds.some((o) => o !== seed && !el.contains(o) && p.contains(o))) break;
+      const ph = p.getBoundingClientRect().height;
+      // 1.6x + 80px of slack: padding, an avatar row and an action bar are all
+      // normal parts of one bubble; a second message is not.
+      if (ph > h * 1.6 + 80) break;
+      el = p;
+      h = ph;
+    }
+    return el;
+  }
+
+  /**
+   * Find message bubbles on a platform we have no selectors for, by locating
+   * the masked/real values and climbing out of them.
+   */
+  function discoverMessages(root, rules) {
+    if (!rules || !rules.length) return [];
+    const seeds = [];
+    let walker;
+    try {
+      walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+        acceptNode(node) {
+          return node.nodeValue && node.nodeValue.trim()
+            ? NodeFilter.FILTER_ACCEPT
+            : NodeFilter.FILTER_REJECT;
+        },
+      });
+    } catch {
+      return [];
+    }
+    let n;
+    let scanned = 0;
+    while ((n = walker.nextNode())) {
+      // A long conversation can hold tens of thousands of text nodes and this
+      // runs on a debounce after every DOM change. Cap the work rather than
+      // janking the page.
+      if (++scanned > 6000) break;
+      if (!anyRuleMatches(n.nodeValue, rules)) continue;
+      let el = n.parentElement;
+      if (!el) continue;
+      try {
+        if (el.closest(NOT_A_MESSAGE)) continue;
+        // Already inside a bubble found on an earlier pass. Skipping it
+        // matters: NOT_A_MESSAGE includes our own button, so re-deriving a
+        // decorated bubble would stop the climb below it and hang a second,
+        // nested button off the same message on every later pass.
+        if (el.closest("[" + MSG_ATTR + "]")) continue;
+      } catch {
+        continue;
+      }
+      el = blockAncestor(el, root);
+      if (!el || el === root) continue;
+      if (!seeds.includes(el)) seeds.push(el);
+    }
+
+    const found = [];
+    for (const seed of seeds) {
+      const bubble = growToBubble(seed, root, seeds);
+      if (bubble && !found.includes(bubble)) found.push(bubble);
+    }
+    // A candidate that CONTAINS another candidate spans more than one message
+    // (the height heuristic over-climbed, usually because the messages around
+    // it are short). Keep the inner ones; one button per message is the point.
+    return found.filter((a) => !found.some((b) => b !== a && a.contains(b)));
+  }
+
+  /**
+   * Every element that should carry a toggle: the configured selectors where a
+   * platform has them, bubbles we previously discovered, and — when neither
+   * turns anything up — a fresh generic discovery pass.
+   */
+  function messageElements(root, rules) {
+    const out = [];
+    const sel = messageSelectors().join(",");
+    let configured = [];
+    if (sel) {
+      try {
+        configured = Array.from(root.querySelectorAll(sel));
+      } catch {
+        /* stale/malformed selector — discovery below covers it */
+      }
+    }
+    out.push(...configured);
+    try {
+      out.push(...root.querySelectorAll("[" + MSG_ATTR + "]"));
+    } catch {
+      /* ignore */
+    }
+    // Gated on the CONFIGURED selectors, not on `out`: bubbles found on an
+    // earlier pass are already in `out`, and gating on that would run
+    // discovery exactly once and then never again — every message after the
+    // first would silently lose its button. Discovery therefore runs on every
+    // pass for a platform with no selectors, and as a rescue for a configured
+    // platform whose selectors have stopped matching after a redesign.
+    if (!configured.length) {
+      for (const el of discoverMessages(root, rules)) {
+        el.setAttribute(MSG_ATTR, "1");
+        out.push(el);
+      }
+    }
+    return Array.from(new Set(out));
+  }
+
+  /** Add a toggle button to any assistant message that doesn't have one yet
+   * AND actually has masked/real data in it worth toggling. */
+  function decorateMessages(root) {
+    // Silent "Masking mode" means the extension leaves no visible trace on the
+    // page — including these per-message buttons. Auto-restore is unaffected:
+    // runUnmaskPass walks the DOM itself and only consults data-guardai-view
+    // for messages the user pinned by hand, which can't happen without buttons.
+    if (state.maskingEnabled) return;
+    if (masker.size === 0) return; // nothing masked yet — nothing to toggle anywhere
+    const unmaskRules = buildSwapRules("unmask");
+    const remaskRules = buildSwapRules("remask");
+    const msgs = messageElements(root, unmaskRules.concat(remaskRules));
     msgs.forEach((msgEl) => {
       if (msgEl.querySelector(":scope > .guardai-msgtoggle")) return; // already done
+      if (!hasSwappableData(msgEl, unmaskRules, remaskRules)) return; // nothing to show here
       if (!msgEl.getAttribute("data-guardai-view")) {
         msgEl.setAttribute("data-guardai-view", state.autoRestore ? "real" : "fake");
       }
@@ -2331,7 +3492,17 @@
     }, 120);
   }
 
-  /** Remove every piece of GuardAI UI we've injected into the page. */
+  // Whether the full panel was visibly open at the moment the master toggle
+  // was switched off, so re-enabling can put the UI back exactly as the user
+  // left it. Purely a VIEW flag — it never gates what is stored.
+  let panelWasOpenBeforeDisable = false;
+
+  /** Hide every piece of GuardAI UI we've injected into the page.
+   *
+   * Hides, never wipes: the activity log and the fake<->real mapping are the
+   * user's data and must survive the master toggle untouched. Turning GuardAI
+   * off means "stop doing things and get out of the way", not "forget what
+   * you already found" — only Clear session / Clear may delete any of it. */
   function teardownUI() {
     document
       .querySelectorAll(
@@ -2339,19 +3510,40 @@
       )
       .forEach((el) => el.remove());
     dismissMaskPrompt();
+    panelWasOpenBeforeDisable = !!(panelEl && panelEl.style.display !== "none");
     if (panelEl) panelEl.style.display = "none";
     if (reopenEl) reopenEl.style.display = "none";
   }
 
   /**
-   * React to the master on/off toggle flipping at runtime. Off -> strip all
+   * React to the master on/off toggle flipping at runtime. Off -> hide all
    * injected UI and stop (the send listeners and observer callbacks already
-   * short-circuit on !state.enabled). On -> resume a restore + decorate pass.
+   * short-circuit on !state.enabled). On -> resume scanning AND put the
+   * activity UI back.
+   *
+   * Restoring the UI matters as much as resuming the scan: teardownUI() hides
+   * the badge, and nothing else re-shows it on re-enable, so previously
+   * masked history stayed invisible until the next full page load (only
+   * startObserving() had the "saved log -> showReopen()" logic). The data was
+   * always still on disk, but from the user's side an off/on cycle was
+   * indistinguishable from having wiped their history.
    */
   function applyEnabledState() {
     if (state.enabled) {
       scheduleUnmask();
       scheduleDecorate();
+      // Put the activity UI back the way the user left it. Re-opening a panel
+      // they had open is restoring their own state, not auto-popping it —
+      // otherwise fall back to the collapsed badge, and show nothing at all
+      // when there's no history to advertise.
+      if (panelWasOpenBeforeDisable) {
+        panelClosed = false;
+        ensurePanel();
+        renderPanel();
+      } else if (activityLog.length) {
+        showReopen();
+      }
+      panelWasOpenBeforeDisable = false;
     } else {
       teardownUI();
     }
@@ -2396,29 +3588,36 @@
     // this the partial echo never matches and the response stays masked.
     const rules = buildSwapRules("unmask");
 
-    const edits = [];
     const swappedEntries = new Map(); // fake (or alias) -> entry (for the log)
+
+    // Cross-node matching FIRST, before anything else touches the DOM — same
+    // reasoning as applyRules() above: a full name split across nodes (e.g.
+    // separate table cells) must be resolved as one unit before the per-node
+    // pass below has a chance to mutate one half of it via a single-token
+    // alias, or re-match an unrelated alias inside the real value it just
+    // wrote. Only runs when auto-restore is on; read-only detection (off)
+    // must never write to the DOM.
+    let touchedNodes = new Set();
+    if (state.autoRestore) {
+      const crossed = swapAcrossNodes(root, rules);
+      touchedNodes = crossed.touchedNodes;
+      for (const [k, v] of crossed.swapped) swappedEntries.set(k, v);
+    }
+
+    const edits = [];
     let n;
     while ((n = walker.nextNode())) {
-      const original = n.nodeValue;
-      let value = original;
-      for (const rule of rules) {
-        if (rule.re.test(value)) {
-          rule.re.lastIndex = 0;
-          // Only rewrite the DOM when auto-restore is on. When off we just note
-          // which fakes appear so the user can reveal them in the panel.
-          if (state.autoRestore) value = value.replace(rule.re, rule.to);
-          swappedEntries.set(rule.key, rule.entry);
-        }
-        rule.re.lastIndex = 0;
+      if (touchedNodes.has(n)) continue; // already finalized by cross-node matching
+      const { value, used } = matchNodeValue(n.nodeValue, rules);
+      if (used.length) {
+        // Only rewrite the DOM when auto-restore is on. When off we just note
+        // which fakes appear so the user can reveal them in the panel.
+        if (state.autoRestore) edits.push([n, value]);
+        for (const u of used) swappedEntries.set(u.key, u.entry);
       }
-      if (value !== original) edits.push([n, value]);
     }
     if (state.autoRestore) {
       for (const [node, value] of edits) node.nodeValue = value;
-      // Catch multi-word values (addresses) the AI wrapped across text nodes.
-      const crossed = swapAcrossNodes(root, rules);
-      for (const [k, v] of crossed) swappedEntries.set(k, v);
     }
 
     // With auto-restore OFF, keep any message the user manually flipped to the
@@ -2468,10 +3667,13 @@
       requestAnimationFrame(startObserving);
       return;
     }
-    // Restore the running activity panel if this conversation already has a log.
-    if (activityLog.length) {
-      ensurePanel();
-      renderPanel();
+    // If this page already has saved history, show the collapsed badge (not
+    // the full panel) — GuardAI must never pop the panel open just because
+    // you opened/reloaded a chat site. Only if GuardAI is enabled: without
+    // that check, a reload while disabled would bring the badge back just
+    // because past activity was saved, even though everything is off.
+    if (activityLog.length && state.enabled) {
+      showReopen();
     }
     observer.observe(document.body, { childList: true, subtree: true, characterData: true });
     // Decorate messages as the user scrolls: long conversations are virtualised,
@@ -2491,10 +3693,15 @@
    * swapped out. On every soft nav we reset that transient state, make sure the
    * observer is attached to the live <body>, and re-run a restore pass.
    * ------------------------------------------------------------------ */
-  let lastHref = location.href;
+  // Track the CONVERSATION path, not the full href. ChatGPT/Claude fire
+  // history.replaceState with changed query strings / hashes (composer state,
+  // model param, scroll anchors) WITHIN the same conversation; those must not be
+  // treated as navigation, or they'd wipe an in-progress review mid-send and
+  // null-deref it. Only a pathname change means we actually switched chats.
+  let lastPath = location.pathname;
   function handleSoftNav() {
-    if (location.href === lastHref) return;
-    lastHref = location.href;
+    if (location.pathname === lastPath) return;
+    lastPath = location.pathname;
     state.lastMaskedText = null; // don't carry a bypass into a new conversation
     bypassNext = false;
     dismissMaskPrompt();
@@ -2538,14 +3745,26 @@
   async function boot() {
     // Load persisted state immediately so enabled/masking/auto-restore are
     // correct as early as possible. These need no DOM, so don't wait for it.
-    await loadSettings();
-    await masker.load();
-    await loadActivity();
+    // Each step is independently fault-isolated (loadSettings/masker.load/
+    // loadActivity all catch their own errors and fall back to safe
+    // defaults) but this catch is a second line of defense: startObserving()
+    // — which wires up the response observer that drives auto-restore — must
+    // run regardless of what happens above it. Before this, an unhandled
+    // rejection from any one step (e.g. "Extension context invalidated"
+    // after a reload) would silently skip everything after it, leaving the
+    // extension looking loaded but never actually monitoring the page.
+    try {
+      await loadSettings();
+      await masker.load();
+      await loadActivity();
+    } catch (err) {
+      console.warn("[GuardAI] boot step failed, continuing with defaults:", err);
+    }
     // Warm up the optional NLP layer in the background (no-op if disabled).
     nlp.init().catch(() => {});
 
     startObserving();
-    console.info(`[GuardAI] active on ${CONFIG.name}. All processing is local.`);
+    console.info(`[GuardAI] active on ${CONFIG.name}. All processing is local. [build: 2026-07-09-upgrade-s1-s5]`);
   }
 
   // Initialise immediately on injection — never gated behind DOMContentLoaded or

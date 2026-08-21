@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GuardAI — Settings</title>
+    <style>
+/* GuardAI — settings page styles.
+ * Same design tokens as popup.html (monochrome chrome, green as the one
+ * brand/health accent, red reserved for destructive actions) so this reads
+ * as the same product, not a bolted-on extra page. A normal tab, not a
+ * popup bubble, so none of popup.html's first-paint-sizing workaround is
+ * needed here — this can be a completely ordinary page. */
+
+:root {
+  --bg:        #0d0d0d;
+  --bg-card:   #171717;
+  --bg-card-2: #212121;
+  --border:    #2e2e2e;
+  --text:      #f4f4f5;
+  --text-dim:  #9a9a9f;
+  --accent:    #f4f4f5;
+  --on-accent: #0d0d0d;
+  --track:     #2e2e2e;
+  --danger:    #f0564b;
+  --good:      #2ea043;
+  --radius:    12px;
+  --slider-off: #333333;
+}
+body.gd-light {
+  --bg:        #ffffff;
+  --bg-card:   #f6f6f7;
+  --bg-card-2: #ececee;
+  --border:    #dcdce0;
+  --text:      #0a0a0a;
+  --text-dim:  #6a6a70;
+  --accent:    #0a0a0a;
+  --on-accent: #ffffff;
+  --track:     #e2e2e6;
+  --slider-off: #cbcbd2;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  transition: background 0.18s, color 0.18s;
+}
+
+.wrap { max-width: 720px; margin: 0 auto; padding: 32px 24px 64px; }
+
+header.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 28px;
+}
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand img { width: 32px; height: 32px; display: block; }
+.brand h1 { font-size: 20px; font-weight: 700; }
+.brand p { font-size: 12px; color: var(--text-dim); }
+.back-link {
+  font-size: 13px;
+  color: var(--text-dim);
+  text-decoration: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 12px;
+  transition: border-color 0.15s, color 0.15s;
+}
+.back-link:hover { color: var(--text); border-color: var(--text-dim); }
+
+/* Connect to your company. Deliberately the first thing on this page and
+   deliberately plain: entering a code here changes who can see something, so
+   it explains itself before it asks, and says exactly what is shared. */
+.company {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 22px;
+  margin-bottom: 24px;
+}
+.company h2 { font-size: 15px; margin-bottom: 6px; }
+.company > p { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; }
+.company__row { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+.company__row input {
+  flex: 1; min-width: 180px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); font-family: inherit; font-size: 14px;
+  letter-spacing: .08em; text-transform: uppercase;
+  padding: 10px 12px;
+}
+.company__row input:focus { outline: none; border-color: var(--text-dim); }
+.company__row input::placeholder { color: var(--text-dim); letter-spacing: .08em; }
+.company__btn {
+  background: var(--accent); color: var(--on-accent);
+  border: 0; border-radius: 8px; padding: 10px 18px;
+  font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.company__btn:disabled { opacity: .5; cursor: default; }
+.company__msg { margin-top: 12px; font-size: 12.5px; line-height: 1.45; display: none; }
+.company__msg.is-on { display: block; }
+.company__msg.is-bad { color: var(--danger); }
+.company__shared {
+  margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border);
+  font-size: 12px; color: var(--text-dim); line-height: 1.55;
+}
+.company__shared b { color: var(--text); font-weight: 600; }
+
+/* Connected state */
+.company__live { display: none; align-items: flex-start; gap: 10px; }
+.company.is-connected .company__live { display: flex; }
+.company.is-connected .company__form { display: none; }
+.company__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); margin-top: 6px; flex: 0 0 8px; }
+.company__live div { flex: 1; }
+.company__live strong { font-size: 14px; color: var(--text); display: block; margin-bottom: 3px; }
+.company__live span { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; }
+.company__leave {
+  background: none; border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text-dim); font-family: inherit; font-size: 12px;
+  padding: 7px 12px; cursor: pointer;
+}
+.company__leave:hover { color: var(--danger); border-color: var(--danger); }
+
+.intro {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 20px;
+  margin-bottom: 22px;
+}
+.intro h2 { font-size: 17px; margin-bottom: 6px; }
+.intro p { font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+.bulk-actions { display: flex; gap: 8px; margin-top: 14px; }
+.bulk-btn {
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--bg-card-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s, background 0.15s;
+}
+.bulk-btn:hover { border-color: var(--text-dim); }
+
+.group { margin-bottom: 24px; }
+.group__title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+  padding-left: 2px;
+}
+.group__list {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.cat-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.cat-row:last-child { border-bottom: none; }
+.cat-row__text { min-width: 0; }
+.cat-row__title { display: block; font-weight: 600; font-size: 13.5px; }
+.cat-row__desc { display: block; font-size: 11.5px; color: var(--text-dim); margin-top: 2px; }
+.cat-row__badge {
+  display: inline-block;
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 7px;
+  margin-top: 5px;
+}
+
+/* Toggle switch — identical shape/behaviour to popup.html's .gd-switch. */
+.gd-switch { position: relative; display: inline-block; width: 42px; height: 24px; flex: none; }
+.gd-switch input { opacity: 0; width: 0; height: 0; }
+.gd-slider {
+  position: absolute; inset: 0; cursor: pointer;
+  background: var(--slider-off); border-radius: 24px; transition: background 0.2s;
+}
+.gd-slider::before {
+  content: ""; position: absolute; height: 18px; width: 18px;
+  left: 3px; bottom: 3px; background: var(--text); border-radius: 50%;
+  transition: transform 0.2s, background 0.2s;
+}
+.gd-switch input:checked + .gd-slider { background: var(--good); }
+.gd-switch input:checked + .gd-slider::before { transform: translateX(18px); background: #fff; }
+.gd-switch input:focus-visible + .gd-slider { outline: 2px solid var(--text); outline-offset: 2px; }
+
+footer.note {
+  margin-top: 28px;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header class="top">
+        <div class="brand">
+          <img src="icons/icon48.png" alt="" />
+          <div>
+            <h1>What GuardAI masks</h1>
+            <p>Turn detection on or off, category by category.</p>
+          </div>
+        </div>
+        <a href="#" id="back-link" class="back-link">&larr; Back</a>
+      </header>
+
+      <section class="company" id="company">
+        <div class="company__form">
+          <h2>Connect to your company</h2>
+          <p>
+            If your workplace runs GuardAI, enter the invite code your admin gave
+            you. There is no account and no password: the code is the only step,
+            and you can disconnect whenever you like.
+          </p>
+          <div class="company__row">
+            <input id="company-code" type="text" placeholder="GA-XXXX-XXXX"
+                   autocomplete="off" spellcheck="false" maxlength="13" />
+            <button class="company__btn" id="company-connect" type="button">Connect</button>
+          </div>
+          <p class="company__msg" id="company-msg" role="status" aria-live="polite"></p>
+          <p class="company__shared">
+            Once connected, your admin can see <b>how many</b> items were masked and
+            <b>what kind</b> they were, on <b>which AI platform</b> and <b>when</b>.
+            They cannot see the values themselves, the messages around them, or
+            anything you typed. Those never leave this device, connected or not.
+          </p>
+        </div>
+
+        <div class="company__live">
+          <span class="company__dot"></span>
+          <div>
+            <strong>Connected to <span id="company-name">your company</span></strong>
+            <span>Your masking activity is visible to your admin: counts and
+                  categories only, never the values or your messages.</span>
+          </div>
+          <button class="company__leave" id="company-leave" type="button">Disconnect</button>
+        </div>
+      </section>
+
+      <section class="intro">
+        <h2>Every category GuardAI can detect</h2>
+        <p>
+          All categories are on by default. Turning one off means GuardAI stops
+          looking for it entirely — it won't be masked, and it won't be flagged
+          in the warning card either. This changes what's detected; it doesn't
+          change how each category is recognised.
+        </p>
+        <div class="bulk-actions">
+          <button type="button" class="bulk-btn" id="enable-all">Enable all</button>
+          <button type="button" class="bulk-btn" id="disable-all">Disable all</button>
+        </div>
+      </section>
+
+      <div id="groups"></div>
+
+      <footer class="note">Changes apply immediately — no need to reload the page you're chatting on.</footer>
+    </div>
+
+    <script src="settings.js"></script>
+  </body>
+</html>

@@ -25,6 +25,21 @@
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
+/* The monochrome brand shield mark, sized to the surrounding text (1em) and
+ * inheriting its colour via currentColor so it stays crisp in both themes. */
+.guardai-shield-svg { width: 1em; height: 1em; display: block; }
+.guardai-prompt__shield,
+.guardai-panel__shield,
+.guardai-reopen__shield,
+.guardai-toast__shield { display: inline-flex; align-items: center; }
+
+/* Honour a user's reduced-motion preference across every injected surface. */
+@media (prefers-reduced-motion: reduce) {
+  .guardai-prompt, .guardai-panel, .guardai-toast, .guardai-warning,
+  .guardai-review-pop { animation: none !important; }
+  .guardai-toast { transition: opacity 0.01s !important; }
+}
+
 .guardai-warning__header {
   display: flex;
   align-items: center;
@@ -104,8 +119,8 @@
   transition: 0.15s;
 }
 .guardai-btn:hover { filter: brightness(1.15); }
-.guardai-btn--mask { background: #238636; border-color: #2ea043; color: #fff; }
-.guardai-btn--send { background: #1c2230; color: #d29922; border-color: rgba(210,153,34,0.4); }
+.guardai-btn--mask { background: #f4f4f5; border-color: #f4f4f5; color: #111; }
+.guardai-btn--send { background: #1c2230; color: #e6edf3; border-color: #3a3a3a; }
 .guardai-btn--cancel { background: transparent; color: #8b949e; }
 
 /* ---- Mask confirmation toast (bottom-right) ---- */
@@ -119,7 +134,7 @@
   background: #161b22;
   color: #e6edf3;
   border: 1px solid #2a313c;
-  border-left: 3px solid #3fb950;
+  border-left: 3px solid #f4f4f5;
   border-radius: 10px;
   box-shadow: 0 10px 34px rgba(0, 0, 0, 0.5);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -130,7 +145,8 @@
   transition: opacity 0.25s ease, transform 0.25s ease;
 }
 .guardai-toast--in { opacity: 1; transform: translateY(0); }
-.guardai-toast--error { border-left-color: #f85149; }
+/* The one functional colour: a red accent only when something went wrong. */
+.guardai-toast--error { border-left-color: #f0564b; }
 .guardai-toast__head {
   font-weight: 700;
   display: flex;
@@ -138,7 +154,7 @@
   gap: 6px;
   margin-bottom: 8px;
 }
-.guardai-toast__shield { font-size: 15px; }
+.guardai-toast__shield { font-size: 15px; display: inline-flex; }
 .guardai-toast__list { display: flex; flex-direction: column; gap: 5px; max-height: 180px; overflow-y: auto; }
 .guardai-toast__row {
   display: flex;
@@ -149,10 +165,11 @@
   border-radius: 6px;
   padding: 5px 8px;
 }
+/* real -> fake shown by weight/strike, not colour (matches the popup log):
+ * the real value is struck-through + dimmed, the fake is bright + bold. */
 .guardai-toast__real {
-  color: #f85149;
+  color: #8b949e;
   text-decoration: line-through;
-  opacity: 0.85;
   max-width: 42%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -160,8 +177,8 @@
 }
 .guardai-toast__arrow { color: #8b949e; flex: none; }
 .guardai-toast__fake {
-  color: #3fb950;
-  font-weight: 600;
+  color: #f4f4f5;
+  font-weight: 700;
   max-width: 42%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -169,18 +186,16 @@
 }
 
 /* ---- Unmask (auto-decryption) toast: fake -> real, reverse styling ---- */
-.guardai-toast--unmask { border-left-color: #58a6ff; }
+.guardai-toast--unmask { border-left-color: #6a6a6f; }
 .guardai-toast--unmask .guardai-toast__fake {
-  color: #f85149;
+  color: #8b949e;
   font-weight: 400;
   text-decoration: line-through;
-  opacity: 0.85;
 }
 .guardai-toast--unmask .guardai-toast__real {
-  color: #3fb950;
-  font-weight: 600;
+  color: #f4f4f5;
+  font-weight: 700;
   text-decoration: none;
-  opacity: 1;
 }
 
 /* =====================================================================
@@ -273,7 +288,10 @@
   background: #d8d8d8;
   transition: transform 0.18s;
 }
-.guardai-panel__switch--on { background: #4CAF82; border-color: #4CAF82; }
+/* "On" = green, same intentional accent as the send button above and the
+ * popup's toggles — a clear "protected/enabled" signal instead of blending
+ * into the monochrome chrome around it. */
+.guardai-panel__switch--on { background: #2ea043; border-color: #2ea043; }
 .guardai-panel__switch--on::after { transform: translateX(19px); background: #fff; }
 
 /* ---- Pill tab switcher ---- */
@@ -355,9 +373,11 @@
   flex-direction: column;
   gap: 8px;
 }
-.guardai-panel__row--mask { border-left-color: #4CAF82; }
-.guardai-panel__row--unmask { border-left-color: #6B9FFF; }
-.guardai-panel__row--pending { border-left-color: #FFD166; }
+/* Row kind shown by border-weight/tone, not colour: mask = bright, unmask =
+ * mid, pending = dim. Keeps the three states distinguishable in greyscale. */
+.guardai-panel__row--mask { border-left-color: #f4f4f5; }
+.guardai-panel__row--unmask { border-left-color: #6e6e73; }
+.guardai-panel__row--pending { border-left-color: #444448; }
 
 .guardai-panel__rowhead {
   display: flex;
@@ -372,14 +392,43 @@
   letter-spacing: 0.05em;
   color: #8a8a8f;
 }
-.guardai-panel__row--mask .guardai-panel__tag { color: #4CAF82; }
-.guardai-panel__row--unmask .guardai-panel__tag { color: #6B9FFF; }
-.guardai-panel__row--pending .guardai-panel__tag { color: #FFD166; }
+.guardai-panel__row--mask .guardai-panel__tag { color: #f4f4f5; }
+.guardai-panel__row--unmask .guardai-panel__tag { color: #b8b8bd; }
+.guardai-panel__row--pending .guardai-panel__tag { color: #8a8a8f; }
+/* "Restored" only — a quick-scan green signal that data was successfully
+ * protected and swapped back. Everything else in the row stays monochrome.
+ * Selector matches .guardai-panel__row--unmask .guardai-panel__tag's own
+ * specificity (two classes) so it reliably wins regardless of rule order. */
+.guardai-panel__row--unmask .guardai-panel__tag--restored { color: #3fb950; }
 
 .guardai-panel__type {
   font-size: 11px;
   color: #6e6e73;
 }
+
+/* Per-item "forget this one" — the alternative to all-or-nothing Clear
+ * session. Small and quiet by default (this is a secondary action sitting
+ * right next to the row's own label), reading clearly as "delete" on hover. */
+.guardai-panel__itemdel {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #6e6e73;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.guardai-panel__itemdel:hover {
+  background: rgba(255, 107, 107, 0.12);
+  border-color: rgba(255, 107, 107, 0.5);
+  color: #ff6b6b;
+}
+.guardai-panel__itemdel:focus-visible { outline: 2px solid #f4f4f5; outline-offset: 1px; }
 
 .guardai-panel__swap {
   display: flex;
@@ -396,22 +445,27 @@
 }
 .guardai-panel__arrow { color: #8a8a8f; flex: none; }
 
-.guardai-panel__row--mask .guardai-panel__from { color: #f4f4f5; }
-.guardai-panel__row--mask .guardai-panel__to { color: #4CAF82; font-weight: 600; }
+/* Colour follows the VALUE, not its position: a fake value is always red, a
+ * real value is always green, in both row types. Masked rows cross out the
+ * real value (green, about to be hidden) and show the new fake (red).
+ * Restored rows cross out the fake (red, no longer needed) and show the real
+ * value back (green) — the crossed-out colour flips between the two row
+ * types because what's crossed out flips (real vs fake). */
+.guardai-panel__row--mask .guardai-panel__from { color: #3fb950; text-decoration: line-through; }
+.guardai-panel__row--mask .guardai-panel__to { color: #ff6b6b; font-weight: 700; }
 .guardai-panel__row--unmask .guardai-panel__from {
-  color: #FF6B6B;
+  color: #ff6b6b;
   text-decoration: line-through;
-  opacity: 0.85;
 }
-.guardai-panel__row--unmask .guardai-panel__to { color: #4CAF82; font-weight: 600; }
+.guardai-panel__row--unmask .guardai-panel__to { color: #3fb950; font-weight: 700; }
 
-.guardai-panel__from--fake { color: #FFD166; font-weight: 600; max-width: 100%; }
+.guardai-panel__from--fake { color: #c8c8cd; font-weight: 600; max-width: 100%; }
 .guardai-panel__reveal {
   margin-top: 4px;
   align-self: flex-start;
   background: transparent;
-  color: #FFD166;
-  border: 1px solid rgba(255, 209, 102, 0.4);
+  color: #d8d8d8;
+  border: 1px solid #3a3a3a;
   border-radius: 9px;
   padding: 8px 14px;
   font-size: 13px;
@@ -495,8 +549,8 @@
 .guardai-panel__apply {
   width: 100%;
   margin-top: 12px;
-  background: #4CAF82;
-  color: #fff;
+  background: #f4f4f5;
+  color: #111;
   border: none;
   border-radius: 12px;
   padding: 13px 16px;
@@ -558,8 +612,8 @@
 }
 .guardai-panel__send {
   flex: 1;
-  background: #4CAF82;
-  color: #fff;
+  background: #f4f4f5;
+  color: #111;
   border: none;
   border-radius: 12px;
   padding: 14px 16px;
@@ -637,7 +691,7 @@
 .guardai-prompt--dragging .guardai-prompt__head { cursor: grabbing; }
 .guardai-prompt--dragging { box-shadow: 0 28px 72px rgba(0, 0, 0, 0.7); }
 
-.guardai-prompt__shield { font-size: 18px; }
+.guardai-prompt__shield { font-size: 18px; display: inline-flex; color: #f4f4f5; }
 .guardai-prompt__text { font-size: 14px; font-weight: 600; color: #f4f4f5; flex: 1; }
 .guardai-prompt__btns { display: flex; gap: 10px; }
 .guardai-prompt__btn {
@@ -651,8 +705,11 @@
   border: 1px solid transparent;
   transition: filter 0.15s, background 0.15s, border-color 0.15s;
 }
+/* Primary safe action gets the one intentional accent colour: green, so it
+ * reads as "go / safe" at a glance against the black-and-white buttons
+ * around it. Everything else in this card stays monochrome. */
 .guardai-prompt__btn--send {
-  background: #4CAF82;
+  background: #2ea043;
   color: #fff;
 }
 .guardai-prompt__btn--send:hover { filter: brightness(1.08); }
@@ -662,6 +719,15 @@
   border-color: #3a3a3a;
 }
 .guardai-prompt__btn--edit:hover { background: #2e2e2e; border-color: #4a4a4a; }
+/* Clear keyboard focus ring on every control in the card. */
+.guardai-prompt__btn:focus-visible,
+.guardai-prompt__close:focus-visible { outline: 2px solid #f4f4f5; outline-offset: 2px; }
+/* Mask & Send is auto-focused the instant the card opens (so a keyboard user
+ * can accept with one Enter) — ANY ring on top of the green button, even a
+ * soft same-hue one, reads as an unwanted outline since it's visible right
+ * away rather than only on real keyboard navigation. No ring at all here;
+ * the button's own colour is signal enough. */
+.guardai-prompt__btn--send:focus-visible { outline: none; }
 
 /* ---- Educational warning variant ---- */
 .guardai-prompt--warn { width: 400px; }
@@ -677,14 +743,17 @@
   transition: color 0.15s;
 }
 .guardai-prompt__close:hover { color: #f4f4f5; }
+/* Platform disclosure note ("Sending to ChatGPT: ...") gets the same warning
+ * orange as "Send anyway" — it's telling you what happens to your data on
+ * THIS site, worth reading before you pick an action. */
 .guardai-prompt__platform {
   margin: 0 0 14px;
   padding: 11px 13px;
   font-size: 13px;
   line-height: 1.5;
-  color: #FFD166;
-  background: rgba(255, 209, 102, 0.1);
-  border: 1px solid rgba(255, 209, 102, 0.25);
+  color: #f0883e;
+  background: rgba(240, 136, 62, 0.1);
+  border: 1px solid rgba(240, 136, 62, 0.3);
   border-radius: 12px;
 }
 .guardai-prompt__list {
@@ -709,7 +778,9 @@
   justify-content: space-between;
   gap: 8px;
 }
-.guardai-prompt__cat { font-size: 14px; font-weight: 600; color: #6B9FFF; }
+/* Category label ("Full name (with other PII)", "Phone number", etc.) gets a
+ * blue accent so each detected-item card is easy to scan at a glance. */
+.guardai-prompt__cat { font-size: 14px; font-weight: 600; color: #6ea8fe; }
 .guardai-prompt__count {
   background: #1a1a1a;
   border: 1px solid #3a3a3a;
@@ -733,11 +804,14 @@
   font-weight: 600;
 }
 .guardai-prompt__btn--ghost:hover { background: #242424; color: #d8d8d8; border-color: #4a4a4a; }
-.guardai-prompt__btn--anyway { color: #FF8C42; border-color: rgba(255, 140, 66, 0.4); }
+/* "Send anyway" skips masking and sends real data — it gets an explicit
+ * warning colour (orange) so it visibly reads as risky, distinct from both
+ * the green safe action and the monochrome buttons around it. */
+.guardai-prompt__btn--anyway { color: #f0883e; border-color: rgba(240, 136, 62, 0.4); }
 .guardai-prompt__btn--anyway:hover {
-  background: rgba(255, 140, 66, 0.12);
-  border-color: rgba(255, 140, 66, 0.7);
-  color: #FF8C42;
+  background: rgba(240, 136, 62, 0.12);
+  border-color: rgba(240, 136, 62, 0.7);
+  color: #f0883e;
 }
 
 /* ---- Collapsed reopen badge ---- */
@@ -763,8 +837,8 @@
 .guardai-reopen:hover { filter: brightness(1.12); }
 .guardai-reopen__shield { font-size: 18px; }
 .guardai-reopen__count {
-  background: #4CAF82;
-  color: #fff;
+  background: #f4f4f5;
+  color: #111;
   border-radius: 999px;
   font-size: 12px;
   font-weight: 700;
@@ -772,6 +846,52 @@
   min-width: 18px;
   text-align: center;
 }
+
+/* ---- First-run explainer (one-time, on the first real mask) ---- */
+.guardai-firstrun {
+  position: fixed;
+  left: 20px;
+  bottom: 20px;
+  z-index: 2147483647;
+  width: 320px;
+  max-width: calc(100vw - 40px);
+  background: #1a1a1a;
+  color: #f4f4f5;
+  border: 1px solid #2f2f2f;
+  border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  padding: 16px;
+  animation: guardai-pop 0.18s ease-out;
+}
+.guardai-firstrun__head { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; }
+.guardai-firstrun__shield { font-size: 18px; display: inline-flex; color: #f4f4f5; }
+.guardai-firstrun__title { font-size: 14px; font-weight: 700; flex: 1; }
+.guardai-firstrun__close {
+  background: none; border: none; color: #8a8a8f; font-size: 20px; line-height: 1;
+  cursor: pointer; padding: 0 2px; border-radius: 8px; transition: color 0.15s;
+}
+.guardai-firstrun__close:hover { color: #f4f4f5; }
+.guardai-firstrun__body { margin: 0 0 12px; font-size: 13px; line-height: 1.55; color: #c8c8cd; }
+.guardai-firstrun__ok {
+  width: 100%; background: #f4f4f5; color: #111; border: none; border-radius: 10px;
+  padding: 10px; font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit;
+  transition: filter 0.15s;
+}
+.guardai-firstrun__ok:hover { filter: brightness(0.92); }
+.guardai-firstrun__close:focus-visible,
+.guardai-firstrun__ok:focus-visible { outline: 2px solid #f4f4f5; outline-offset: 2px; }
+html.guardai-light .guardai-firstrun {
+  background: #ffffff; color: #0f172a; border-color: #e2e8f0;
+  box-shadow: 0 18px 48px rgba(0,0,0,0.18);
+}
+html.guardai-light .guardai-firstrun__shield { color: #0f172a; }
+html.guardai-light .guardai-firstrun__body { color: #475569; }
+html.guardai-light .guardai-firstrun__ok { background: #0a0a0a; color: #ffffff; }
+html.guardai-light .guardai-firstrun__ok:hover { filter: brightness(1.6); }
+html.guardai-light .guardai-firstrun__close { color: #94a3b8; }
+html.guardai-light .guardai-firstrun__close:hover { color: #0f172a; }
+@media (prefers-reduced-motion: reduce) { .guardai-firstrun { animation: none !important; } }
 
 /* ---- Per-message fake/real toggle button ---- */
 .guardai-msgtoggle {
@@ -792,6 +912,16 @@
   vertical-align: middle;
   opacity: 0.65;
   transition: opacity 0.15s, color 0.15s, border-color 0.15s;
+  /* `inline-flex` only controls how this element lays out ITS OWN children —
+   * it does nothing to stop the element itself being stretched by a PARENT
+   * that's a grid/flex container. Claude wraps the user's own message in
+   * `display: grid; grid-template-columns: 1fr`, whose default
+   * `justify-items: stretch` forces any child to fill the full column width
+   * (measured: the button became 576px wide, vs ~136px content-sized on the
+   * assistant's plain `display: block` wrapper). `justify-self` only has an
+   * effect inside a grid parent, so this is a no-op everywhere else. */
+  justify-self: start;
+  width: fit-content;
 }
 .guardai-msgtoggle:hover { opacity: 1; }
 .guardai-msgtoggle::before {
@@ -799,12 +929,12 @@
   font-size: 11px;
 }
 .guardai-msgtoggle[data-state="fake"] {
-  color: #d29922;
-  border-color: rgba(210, 153, 34, 0.4);
+  color: #9a9a9f;
+  border-color: #3a3a3a;
 }
 .guardai-msgtoggle[data-state="real"] {
-  color: #3fb950;
-  border-color: rgba(63, 185, 80, 0.35);
+  color: #f4f4f5;
+  border-color: #4a4a4a;
 }
 
 /* ---- Selection mask popup (anchored to highlighted text in MESSAGE tab) ---- */
@@ -834,8 +964,8 @@
   transition: background 0.15s, border-color 0.15s;
 }
 .guardai-review-pop__btn:hover { background: #383838; border-color: #4a4a4a; }
-.guardai-review-pop__go { background: #4CAF82; color: #fff; border-color: #4CAF82; }
-.guardai-review-pop__go:hover { filter: brightness(1.08); }
+.guardai-review-pop__go { background: #f4f4f5; color: #111; border-color: #f4f4f5; }
+.guardai-review-pop__go:hover { filter: brightness(0.92); }
 .guardai-review-pop__input {
   background: #161616;
   color: #f4f4f5;
@@ -847,7 +977,7 @@
   width: 170px;
   outline: none;
 }
-.guardai-review-pop__input:focus { border-color: #6B9FFF; }
+.guardai-review-pop__input:focus { border-color: #f4f4f5; }
 
 /* Error toast */
 .guardai-toast {
@@ -907,8 +1037,17 @@ html.guardai-light .guardai-panel__switch {
   background: #cbd5e1;
   border-color: #cbd5e1;
 }
-html.guardai-light .guardai-panel__switch::after { background: #fff; }
-html.guardai-light .guardai-panel__switch--on { background: #4CAF82; border-color: #4CAF82; }
+html.guardai-light .guardai-panel__switch::after { background: #0a0a0a; }
+html.guardai-light .guardai-panel__switch--on { background: #2ea043; border-color: #2ea043; }
+html.guardai-light .guardai-panel__switch--on::after { background: #ffffff; }
+/* Primary (white-in-dark) buttons invert to black-on-white in light mode.
+ * guardai-prompt__btn--send is deliberately excluded here — it keeps its
+ * green accent colour in both themes (see the light-mode override below). */
+html.guardai-light .guardai-btn--mask,
+html.guardai-light .guardai-panel__apply,
+html.guardai-light .guardai-panel__send,
+html.guardai-light .guardai-review-pop__go,
+html.guardai-light .guardai-reopen__count { background: #0a0a0a; color: #ffffff; border-color: #0a0a0a; }
 html.guardai-light .guardai-panel__tabs {
   background: #f1f5f9;
   border-color: #e2e8f0;
@@ -926,22 +1065,31 @@ html.guardai-light .guardai-panel__row {
   border-color: #e2e8f0;
 }
 html.guardai-light .guardai-panel__tag { color: #94a3b8; }
-html.guardai-light .guardai-panel__row--mask .guardai-panel__tag { color: #4CAF82; }
-html.guardai-light .guardai-panel__row--unmask .guardai-panel__tag { color: #3b82f6; }
-html.guardai-light .guardai-panel__row--pending .guardai-panel__tag { color: #d97706; }
+html.guardai-light .guardai-panel__row--mask .guardai-panel__tag { color: #0a0a0a; }
+html.guardai-light .guardai-panel__row--unmask .guardai-panel__tag { color: #52525b; }
+html.guardai-light .guardai-panel__row--pending .guardai-panel__tag { color: #8a8a8f; }
+html.guardai-light .guardai-panel__row--unmask .guardai-panel__tag--restored { color: #16a34a; }
 html.guardai-light .guardai-panel__type { color: #94a3b8; }
 html.guardai-light .guardai-panel__arrow { color: #94a3b8; }
-html.guardai-light .guardai-panel__row--mask .guardai-panel__from { color: #0f172a; }
+html.guardai-light .guardai-panel__row--mask .guardai-panel__from { color: #16a34a; text-decoration: line-through; }
+html.guardai-light .guardai-panel__row--mask .guardai-panel__to { color: #dc2626; }
 html.guardai-light .guardai-panel__row--unmask .guardai-panel__from {
-  color: #ef4444;
+  color: #dc2626;
   text-decoration: line-through;
 }
-html.guardai-light .guardai-panel__from--fake { color: #d97706; }
+html.guardai-light .guardai-panel__row--unmask .guardai-panel__to { color: #16a34a; }
+html.guardai-light .guardai-panel__from--fake { color: #52525b; }
 html.guardai-light .guardai-panel__reveal {
-  color: #d97706;
-  border-color: rgba(217,119,6,0.4);
+  color: #0a0a0a;
+  border-color: #cbd5e1;
 }
-html.guardai-light .guardai-panel__reveal:hover { background: rgba(217,119,6,0.08); border-color: rgba(217,119,6,0.7); }
+html.guardai-light .guardai-panel__reveal:hover { background: #f1f5f9; border-color: #94a3b8; }
+html.guardai-light .guardai-panel__itemdel { color: #94a3b8; }
+html.guardai-light .guardai-panel__itemdel:hover {
+  background: rgba(220, 38, 38, 0.08);
+  border-color: rgba(220, 38, 38, 0.4);
+  color: #dc2626;
+}
 html.guardai-light .guardai-panel__legenditem { color: #475569; }
 html.guardai-light .guardai-panel__msgviews {
   background: #f1f5f9;
@@ -984,15 +1132,16 @@ html.guardai-light .guardai-prompt__text { color: #0f172a; }
 html.guardai-light .guardai-prompt__close { color: #94a3b8; }
 html.guardai-light .guardai-prompt__close:hover { color: #0f172a; }
 html.guardai-light .guardai-prompt__platform {
-  color: #92400e;
-  background: rgba(251,191,36,0.12);
-  border-color: rgba(251,191,36,0.35);
+  color: #c2410c;
+  background: rgba(194, 65, 12, 0.08);
+  border-color: rgba(194, 65, 12, 0.3);
 }
 html.guardai-light .guardai-prompt__item {
   background: #f8fafc;
   border-color: #e2e8f0;
 }
-html.guardai-light .guardai-prompt__cat { color: #3b82f6; }
+html.guardai-light .guardai-prompt__cat { color: #2563eb; }
+html.guardai-light .guardai-prompt__shield { color: #0f172a; }
 html.guardai-light .guardai-prompt__count {
   background: #f1f5f9;
   border-color: #e2e8f0;
@@ -1010,8 +1159,12 @@ html.guardai-light .guardai-prompt__btn--ghost {
   border-color: #e2e8f0;
 }
 html.guardai-light .guardai-prompt__btn--ghost:hover { background: #f1f5f9; color: #0f172a; border-color: #cbd5e1; }
-html.guardai-light .guardai-prompt__btn--anyway { color: #ea580c; border-color: rgba(234,88,12,0.35); }
-html.guardai-light .guardai-prompt__btn--anyway:hover { background: rgba(234,88,12,0.07); border-color: rgba(234,88,12,0.6); color: #ea580c; }
+/* Send anyway: same warning orange as dark mode, tuned for a white card. */
+html.guardai-light .guardai-prompt__btn--anyway { color: #c2410c; border-color: rgba(194, 65, 12, 0.35); }
+html.guardai-light .guardai-prompt__btn--anyway:hover { background: rgba(194, 65, 12, 0.08); border-color: rgba(194, 65, 12, 0.6); color: #c2410c; }
+/* Mask & Send: same green in both themes; a plain darken reads better than
+ * the generic brighten used for the monochrome buttons. */
+html.guardai-light .guardai-prompt__btn--send:hover { filter: brightness(0.92); }
 
 /* ---- Reopen badge ---- */
 html.guardai-light .guardai-reopen {
@@ -1038,7 +1191,7 @@ html.guardai-light .guardai-review-pop__input {
   color: #0f172a;
   border-color: #e2e8f0;
 }
-html.guardai-light .guardai-review-pop__input:focus { border-color: #3b82f6; }
+html.guardai-light .guardai-review-pop__input:focus { border-color: #0a0a0a; }
 
 /* ---- Error toast (light) ---- */
 html.guardai-light .guardai-toast--error {

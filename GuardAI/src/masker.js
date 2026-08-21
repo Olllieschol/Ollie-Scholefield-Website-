@@ -23,6 +23,14 @@
   "use strict";
 
   const STORAGE_KEY = "guardai_mapping";
+  // Hard cap on how many real<->fake pairs the table keeps. Without this, a
+  // long-lived conversation (or many days of daily use, since the table
+  // persists across reloads) grows the mapping forever: every restore pass
+  // iterates the whole table (buildSwapRules, unmask's fakeToReal.keys()
+  // sort), so unbounded growth means unbounded per-message latency, and
+  // chrome.storage.local has a quota too. Oldest entries (by createdAt) are
+  // evicted first — see _evictIfNeeded().
+  const MAX_ENTRIES = 500;
 
   /* ------------------------------------------------------------------ *
    * Australian-flavoured fake-data pools.
@@ -45,10 +53,18 @@
     "Newcastle", "Geelong", "Cairns", "Darwin",
   ];
   const EMAIL_DOMAINS = ["placeholder.com", "example.com.au", "sample.net"];
-  const COMPANIES = [
-    "Acme Holdings", "Northwind Pty Ltd", "Riverstone Group", "BlueGum Co",
-    "Summit Partners", "Harbourview Ltd",
+  // Fake company STEMS only — no designator. The ORG generator re-attaches the
+  // real name's own "Pty Ltd" / "Logistics" / "Group" ending so the fake keeps
+  // the same shape and industry sense. (This replaces an earlier unused
+  // COMPANIES pool of complete names, which couldn't preserve that.)
+  const ORG_NAMES = [
+    "Northwind", "Riverstone", "Harbourview", "Bluestone", "Ironbark",
+    "Silverbrook", "Kestrel", "Meridian", "Copperfield", "Brightwater",
+    "Stonebridge", "Wattlebank", "Redgum", "Coastline", "Pinnacle", "Lantern",
   ];
+  // Fallback ending, used only when the real name had no recognisable
+  // designator of its own to carry over.
+  const ORG_DESCRIPTORS = ["Group", "Holdings", "Partners", "Enterprises", "Pty Ltd"];
 
   /* ------------------------------------------------------------------ *
    * Seeded pseudo-random helpers. The seed is random per generated value, so
@@ -133,14 +149,44 @@
       return `${letter}${seededDigits(seed, 7)}`;
     },
     LICENCE(real, seed) {
-      return seededDigits(seed, 8);
+      // Preserve the original structure so the fake stays the same shape:
+      // a state-letter prefix (NSW45612378 -> NSW + 8 fake digits) or, if there
+      // is no prefix, the same number of digits as the original.
+      const m = (real || "").match(/^([A-Za-z]{1,3})\s?(\d+)$/);
+      if (m) return m[1].toUpperCase() + seededDigits(seed, m[2].length);
+      const len = (real || "").replace(/\D/g, "").length || 8;
+      return seededDigits(seed, len);
     },
     BSB(real, seed) {
       const d = seededDigits(seed, 6);
       return `${d.slice(0, 3)}-${d.slice(3, 6)}`;
     },
     BANK_ACCOUNT(real, seed) {
-      return seededDigits(seed, real.replace(/\D/g, "").length || 8);
+      // Preserve the grouping ("8827 3410" -> "1248 4940", "044-772-19" ->
+      // "263-694-37"), not just the digit count. Account and order references
+      // are frequently written in blocks, and collapsing them to one run makes
+      // the masked message read as a different kind of value than the user
+      // wrote — the same reason REF_CODE below keeps its shape.
+      const digits = seededDigits(seed, real.replace(/\D/g, "").length || 8);
+      let i = 0;
+      let outStr = "";
+      for (const ch of real) outStr += /\d/.test(ch) ? digits[i++] : ch;
+      return i ? outStr : digits;
+    },
+    REF_CODE(real, seed) {
+      // Keep the SHAPE (same letter count, same digit count) so the AI still
+      // reads it as one reference code, but replace the letters too rather
+      // than preserving them: a prefix like "BW-" is usually the client's own
+      // initials, so carrying it through would leak the very organisation
+      // name being masked two lines above it.
+      const m = (real || "").match(/^([A-Za-z]{2,4})-(\d{4,6})$/);
+      const letterCount = m ? m[1].length : 3;
+      const digitCount = m ? m[2].length : 5;
+      let letters = "";
+      for (let i = 0; i < letterCount; i++) {
+        letters += String.fromCharCode(65 + ((seed >>> (i * 5)) % 26));
+      }
+      return `${letters}-${seededDigits(seed >>> 3, digitCount)}`;
     },
     ABN(real, seed) {
       const d = seededDigits(seed, 11);
@@ -187,25 +233,117 @@
       const city = pick(CITIES, seed >>> 6);
       return `${num} ${street} ${type} ${city}`;
     },
-    PASSWORD() {
-      // Never preserve any structure of a real secret — return a generic token.
-      return "[redacted-secret]";
+    USERNAME(real, seed) {
+      // Keep it obviously a handle (lowercase word + digits) without echoing
+      // any part of the real one — a username is frequently the person's
+      // actual surname or initials, which is exactly what masking is for.
+      const first = pick(FIRST_NAMES, seed).toLowerCase();
+      const last = pick(LAST_NAMES, seed >>> 5).toLowerCase();
+      return `${first[0]}${last}${seededDigits(seed >>> 9, 2)}`;
+    },
+    PASSWORD(real, seed) {
+      // A realistic random secret, NOT a fixed "[redacted-secret]" token.
+      //
+      // The constant was not merely cosmetic: every password in a message
+      // mapped to the same string, so two different secrets became
+      // indistinguishable. previewFake()'s collision guard is built to stop
+      // exactly that, but it retries by re-generating, and a constant
+      // generator returns the same value on all 100 retries — so it silently
+      // gave up and handed out the duplicate. Unmasking then had no way to
+      // tell which secret a "[redacted-secret]" belonged to.
+      //
+      // Nothing of the real value is preserved (not even its length), so this
+      // still leaks no structure — it just makes each fake unique and
+      // plausible enough that the AI reads it as a credential.
+      const lower = "abcdefghijkmnpqrstuvwxyz"; // no l/o — ambiguous glyphs
+      const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+      const digits = "23456789";
+      const symbols = "!@#$%&*?";
+      let s = (seed || 1) >>> 0;
+      const next = (n) => {
+        s = (Math.imul(s, 1103515245) + 12345) >>> 0;
+        return (s >>> 16) % n;
+      };
+      // Guarantee one of each class, then fill to a random 9-12 chars.
+      const chars = [
+        upper[next(upper.length)],
+        lower[next(lower.length)],
+        digits[next(digits.length)],
+        symbols[next(symbols.length)],
+      ];
+      const pool = lower + upper + digits;
+      const target = 9 + next(4);
+      while (chars.length < target) chars.push(pool[next(pool.length)]);
+      // Fisher-Yates so the guaranteed characters aren't always in positions 0-3.
+      for (let i = chars.length - 1; i > 0; i--) {
+        const j = next(i + 1);
+        const t = chars[i];
+        chars[i] = chars[j];
+        chars[j] = t;
+      }
+      return chars.join("");
     },
     NAME_PII(real, seed) {
       return `${pick(FIRST_NAMES, seed)} ${pick(LAST_NAMES, seed >>> 3)}`;
     },
+    ORG(real, seed) {
+      // Keep the real name's own designator/descriptor ("Pty Ltd",
+      // "Logistics", "Group") and swap only the distinctive part, the same way
+      // LICENCE preserves its state prefix. The AI then still sees "a
+      // logistics company" / "a Pty Ltd entity" and reasons about the message
+      // correctly, while the identifying word — the part that actually names
+      // the business — is gone.
+      const m = (real || "").trim().match(
+        /^(.*?)[\s]+((?:Pty\.?\s+)?Ltd\.?|(?:Pty\.?\s+)?Limited|Pty\.?|Incorporated|Inc\.?|L\.L\.C\.?|LLC|LLP|PLC|P\/L|Corporation|Corp\.?|GmbH|Group|Holdings|Partners|Partnership|Enterprises|Industries|Solutions|Services|Systems|Technologies|Consulting|Consultancy|Consultants|Logistics|Trading|Ventures|Associates|Agency|Studios|Studio|Laboratories|Labs|Foundation|Institute|Company|Contractors|Constructions|Developments|Investments|Removals|Freight|Transport|Supplies|Distribution|Manufacturing|Engineering|Motors)$/i
+      );
+      const stem = pick(ORG_NAMES, seed);
+      return m ? `${stem} ${m[2]}` : `${stem} ${pick(ORG_DESCRIPTORS, seed >>> 5)}`;
+    },
   };
 
   /**
-   * Only these types are MASKED (swapped for fakes). Keyword/contextual
-   * findings (CONFIDENTIAL, HEALTH, LEGAL, IMMIGRATION, BUSINESS_CONFIDENTIAL)
-   * are warning-only — replacing free-text phrases would mangle the message.
+   * Masking policy — which findings are auto-swapped for fakes.
+   *
+   * MASK: anything that IDENTIFIES someone or something — people, companies,
+   * contact details, locations, and government/account/reference numbers.
+   *
+   * DON'T auto-mask: dollar figures (MONEY), dates including dates of birth
+   * (DOB), and quantities. Two reasons. First, replacing them corrupts the
+   * very thing people ask an AI to do with them — totals stop adding up,
+   * date arithmetic and ages come out wrong, and the answer that comes back
+   * is quietly useless. Second, they aren't identifying on their own: once
+   * the name, company, phone, email, address and account numbers around a
+   * figure are all fake, "$40,000 owing since 03/2024" no longer points at
+   * anybody. Note this is a deliberate trade-off, not an oversight — a bare
+   * DOB IS an identifier in combination with data from elsewhere, so a user
+   * who wants one hidden can highlight it and mask it by hand (the manual
+   * flow doesn't consult this set, and the DOB/MONEY fake generators are
+   * kept for exactly that path).
+   *
+   * Keyword/contextual findings (CONFIDENTIAL, HEALTH, LEGAL, IMMIGRATION,
+   * BUSINESS_CONFIDENTIAL) stay warning-only for a different reason —
+   * replacing free-text phrases would mangle the message.
+   *
+   * Everything not in this set is still DETECTED and still listed on the
+   * warning card; it just isn't swapped automatically.
    */
   const MASKABLE = new Set([
-    "NAME_PII", "DOB", "PASSPORT", "LICENCE", "MEDICARE", "TFN", "CREDIT_CARD",
-    "BSB", "BANK_ACCOUNT", "MONEY", "PHONE", "EMAIL", "ADDRESS", "GPS", "ABN",
-    "ACN", "PASSWORD",
+    // people and organisations
+    "NAME_PII", "ORG",
+    // contact details and location
+    "PHONE", "EMAIL", "ADDRESS", "GPS",
+    // government / identity documents
+    "PASSPORT", "LICENCE", "MEDICARE", "TFN",
+    // account, banking and business reference numbers
+    "CREDIT_CARD", "BSB", "BANK_ACCOUNT", "REF_CODE", "ABN", "ACN",
+    // credentials
+    "PASSWORD", "USERNAME",
   ]);
+  // Exposed so detector.js's overlap resolution (which runs after all four
+  // scripts have loaded) can prefer a maskable finding over a warning-only one
+  // when their spans clash — see resolveOverlaps() in detector.js.
+  window.GuardAI = window.GuardAI || {};
+  window.GuardAI.MASKABLE_TYPES = MASKABLE;
 
   function generateFake(type, real) {
     const gen = GENERATORS[type] || (() => "[redacted]");
@@ -223,22 +361,68 @@
       this._loaded = false;
     }
 
-    /** Load the persisted mapping table from chrome.storage.local. */
+    /**
+     * Load the persisted mapping table from chrome.storage.local. Never
+     * throws: masking must keep working in-memory for the current page even
+     * if persistence is broken (quota issues, "Extension context
+     * invalidated" after a reload, storage genuinely unavailable, etc.), and
+     * a corrupted/unexpected stored shape must be skipped rather than crash
+     * the caller (every mask/unmask path awaits this).
+     */
     async load() {
       if (this._loaded) return;
-      const data = await chrome.storage.local.get(STORAGE_KEY);
-      const entries = data[STORAGE_KEY] || [];
-      for (const e of entries) {
-        this.realToFake.set(e.real, e);
-        this.fakeToReal.set(e.fake, e);
+      try {
+        const data = await chrome.storage.local.get(STORAGE_KEY);
+        const entries = Array.isArray(data[STORAGE_KEY]) ? data[STORAGE_KEY] : [];
+        for (const e of entries) {
+          if (!e || typeof e.real !== "string" || typeof e.fake !== "string" || typeof e.type !== "string") {
+            console.warn("[GuardAI] skipping malformed mapping entry:", e);
+            continue;
+          }
+          this.realToFake.set(e.real, e);
+          this.fakeToReal.set(e.fake, e);
+        }
+      } catch (err) {
+        console.warn("[GuardAI] could not load mapping table, starting empty:", err);
+      } finally {
+        // Always mark loaded, even on failure — otherwise every future call
+        // would retry load() and could throw again instead of just proceeding
+        // with an empty (or partially recovered) in-memory table.
+        this._loaded = true;
       }
-      this._loaded = true;
     }
 
-    /** Persist the in-memory table back to chrome.storage.local. */
+    /**
+     * Persist the in-memory table back to chrome.storage.local. Never
+     * throws — masking has already happened in memory by the time this is
+     * called, so a save failure should only mean the mapping won't survive a
+     * reload, not that the current mask/unmask operation fails.
+     */
     async save() {
-      const entries = Array.from(this.realToFake.values());
-      await chrome.storage.local.set({ [STORAGE_KEY]: entries });
+      try {
+        const entries = Array.from(this.realToFake.values());
+        await chrome.storage.local.set({ [STORAGE_KEY]: entries });
+      } catch (err) {
+        console.warn("[GuardAI] could not persist mapping table (masking still works this session):", err);
+      }
+    }
+
+    /**
+     * Evict the oldest entries (by createdAt) once the table exceeds
+     * MAX_ENTRIES, so a long-lived conversation's mapping table — and the
+     * per-message cost of iterating it on every restore pass — never grows
+     * unbounded. Called before adding a new entry.
+     */
+    _evictIfNeeded() {
+      const overflow = this.realToFake.size - MAX_ENTRIES + 1;
+      if (overflow <= 0) return;
+      const oldest = Array.from(this.realToFake.values())
+        .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+        .slice(0, overflow);
+      for (const entry of oldest) {
+        this.realToFake.delete(entry.real);
+        this.fakeToReal.delete(entry.fake);
+      }
     }
 
     /** Get an existing fake for a real value, or create + remember one. */
@@ -247,12 +431,25 @@
       if (existing) return existing.fake;
 
       let fake = generateFake(type, real);
-      // Guarantee uniqueness of the fake value so unmasking is unambiguous.
+      // Guarantee uniqueness of the fake value so unmasking is unambiguous,
+      // that it never lands on the real value itself (e.g. MONEY scales the
+      // real amount by a random 80-120%, so roughly 1 in 400 draws rounds
+      // right back to the original figure), AND that it never lands on a
+      // DIFFERENT entry's real value. Restore rules match a fake string
+      // literally anywhere in the response — if person B's randomly
+      // generated fake happened to equal person A's real name, an unrelated
+      // AI mention of that name (or A's own correctly-displayed real text
+      // elsewhere in the conversation) would get wrongly rewritten into B's
+      // real data the next time an unmask pass runs.
       let guard = 0;
-      while (this.fakeToReal.has(fake) && guard < 50) {
+      while (
+        (this.fakeToReal.has(fake) || fake === real || this.realToFake.has(fake)) &&
+        guard < 50
+      ) {
         fake = generateFake(type, real + ":" + guard);
         guard++;
       }
+      this._evictIfNeeded();
       const entry = { real, fake, type, createdAt: Date.now() };
       this.realToFake.set(real, entry);
       this.fakeToReal.set(fake, entry);
@@ -270,12 +467,23 @@
      * commits. Reuses an existing mapping if one is already known, and avoids
      * collisions with fakes that are already in the table.
      */
-    previewFake(type, real) {
+    previewFake(type, real, avoid) {
       const existing = this.realToFake.get(real);
       if (existing) return existing.fake;
+      // Treat a fake as taken if it's in the persisted table, in the caller's
+      // `avoid` set (fakes already handed out to OTHER values in this same
+      // batch, which aren't registered yet), IS the real value itself (e.g.
+      // MONEY's random 80-120% scaling can round back to the original
+      // figure), or equals a DIFFERENT entry's real value (see the matching
+      // comment in _getOrCreate for why that's also unsafe). This is what
+      // stops two different real values colliding on the same fake when many
+      // are masked in one pass, and stops a fake silently being identical to
+      // ANY real data anywhere in the table.
+      const taken = (f) =>
+        this.fakeToReal.has(f) || f === real || this.realToFake.has(f) || (avoid && avoid.has(f));
       let fake = generateFake(type, real);
       let guard = 0;
-      while (this.fakeToReal.has(fake) && guard < 50) {
+      while (taken(fake) && guard < 100) {
         fake = generateFake(type, real + ":" + guard);
         guard++;
       }
@@ -290,6 +498,7 @@
     registerManual(real, fake, type) {
       const existing = this.realToFake.get(real);
       if (existing) return existing.fake;
+      this._evictIfNeeded();
       const entry = { real, fake, type: type || "CUSTOM", createdAt: Date.now() };
       this.realToFake.set(real, entry);
       this.fakeToReal.set(fake, entry);
@@ -378,9 +587,30 @@
 
     /** Wipe the entire mapping table (memory + storage). */
     async clear() {
+      // In-memory state is cleared first and unconditionally, so the current
+      // page's masking/restore is correctly reset even if the storage call
+      // below fails.
       this.realToFake.clear();
       this.fakeToReal.clear();
-      await chrome.storage.local.remove(STORAGE_KEY);
+      try {
+        await chrome.storage.local.remove(STORAGE_KEY);
+      } catch (err) {
+        console.warn("[GuardAI] could not clear persisted mapping table:", err);
+      }
+    }
+
+    /**
+     * Drop the in-memory table WITHOUT touching storage — for when this page
+     * learns (via chrome.storage.onChanged) that some OTHER context, like the
+     * popup's "Clear" button, already deleted storage. That popup click can't
+     * reach into this page's masker instance directly (`_loaded` means load()
+     * never re-reads storage after the first time), so without this the
+     * page's own in-memory table just kept working — masking and restoring
+     * with the very data the user just asked to delete, invisible to them.
+     */
+    forgetInMemory() {
+      this.realToFake.clear();
+      this.fakeToReal.clear();
     }
 
     /** Number of stored mappings. */
