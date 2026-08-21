@@ -1481,6 +1481,40 @@
   }
 
   // ---- Names (only with another identifier) ------------------------------
+  /**
+   * One capitalised name token.
+   *
+   * Two deliberate properties, each fixing a real miss in the ASCII-only
+   * `[A-Z][a-z]+` this replaces:
+   *
+   *  - UNICODE. `[a-z]` cannot match the accented and diacritic characters in
+   *    José, Zoë, Björn, Siobhán, Renée or Nguyễn, so every one of those was
+   *    missed even with a phone number beside it. Since the point of name
+   *    detection is protecting people's identities, a matcher that only works
+   *    on unaccented English names protects an arbitrary subset of them.
+   *
+   *  - INTERNAL HYPHENS AND APOSTROPHES. "Mary-Anne Douglas" matched only
+   *    "Anne Douglas" (the hyphen creates a word boundary), so masking left
+   *    "Mary-" behind attached to a fake name — half a leak, half a corrupted
+   *    sentence. O'Brien, D'Angelo and Mary-Anne are all single tokens here.
+   *
+   * The lowercase run is `*` rather than `+` so "O'Brien" parses; tokens of
+   * fewer than two letters are rejected in the caller instead, which keeps
+   * this pattern simple and avoids matching stray initials.
+   *
+   * Not ReDoS-prone: the repeating group must start with a separator that the
+   * letter class cannot match, so there is exactly one way to parse any input.
+   */
+  const NAME_TOKEN =
+    "\\p{Lu}[\\p{Ll}\\p{M}]*(?:['’\\-]\\p{Lu}?[\\p{Ll}\\p{M}]+)*";
+  // JS `\b` is ASCII-only, so it fires in the middle of "José". These do the
+  // job properly: the character either side must not be part of a name token.
+  const NAME_BOUNDARY_BEFORE = "(?<![\\p{L}\\p{M}'’-])";
+  const NAME_BOUNDARY_AFTER = "(?![\\p{L}\\p{M}'’-])";
+  /** Letters only, so "O'Brien" counts 6 and a stray "J" counts 1. */
+  function letterCount(s) {
+    return (s.match(/\p{L}/gu) || []).length;
+  }
 
   // Identifier / category keywords that must never be read as a name. If either
   // word of a candidate "First Last" pair is one of these (e.g. "Her Medicare",
@@ -1566,7 +1600,10 @@
     const lc = text.toLowerCase();
     const hasNameCtx = NAME_INTRO_PHRASES.some((p) => lc.includes(p));
     if (!hasIdentifier && !hasNameCtx) return;
-    const re = /\b([A-Z][a-z]+)\s+([A-Z][a-z]+)\b/g;
+    const re = new RegExp(
+      `${NAME_BOUNDARY_BEFORE}(${NAME_TOKEN})\\s+(${NAME_TOKEN})${NAME_BOUNDARY_AFTER}`,
+      "gu"
+    );
     const STOPWORDS = new Set([
       "Hi", "Hello", "Dear", "Thanks", "Thank", "Kind", "Best", "The", "This",
       "That", "My", "Please", "Could", "Would", "Should", "Date", "Tax", "File",
@@ -1579,18 +1616,50 @@
       "Additionally", "Furthermore", "Moreover", "Plus", "Finally", "Lastly",
       "Regarding", "Attention", "Attn", "Subject", "From", "Sent", "Now",
       "Today", "Tomorrow", "Yesterday", "Unfortunately", "Hopefully",
+      // Short message/thread openers. These are the same hazard as the
+      // connectives above but were missed because they are only two or three
+      // letters: "Re James Whitfield" captured "Re James" as the name, which
+      // masked the word "Re" and left the SURNAME in the message.
+      "Re", "Ref", "Fwd", "Fw", "Cc", "Bcc", "Reply", "Forwarded",
+      "Note", "Notes", "Update", "Reminder", "Urgent", "Important",
+      "Confidential", "Draft", "Copy", "Meeting", "Call", "Email",
     ]);
-    let m;
-    while ((m = re.exec(text))) {
-      if (STOPWORDS.has(m[1])) continue;
+    /** Decide one candidate pair. Returns false when it is NOT a name. */
+    const accept = (m) => {
+      if (STOPWORDS.has(m[1])) return false;
       const w1 = m[1].toLowerCase();
       const w2 = m[2].toLowerCase();
       // Skip if either token is an identifier/category keyword.
-      if (NAME_CONTEXT_WORDS.has(w1) || NAME_CONTEXT_WORDS.has(w2)) continue;
+      if (NAME_CONTEXT_WORDS.has(w1) || NAME_CONTEXT_WORDS.has(w2)) return false;
       // Skip if either token is a common non-name word (form labels, finance,
       // address parts, etc.) so structural text isn't masked as a person.
-      if (COMMON_WORDS.has(w1) || COMMON_WORDS.has(w2)) continue;
+      if (COMMON_WORDS.has(w1) || COMMON_WORDS.has(w2)) return false;
+      // A bare initial ("J K Rowling") is not enough on its own to call
+      // something a name; require at least two letters in each token.
+      if (letterCount(m[1]) < 2 || letterCount(m[2]) < 2) return false;
       out.push(finding("NAME_PII", "Full name (with other PII)", m[0], m.index, "medium"));
+      return true;
+    };
+
+    let m;
+    let guard = 0;
+    while ((m = re.exec(text)) && guard++ < 20000) {
+      if (accept(m)) continue;
+      // REWIND. The rejected pair's SECOND word may itself be the first word
+      // of a real name, and continuing past it loses that name entirely:
+      // "Contact James Whitfield on 0412 556 781" matched "Contact James",
+      // correctly rejected it (Contact is a form-label word), and then resumed
+      // AFTER "James" — so "James Whitfield" was never tested and went out
+      // completely unmasked, with a phone number sitting beside it. Every
+      // common business opener does this: Contact / Regarding / Attention /
+      // Dear / From / Subject.
+      //
+      // Same failure as the credential scanner: rejecting a candidate is not
+      // neutral, because the rejected span is still consumed. See
+      // scanCredential() for the identical fix.
+      const w2at = m.index + m[0].lastIndexOf(m[2]);
+      const resume = Math.max(w2at, m.index + 1);
+      if (resume < re.lastIndex) re.lastIndex = resume;
     }
   }
 

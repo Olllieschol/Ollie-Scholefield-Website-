@@ -31,6 +31,7 @@ const SUITES = [
   { name: "refs-email-flight.cjs (email formats, reference consistency, flight exclusion)", file: "test/refs-email-flight.cjs" },
   { name: "credentials.cjs (usernames + passwords detected by phrasing)", file: "test/credentials.cjs" },
   { name: "credential-fakes.cjs (unique realistic credential fakes, real pipeline)", file: "test/credential-fakes.cjs" },
+  { name: "name-matching.cjs (lead-word leak, hyphens/apostrophes, non-ASCII names)", file: "test/name-matching.cjs" },
   // Section 1 core bug regressions.
   { name: "section1-bugs.cjs (licence/address/auto-replace)", file: "test/section1-bugs.cjs" },
   { name: "restore-name-integrity.cjs (name cross-contamination)", file: "test/restore-name-integrity.cjs" },
