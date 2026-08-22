@@ -116,6 +116,10 @@ header.top {
 .company__live { display: none; align-items: flex-start; gap: 10px; }
 .company.is-connected .company__live { display: flex; }
 .company.is-connected .company__form { display: none; }
+/* Warned: show the status AND the form, because that is exactly when someone
+   needs somewhere to type a new key. */
+.company.is-warned .company__live { display: flex; margin-bottom: 18px; }
+.company.is-warned .company__dot { background: var(--danger); }
 .company__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--good); margin-top: 6px; flex: 0 0 8px; }
 .company__live div { flex: 1; }
 .company__live strong { font-size: 14px; color: var(--text); display: block; margin-bottom: 3px; }
@@ -238,34 +242,39 @@ footer.note {
 
       <section class="company" id="company">
         <div class="company__form">
-          <h2>Connect to your company</h2>
-          <p>
-            If your workplace runs GuardAI, enter the invite code your admin gave
-            you. There is no account and no password: the code is the only step,
-            and you can disconnect whenever you like.
+          <h2 id="activate-heading">Activate GuardAI</h2>
+          <p id="activate-intro">
+            GuardAI needs a key before it will mask anything. Enter your personal
+            licence key, or the invite code your workplace gave you — one field
+            takes either, and there is no account and no password to set up.
           </p>
           <div class="company__row">
-            <input id="company-code" type="text" placeholder="GA-XXXX-XXXX"
-                   autocomplete="off" spellcheck="false" maxlength="13" />
-            <button class="company__btn" id="company-connect" type="button">Connect</button>
+            <input id="company-code" type="text" placeholder="GK-XXXX-XXXX-XXXX  or  GA-XXXX-XXXX"
+                   autocomplete="off" spellcheck="false" maxlength="32"
+                   aria-label="Licence key or invite code" />
+            <button class="company__btn" id="company-connect" type="button">Activate</button>
           </div>
           <p class="company__msg" id="company-msg" role="status" aria-live="polite"></p>
           <p class="company__shared">
-            Once connected, your admin can see <b>how many</b> items were masked and
-            <b>what kind</b> they were, on <b>which AI platform</b> and <b>when</b>.
-            They cannot see the values themselves, the messages around them, or
-            anything you typed. Those never leave this device, connected or not.
+            <b>A personal licence reports nothing.</b> No counts, no categories,
+            no usage — GuardAI does not contact us again except to check the key
+            is still valid.
+            <br /><br />
+            <b>A workplace invite code does report counts.</b> Your admin can see
+            <b>how many</b> items were masked and <b>what kind</b> they were, on
+            <b>which AI platform</b> and <b>when</b>. They cannot see the values
+            themselves, the messages around them, or anything you typed. Those
+            never leave this device either way.
           </p>
         </div>
 
         <div class="company__live">
           <span class="company__dot"></span>
           <div>
-            <strong>Connected to <span id="company-name">your company</span></strong>
-            <span>Your masking activity is visible to your admin: counts and
-                  categories only, never the values or your messages.</span>
+            <strong id="activate-state">GuardAI is active</strong>
+            <span id="activate-detail">Everything is running.</span>
           </div>
-          <button class="company__leave" id="company-leave" type="button">Disconnect</button>
+          <button class="company__leave" id="company-leave" type="button">Deactivate</button>
         </div>
       </section>
 

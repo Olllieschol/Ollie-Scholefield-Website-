@@ -267,8 +267,10 @@
   });
 
   // Live-refresh if storage changes while the popup is open.
-  chrome.storage.onChanged.addListener((_changes, area) => {
-    if (area === "local") render();
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    render();
+    if (changes.guardai_entitlement) renderLicence();
   });
 
   function flash(btn, text) {
@@ -279,6 +281,126 @@
 
   function escapeHtml(s) {
     return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Licence card.
+   *
+   * The whole point of this card is that a locked GuardAI is never a dead
+   * popup. Somebody who installs the extension, opens this, and finds a
+   * disabled dashboard with no explanation has been given a broken product;
+   * the code field is right here, so activation is one click from the place
+   * they already are rather than a link to somewhere else.
+   *
+   * The same card handles "running out", because a second card with a second
+   * code field would mean two places to type the same thing.
+   * ------------------------------------------------------------------ */
+  const DAY_MS = 86400000;
+
+  function daysLeft(rec) {
+    if (!rec || typeof rec.hardStopAt !== "number") return null;
+    return Math.max(0, Math.ceil((rec.hardStopAt - Date.now()) / DAY_MS));
+  }
+
+  function setLockMsg(text, kind) {
+    const el = $("lock-msg");
+    if (!el) return;
+    el.textContent = text || "";
+    el.className = "gd-lock__msg" + (text ? " is-on" : "") + (kind ? " is-" + kind : "");
+  }
+
+  /** Paint the card for one of the four states the worker reports. */
+  function paintLicence(state, rec) {
+    const card = $("lock-card");
+    const score = $("score-card");
+    if (!card) return;
+
+    const showCard = state === "locked" || state === "warned";
+    card.classList.toggle("is-on", showCard);
+    card.classList.toggle("is-warning", state === "warned");
+    // A privacy score is meaningless when nothing is being scanned, so the
+    // locked card takes its place rather than sitting above a ring reading
+    // 100 out of 100.
+    if (score) score.style.display = state === "locked" ? "none" : "";
+    if (!showCard) return;
+
+    const left = daysLeft(rec);
+    const plural = left === 1 ? "day" : "days";
+    if (state === "locked") {
+      $("lock-title").textContent = "GuardAI is not active";
+      $("lock-body").textContent =
+        "Nothing is being masked. Enter your licence key, or the invite code from your workplace.";
+    } else if (rec && rec.kind === "legacy") {
+      $("lock-title").textContent = "GuardAI now needs a licence";
+      $("lock-body").textContent =
+        `Still protecting you for ${left} more ${plural}. Enter a licence key or an invite code to keep it on.`;
+    } else {
+      $("lock-title").textContent = "Your licence has lapsed";
+      $("lock-body").textContent =
+        `Still protecting you for ${left} more ${plural}, so nothing stops mid-conversation. Renew or enter a new key.`;
+    }
+  }
+
+  /**
+   * Fallback for when the worker cannot be reached at all.
+   *
+   * Without this, a dead worker leaves a locked install showing a normal
+   * dashboard with a privacy score on it — the dead popup this card exists to
+   * prevent, arriving by a different route. It deliberately does NOT
+   * re-implement the state machine: the ABSENCE of a record is the one thing
+   * that can be read straight off storage and cannot be misinterpreted. If a
+   * record exists but we cannot ask what it means, say nothing.
+   */
+  function renderLicenceFromStorage() {
+    chrome.storage.local.get(["guardai_entitlement"]).then((d) => {
+      if (!d || !d.guardai_entitlement) paintLicence("locked", null);
+    }).catch(() => { /* storage gone too — nothing sensible left to say */ });
+  }
+
+  function renderLicence() {
+    try {
+      chrome.runtime.sendMessage({ type: "GUARDAI_ENTITLEMENT_STATUS" }, (res) => {
+        if (chrome.runtime.lastError || !res || !res.ok) return renderLicenceFromStorage();
+        paintLicence(res.state, res.record);
+      });
+    } catch (_) {
+      renderLicenceFromStorage();
+    }
+  }
+
+  {
+    const btn = $("lock-activate");
+    const input = $("lock-code");
+    if (btn && input) {
+      const activate = () => {
+        const code = input.value.trim();
+        if (!code) return setLockMsg("Enter your licence key or invite code.", "bad");
+        btn.disabled = true;
+        btn.textContent = "\u2026";
+        setLockMsg("");
+        try {
+          chrome.runtime.sendMessage({ type: "GUARDAI_ACTIVATE", code }, (res) => {
+            btn.disabled = false;
+            btn.textContent = "Activate";
+            if (chrome.runtime.lastError || !res) {
+              return setLockMsg("Could not reach GuardAI. Check your connection and try again.", "bad");
+            }
+            if (!res.ok) return setLockMsg(res.error || "Could not activate. Try again.", "bad");
+            input.value = "";
+            setLockMsg("GuardAI is on. Open tabs are protected straight away.", "good");
+            paintLicence(res.state, res.record);
+            render();
+            renderCompanyBanner();
+          });
+        } catch (_) {
+          btn.disabled = false;
+          btn.textContent = "Activate";
+          setLockMsg("Could not reach GuardAI. Try again.", "bad");
+        }
+      };
+      btn.addEventListener("click", activate);
+      input.addEventListener("keydown", (e) => { if (e.key === "Enter") activate(); });
+    }
   }
 
   /* Company connection banner. Asks the worker rather than reading storage
@@ -300,4 +422,5 @@
 
   render();
   renderCompanyBanner();
+  renderLicence();
 })();

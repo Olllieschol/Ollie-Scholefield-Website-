@@ -152,6 +152,42 @@ body {
 .gd-company p { font-size: 11.5px; line-height: 1.45; color: var(--text-dim); }
 .gd-company strong { color: var(--text); font-weight: 600; }
 
+/* Licence card. One card, three modes — locked, and the two flavours of
+   "running out". A second card with a second code field would mean two places
+   to type the same thing. */
+.gd-lock {
+  display: none;
+  margin: 0 0 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+}
+.gd-lock.is-on { display: block; }
+.gd-lock.is-warning { border-left-color: var(--text-dim); }
+.gd-lock__title { font-size: 13.5px; font-weight: 700; margin: 0 0 5px; }
+.gd-lock__body { font-size: 11.5px; line-height: 1.5; color: var(--text-dim); margin: 0 0 11px; }
+.gd-lock__row { display: flex; gap: 7px; }
+.gd-lock__row input {
+  flex: 1; min-width: 0;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 7px 9px; font-size: 12px; letter-spacing: .06em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.gd-lock__row input:focus { outline: none; border-color: var(--text-dim); }
+.gd-lock__row input::placeholder { color: var(--text-dim); letter-spacing: .06em; }
+.gd-lock__btn {
+  background: var(--text); color: var(--on-accent); border: none; border-radius: 8px;
+  padding: 7px 13px; font-size: 12px; font-weight: 650; cursor: pointer; flex: none;
+}
+.gd-lock__btn:disabled { opacity: .5; cursor: default; }
+.gd-lock__msg { display: none; margin: 9px 0 0; font-size: 11.5px; line-height: 1.45; color: var(--text-dim); }
+.gd-lock__msg.is-on { display: block; }
+.gd-lock__msg.is-bad { color: var(--danger); }
+.gd-lock__msg.is-good { color: var(--good); }
+
 .gd-score-card {
   display: flex; align-items: center; gap: 16px;
   background: var(--bg-card); border: 1px solid var(--border);
@@ -311,8 +347,24 @@ body.gd-disabled .gd-platforms { opacity: 0.45; pointer-events: none; }
       <p>Connected to <strong id="company-name">your company</strong>. Your masking activity is visible to your admin: <strong>how many</strong> items and <strong>what kind</strong>, never the values or your messages.</p>
     </div>
 
+    <!-- Licence: locked, or running out -->
+    <section class="gd-lock" id="lock-card">
+      <h2 class="gd-lock__title" id="lock-title">GuardAI is not active</h2>
+      <p class="gd-lock__body" id="lock-body">
+        Nothing is being masked. Enter your licence key, or the invite code from
+        your workplace.
+      </p>
+      <div class="gd-lock__row">
+        <input id="lock-code" type="text" placeholder="GK-XXXX-XXXX-XXXX"
+               autocomplete="off" spellcheck="false" maxlength="32"
+               aria-label="Licence key or invite code" />
+        <button class="gd-lock__btn" id="lock-activate" type="button">Activate</button>
+      </div>
+      <p class="gd-lock__msg" id="lock-msg" role="status" aria-live="polite"></p>
+    </section>
+
     <!-- Privacy score -->
-    <section class="gd-score-card">
+    <section class="gd-score-card" id="score-card">
       <div class="gd-score-ring" id="score-ring">
         <span class="gd-score-value" id="score-value">100</span>
         <span class="gd-score-label">privacy<br />score</span>

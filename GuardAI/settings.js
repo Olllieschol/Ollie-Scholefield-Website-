@@ -226,27 +226,23 @@
   }
 
   /* ------------------------------------------------------------------ *
-   * Connect to your company.
+   * Activate GuardAI.
+   *
+   * One field, two kinds of key. The extension works out which from the
+   * prefix (GA- workplace, GK- personal) rather than making somebody decide
+   * which sort of customer they are before they can type anything.
    *
    * All of the network work lives in the background worker; this only asks it
-   * questions and renders the answers. The code is the whole of the employee
-   * side: no account, no password, and disconnecting is one click.
+   * questions and renders the answers.
    * ------------------------------------------------------------------ */
   const companyEl = document.getElementById("company");
+  const DAY_MS = 86400000;
 
   function setCompanyMsg(text, bad) {
     const el = document.getElementById("company-msg");
     if (!el) return;
     el.textContent = text || "";
     el.className = "company__msg" + (text ? " is-on" : "") + (bad ? " is-bad" : "");
-  }
-
-  function paintCompany(conn) {
-    if (!companyEl) return;
-    companyEl.classList.toggle("is-connected", Boolean(conn));
-    if (conn) {
-      document.getElementById("company-name").textContent = conn.companyName;
-    }
   }
 
   function askWorker(message) {
@@ -262,9 +258,67 @@
     });
   }
 
-  async function initCompany() {
+  /**
+   * Paint one of the four states. "active" and "grace" are the same picture on
+   * purpose: grace means we have not managed to re-check recently, which is
+   * our problem and not something to make the user anxious about.
+   */
+  function paintActivation(state, rec, conn) {
     if (!companyEl) return;
-    const res = await askWorker({ type: "GUARDAI_COMPANY_STATUS" });
+    const running = state === "active" || state === "grace" || state === "warned";
+    // Three layouts, not two. Warned needs the status line AND the form —
+    // being told your licence is running out is useless without somewhere to
+    // type the new one.
+    companyEl.classList.toggle("is-connected", running && state !== "warned");
+    companyEl.classList.toggle("is-warned", state === "warned");
+
+    const heading = document.getElementById("activate-heading");
+    const intro = document.getElementById("activate-intro");
+    if (!running && heading && intro) {
+      heading.textContent = "Activate GuardAI";
+      intro.textContent =
+        "GuardAI needs a key before it will mask anything. Enter your personal " +
+        "licence key, or the invite code your workplace gave you \u2014 one field " +
+        "takes either, and there is no account and no password to set up.";
+    }
+    if (!running) return;
+
+    const kind = rec && rec.kind;
+    const left = rec && typeof rec.hardStopAt === "number"
+      ? Math.max(0, Math.ceil((rec.hardStopAt - Date.now()) / DAY_MS))
+      : null;
+    const stateEl = document.getElementById("activate-state");
+    const detailEl = document.getElementById("activate-detail");
+    if (!stateEl || !detailEl) return;
+
+    if (kind === "company") {
+      stateEl.textContent = "Connected to " + ((conn && conn.companyName) || "your company");
+      detailEl.textContent =
+        "Your masking activity is visible to your admin: counts and categories " +
+        "only, never the values or your messages.";
+    } else if (kind === "review") {
+      stateEl.textContent = "GuardAI is active (review build)";
+      detailEl.textContent = "This key does not expire and reports nothing.";
+    } else if (kind === "legacy") {
+      stateEl.textContent = "GuardAI now needs a licence";
+      detailEl.textContent =
+        `Still protecting you for ${left} more ${left === 1 ? "day" : "days"}. ` +
+        "Enter a licence key or an invite code above to keep it on.";
+    } else if (state === "warned") {
+      stateEl.textContent = "Your licence has lapsed";
+      detailEl.textContent =
+        `Still protecting you for ${left} more ${left === 1 ? "day" : "days"}, ` +
+        "so nothing stops mid-conversation. Renew or enter a new key above.";
+    } else {
+      stateEl.textContent = "GuardAI is active";
+      detailEl.textContent = "Personal licence. Nothing about your usage is reported to anyone.";
+    }
+
+  }
+
+  async function refreshActivation() {
+    if (!companyEl) return;
+    const res = await askWorker({ type: "GUARDAI_ENTITLEMENT_STATUS" });
 
     // Nothing to offer if this build has no backend configured: hide the whole
     // section rather than show a control that cannot work.
@@ -272,30 +326,37 @@
       companyEl.style.display = "none";
       return;
     }
-    paintCompany(res.connection);
+    const conn = await askWorker({ type: "GUARDAI_COMPANY_STATUS" });
+    paintActivation(res.state, res.record, conn && conn.connection);
+  }
+
+  async function initCompany() {
+    if (!companyEl) return;
+    await refreshActivation();
 
     const input = document.getElementById("company-code");
     const connectBtn = document.getElementById("company-connect");
+    if (!input || !connectBtn) return;
 
     connectBtn.addEventListener("click", async () => {
       const code = input.value.trim();
-      if (!code) return setCompanyMsg("Enter your invite code.", true);
+      if (!code) return setCompanyMsg("Enter your licence key or invite code.", true);
 
       connectBtn.disabled = true;
-      connectBtn.textContent = "Connecting\u2026";
+      connectBtn.textContent = "Activating\u2026";
       setCompanyMsg("");
 
-      const out = await askWorker({ type: "GUARDAI_COMPANY_CONNECT", code });
+      const out = await askWorker({ type: "GUARDAI_ACTIVATE", code });
       connectBtn.disabled = false;
-      connectBtn.textContent = "Connect";
+      connectBtn.textContent = "Activate";
 
       if (!out || !out.ok) {
-        setCompanyMsg((out && out.error) || "Could not connect. Try again.", true);
+        setCompanyMsg((out && out.error) || "Could not activate. Try again.", true);
         return;
       }
       input.value = "";
       setCompanyMsg("");
-      paintCompany(out.connection);
+      await refreshActivation();
     });
 
     input.addEventListener("keydown", (e) => {
@@ -303,9 +364,13 @@
     });
 
     document.getElementById("company-leave").addEventListener("click", async () => {
-      await askWorker({ type: "GUARDAI_COMPANY_DISCONNECT" });
-      paintCompany(null);
+      await askWorker({ type: "GUARDAI_DEACTIVATE" });
       setCompanyMsg("");
+      await refreshActivation();
+    });
+
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === "local" && changes.guardai_entitlement) refreshActivation();
     });
   }
 
