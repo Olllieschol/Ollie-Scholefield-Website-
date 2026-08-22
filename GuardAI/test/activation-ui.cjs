@@ -35,6 +35,7 @@ function check(ok, label, detail) {
 }
 
 const DAY = 86400000;
+const SEAT_ID = "4f2a9c31-7b60-4e8d-9f15-2c0a6d83be41";
 const rec = (over) => Object.assign({
   status: "active", kind: "individual", token: "tok",
   validUntil: null, hardStopAt: null, lastVerifiedAt: Date.now(), lastError: null,
@@ -79,7 +80,7 @@ function makeEnv(page, { state = "locked", record = null, onActivate, available 
           res = { ok: true, available, state: cur.state, record: cur.record };
         } else if (msg.type === "GUARDAI_COMPANY_STATUS") {
           res = { ok: true, available, connection: cur.record && cur.record.kind === "company"
-            ? { employeeId: "e", companyName: "Northwind Pty Ltd" } : null };
+            ? { employeeId: SEAT_ID, companyName: "Northwind Pty Ltd" } : null };
         } else if (msg.type === "GUARDAI_ACTIVATE") {
           res = onActivate ? onActivate(msg.code) : { ok: false, error: "no stub" };
           if (res && res.ok) cur = { state: res.state || "active", record: res.record || rec() };
@@ -94,8 +95,16 @@ function makeEnv(page, { state = "locked", record = null, onActivate, available 
     },
     tabs: { create() {} },
   };
+  // jsdom has no clipboard. Record what the copy button writes so the test can
+  // assert the id actually reached it, rather than only that a label changed.
+  const clipboard = [];
+  Object.defineProperty(window.navigator, "clipboard", {
+    value: { writeText: (t) => { clipboard.push(t); return Promise.resolve(); } },
+    configurable: true,
+  });
   window.eval(read(page === "popup.html" ? "popup.js" : "settings.js"));
-  return { window, document: window.document, storage, sent, setState: (s, r) => { cur = { state: s, record: r }; } };
+  return { window, document: window.document, storage, sent, clipboard,
+           setState: (s, r) => { cur = { state: s, record: r }; } };
 }
 
 const vis = (el) => !!el && el.style.display !== "none";
@@ -273,6 +282,54 @@ const vis = (el) => !!el && el.style.display !== "none";
       "naming the company", env.document.getElementById("activate-state").textContent);
     check(/visible to your admin/i.test(env.document.getElementById("activate-detail").textContent),
       "and repeating what the admin can see, where it is now relevant");
+  }
+
+  /* The seat id.
+     The privacy policy promises the holder can ask for their data or have it
+     deleted, and the seat id is deliberately the only handle that exists — we
+     cannot look anyone up by name. If this control regresses, that promise
+     silently becomes unkeepable, which is why it is tested rather than eyeballed. */
+  console.log("\n--- settings: the seat id, which the privacy policy depends on ---");
+  {
+    const env = makeEnv("settings.html", { state: "active", record: rec({ kind: "company" }) });
+    await wait(150);
+    const seat = env.document.getElementById("company-seat");
+    check(seat.classList.contains("is-on"), "a workplace seat shows its id");
+    check(env.document.getElementById("seat-id").textContent === SEAT_ID,
+      "showing the real id in full, not a truncation nobody could quote",
+      env.document.getElementById("seat-id").textContent);
+
+    const note = env.document.querySelector(".company__seatnote").textContent;
+    check(/hello@guard4ai\.com/.test(note), "with an address to send it to");
+    check(/deleted/i.test(note), "and what it is for");
+
+    env.document.getElementById("seat-copy").click();
+    await wait(60);
+    check(env.clipboard.length === 1 && env.clipboard[0] === SEAT_ID,
+      "the copy button copies the id itself", JSON.stringify(env.clipboard));
+    check(/copied/i.test(env.document.getElementById("seat-copy").textContent),
+      "and says so");
+  }
+  {
+    const env = makeEnv("settings.html", { state: "active", record: rec({ kind: "individual" }) });
+    await wait(150);
+    check(!env.document.getElementById("company-seat").classList.contains("is-on"),
+      "a personal licence shows no seat id, because it never mints one");
+    check(env.document.getElementById("seat-id").textContent === "",
+      "and nothing is left in the element to leak into a later paint");
+  }
+  {
+    // A stale id left on screen after deactivating would be the kind of quiet
+    // wrongness this whole section exists to avoid.
+    const env = makeEnv("settings.html", { state: "active", record: rec({ kind: "company" }) });
+    await wait(150);
+    check(env.document.getElementById("seat-id").textContent === SEAT_ID, "connected: id present");
+    env.document.getElementById("company-leave").click();
+    await wait(120);
+    check(!env.document.getElementById("company-seat").classList.contains("is-on"),
+      "deactivating takes the seat id off the screen");
+    check(env.document.getElementById("seat-id").textContent === "",
+      "and clears it, rather than leaving the last one sitting there");
   }
   {
     const env = makeEnv("settings.html", {

@@ -18,7 +18,7 @@
  * are absent, it silently disables itself and GuardAI keeps working on
  * patterns alone.
  *
- * TO ENABLE (see README / privacy-policy for full steps):
+ * TO ENABLE (see README for full steps):
  *   1. Download Transformers.js (transformers.min.js) into  GuardAI/lib/
  *   2. Download a small ONNX NER model (e.g. Xenova/bert-base-NER quantized)
  *      into  GuardAI/models/bert-base-NER/

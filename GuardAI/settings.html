@@ -131,6 +131,35 @@ header.top {
 }
 .company__leave:hover { color: var(--danger); border-color: var(--danger); }
 
+/* Your seat id. Only rendered for a workplace invite code, because a personal
+   licence never mints one. It is here because the privacy policy promises the
+   holder can ask for their data or have it deleted, and the seat id is
+   deliberately the only handle that exists — we cannot look anyone up by
+   name. Without this control that promise is unkeepable. */
+.company__seat { display: none; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.company.is-connected .company__seat.is-on { display: block; }
+.company__seat h3 {
+  font-size: 12px; font-weight: 600; color: var(--text);
+  letter-spacing: .04em; text-transform: uppercase; margin-bottom: 9px;
+}
+.company__seatrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.company__seatid {
+  flex: 1; min-width: 240px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px; color: var(--text); letter-spacing: .03em;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  padding: 9px 12px; user-select: all; overflow-wrap: anywhere;
+}
+.company__seatcopy {
+  background: none; border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text-dim); font-family: inherit; font-size: 12px;
+  padding: 9px 14px; cursor: pointer; transition: color .15s, border-color .15s;
+}
+.company__seatcopy:hover { color: var(--text); border-color: var(--text-dim); }
+.company__seatcopy.is-done { color: var(--good); border-color: var(--good); }
+.company__seatnote { margin-top: 10px; font-size: 12px; color: var(--text-dim); line-height: 1.55; }
+.company__seatnote a { color: var(--text); }
+
 .intro {
   background: var(--bg-card);
   border: 1px solid var(--border);
@@ -275,6 +304,22 @@ footer.note {
             <span id="activate-detail">Everything is running.</span>
           </div>
           <button class="company__leave" id="company-leave" type="button">Deactivate</button>
+        </div>
+
+        <div class="company__seat" id="company-seat">
+          <h3>Your seat id</h3>
+          <div class="company__seatrow">
+            <code class="company__seatid" id="seat-id" tabindex="0"></code>
+            <button class="company__seatcopy" id="seat-copy" type="button">Copy</button>
+          </div>
+          <p class="company__seatnote">
+            This random id is the only thing that identifies your seat to us. It
+            is not linked to your name, your email or your device, so we cannot
+            look you up any other way. Send it to
+            <a href="mailto:hello@guard4ai.com">hello@guard4ai.com</a> to get a
+            copy of what is stored against it, or to have it deleted. See the
+            <a href="#" id="seat-privacy">privacy policy</a>.
+          </p>
         </div>
       </section>
 

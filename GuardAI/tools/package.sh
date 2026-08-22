@@ -32,7 +32,6 @@ FILES=(
   popup.js
   settings.html
   settings.js
-  privacy-policy.html
   styles.css
   src
   icons

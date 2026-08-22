@@ -11,6 +11,11 @@
 
   const $ = (id) => document.getElementById(id);
 
+  // The canonical policy lives on the site. The Web Store will not accept a
+  // chrome-extension:// URL as a privacy policy, and a second copy shipped in
+  // the extension would drift from it. settings.js holds the same constant.
+  const PRIVACY_URL = "https://guard4ai.com/privacy";
+
   /* ---- Light / dark mode ---- */
   const THEME_KEY = "guardai_theme";
   function applyTheme(light) {
@@ -259,7 +264,11 @@
 
   els.privacyLink.addEventListener("click", (e) => {
     e.preventDefault();
-    chrome.tabs.create({ url: chrome.runtime.getURL("privacy-policy.html") });
+    // The Web Store requires a publicly reachable policy URL; a
+    // chrome-extension:// page does not qualify. The canonical copy lives on
+    // the site and this links out to it rather than shipping a second one
+    // that can drift.
+    chrome.tabs.create({ url: PRIVACY_URL });
   });
 
   $("settings-btn").addEventListener("click", () => {

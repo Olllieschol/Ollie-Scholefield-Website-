@@ -5,35 +5,33 @@ Everything the store needs that is not in the code. Keep this in step with
 
 ---
 
-## ⛔ BLOCKER — do not submit yet
+## Privacy policy
 
-**The privacy policy is factually wrong and it is the single most likely cause
-of rejection for this particular extension.**
+**https://guard4ai.com/privacy** — this is the URL the Developer Dashboard
+wants. A `chrome-extension://` page does not qualify, so the policy lives on
+the site and `popup.js` / `settings.js` link out to it. The copy that used to
+ship inside the package has been deleted rather than left to drift.
 
-`privacy-policy.html` says GuardAI *"never makes a single network request"* and
-*"we do not request … any network permissions"*, and `popup.html` badges
-*"100% local · zero external calls"*. The manifest carries
-`https://*.supabase.co/*` and the extension now contacts it on activation.
-A reviewer comparing the stated data practices against the requested host
-permissions finds a direct contradiction, on a product whose entire pitch is
-privacy.
+Rewritten 2026-08-22. The old version claimed GuardAI *"never makes a single
+network request"* and *"we do not request … any network permissions"* while the
+manifest carried `https://*.supabase.co/*` — a direct contradiction between the
+stated data practices and the requested permissions, on a product whose entire
+pitch is privacy. Fixed at the same time: `popup.html`'s *"zero external calls"*
+badge, and the manifest description's *"nothing ever leaves your device"*.
 
-`manifest.json`'s description — *"100% local — nothing ever leaves your
-device"* — is the store listing text and is wrong for the same reason.
+The honest claim is still the strong one and it is what the listing now says:
+**your message text never leaves your browser.** What leaves is a code at
+activation, and — workplace accounts only — a category counter.
 
-The rewrite was planned and deliberately deferred (2026-08-22). The honest
-version of the claim is still strong: **your message text never leaves your
-device.** What leaves is a code at activation, and — workplace accounts only —
-a category counter.
+Contact address in the policy: **hello@guard4ai.com**. Make sure it actually
+receives mail before submitting; a policy with a dead address is its own
+rejection, and it is now also the address the in-product rights flow points at.
 
-Also required before submission:
+Still to do on the Developer Dashboard:
 
-- A working contact address in the privacy policy. There is none, and a policy
-  with no way to reach anyone is its own rejection.
-- The Privacy practices tab must declare what is collected. It currently
-  implies nothing is. Authentication information (the licence key) now is.
-
----
+- **The Privacy practices tab must declare what is collected.** It currently
+  implies nothing is. Authentication information (the licence key) now is, and
+  for workplace accounts so is the category counter.
 
 ## Reviewer access
 

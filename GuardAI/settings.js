@@ -237,6 +237,10 @@
    * ------------------------------------------------------------------ */
   const companyEl = document.getElementById("company");
   const DAY_MS = 86400000;
+  // The canonical policy lives on the site. The Web Store will not accept a
+  // chrome-extension:// URL as a privacy policy, and a second copy shipped in
+  // the extension would drift from it. popup.js holds the same constant.
+  const PRIVACY_URL = "https://guard4ai.com/privacy";
 
   function setCompanyMsg(text, bad) {
     const el = document.getElementById("company-msg");
@@ -271,6 +275,12 @@
     // type the new one.
     companyEl.classList.toggle("is-connected", running && state !== "warned");
     companyEl.classList.toggle("is-warned", state === "warned");
+
+    // Above the early return below, deliberately. Every state has to resolve
+    // the seat block, including the ones that bail out before the detail line
+    // is written; otherwise deactivating leaves the previous holder's id on
+    // screen, which on a shared machine is a real if small leak.
+    paintSeat(running && rec && rec.kind === "company" ? conn : null);
 
     const heading = document.getElementById("activate-heading");
     const intro = document.getElementById("activate-intro");
@@ -313,7 +323,25 @@
       stateEl.textContent = "GuardAI is active";
       detailEl.textContent = "Personal licence. Nothing about your usage is reported to anyone.";
     }
+  }
 
+  /**
+   * Show the seat id, or clear it. Called on every paint rather than only when
+   * connecting, so deactivating takes the id off the screen instead of leaving
+   * the last one sitting there.
+   *
+   * A personal licence has no seat id to show: recordEvents() only fires when
+   * a company invite code has been redeemed, so an individual has nothing
+   * filed against them and nothing to ask us about.
+   */
+  function paintSeat(conn) {
+    const wrap = document.getElementById("company-seat");
+    const idEl = document.getElementById("seat-id");
+    if (!wrap || !idEl) return;
+
+    const id = conn && typeof conn.employeeId === "string" ? conn.employeeId : "";
+    idEl.textContent = id;
+    wrap.classList.toggle("is-on", Boolean(id));
   }
 
   async function refreshActivation() {
@@ -330,9 +358,54 @@
     paintActivation(res.state, res.record, conn && conn.connection);
   }
 
+  /**
+   * Copy button and policy link for the seat id. Wired once at startup, not on
+   * every paint, so repainting cannot stack duplicate listeners.
+   */
+  function wireSeatControls() {
+    const copyBtn = document.getElementById("seat-copy");
+    const idEl = document.getElementById("seat-id");
+    if (copyBtn && idEl) {
+      copyBtn.addEventListener("click", async () => {
+        const id = idEl.textContent.trim();
+        if (!id) return;
+        try {
+          await navigator.clipboard.writeText(id);
+        } catch (_) {
+          // Clipboard blocked: select the id instead so it can still be copied
+          // by hand, rather than claiming a success that did not happen.
+          const range = document.createRange();
+          range.selectNodeContents(idEl);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          copyBtn.textContent = "Press \u2318C";
+          setTimeout(() => { copyBtn.textContent = "Copy"; }, 2000);
+          return;
+        }
+        copyBtn.textContent = "Copied";
+        copyBtn.classList.add("is-done");
+        setTimeout(() => {
+          copyBtn.textContent = "Copy";
+          copyBtn.classList.remove("is-done");
+        }, 1600);
+      });
+    }
+
+    const policyLink = document.getElementById("seat-privacy");
+    if (policyLink) {
+      policyLink.addEventListener("click", (e) => {
+        e.preventDefault();
+        chrome.tabs.create({ url: PRIVACY_URL });
+      });
+    }
+  }
+
   async function initCompany() {
     if (!companyEl) return;
     await refreshActivation();
+
+    wireSeatControls();
 
     const input = document.getElementById("company-code");
     const connectBtn = document.getElementById("company-connect");
