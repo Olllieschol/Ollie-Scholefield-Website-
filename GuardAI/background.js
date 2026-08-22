@@ -18,9 +18,14 @@
 
 import { buildEventBody, normaliseSite } from "./src/company.js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured } from "./src/company-config.js";
+import {
+  decide, sweep, needsRefresh, describe, parseCode,
+  grandfathered, companyGrant,
+} from "./src/entitlement.js";
 
 const STATS_KEY = "guardai_stats";
 const COMPANY_KEY = "guardai_company";
+const ENT_KEY = "guardai_entitlement";
 
 const DEFAULT_STATS = () => ({
   detected: 0,
@@ -39,7 +44,7 @@ const DEFAULT_SETTINGS = {
  * Lifecycle: set sensible defaults on first install; reset session
  * stats whenever the browser starts a fresh session.
  * ------------------------------------------------------------------ */
-chrome.runtime.onInstalled.addListener(async () => {
+chrome.runtime.onInstalled.addListener(async (details) => {
   const existing = await chrome.storage.local.get(Object.keys(DEFAULT_SETTINGS));
   const toSet = {};
   for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) {
@@ -47,11 +52,13 @@ chrome.runtime.onInstalled.addListener(async () => {
   }
   toSet[STATS_KEY] = DEFAULT_STATS();
   await chrome.storage.local.set(toSet);
+  await migrateEntitlement(details && details.reason);
 });
 
 chrome.runtime.onStartup.addListener(async () => {
   // New browser session -> fresh stats (mapping table is intentionally kept).
   await chrome.storage.local.set({ [STATS_KEY]: DEFAULT_STATS() });
+  refreshIfStale().catch(() => {});
 });
 
 /* ------------------------------------------------------------------ *
@@ -61,6 +68,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg || msg.type !== "GUARDAI_STATS") return;
 
   // Run async work, then respond. Return true to keep the channel open.
+  refreshIfStale().catch(() => {});
   recordStats(msg).then((stats) => sendResponse({ ok: true, stats }));
   return true;
 });
@@ -153,11 +161,183 @@ async function connectCompany(code) {
     connectedAt: Date.now(),
   };
   await chrome.storage.local.set({ [COMPANY_KEY]: conn });
+  // An invite code is the whole of the employee's activation. They are not the
+  // one who pays, so redeeming it must unlock the product outright rather than
+  // leave them hunting for a second code.
+  await writeEntitlement(companyGrant(Date.now()));
   return conn;
 }
 
 async function disconnectCompany() {
   await chrome.storage.local.remove(COMPANY_KEY);
+  // Leaving your employer's dashboard also ends the entitlement it granted.
+  const rec = await readEntitlement();
+  if (rec && rec.kind === "company") await writeEntitlement(null);
+}
+
+
+/* ------------------------------------------------------------------ *
+ * Entitlement.
+ *
+ * GuardAI does nothing until a code has been redeemed. The rules live in
+ * src/entitlement.js and are deliberately not repeated here: this half only
+ * does the I/O — talk to the server, hand the answer to decide(), store what
+ * comes back. If you are looking for the policy, it is not in this file.
+ *
+ * Note which way the error handling runs. Every catch below produces
+ * `{ result: "error" }`, which decide() is contractually unable to turn into a
+ * lockout. The only path that can revoke anything is a 200 response that
+ * explicitly says the licence is invalid.
+ * ------------------------------------------------------------------ */
+
+/** @returns {Promise<object|null>} the live record, or null if locked. */
+async function readEntitlement() {
+  const data = await chrome.storage.local.get(ENT_KEY);
+  const rec = data[ENT_KEY] || null;
+  const live = sweep(rec, Date.now());
+  // A record that has run out is deleted rather than left lying around, so
+  // that "expired" and "never activated" converge on the same single state
+  // instead of becoming two things every caller has to remember to check.
+  if (rec && !live) await chrome.storage.local.remove(ENT_KEY);
+  return live;
+}
+
+async function writeEntitlement(rec) {
+  if (!rec) await chrome.storage.local.remove(ENT_KEY);
+  else await chrome.storage.local.set({ [ENT_KEY]: rec });
+  return rec;
+}
+
+/** Fold one outcome in through the state machine and persist the result. */
+async function applyOutcome(outcome) {
+  const prev = await readEntitlement();
+  return writeEntitlement(decide(prev, outcome, Date.now()));
+}
+
+/**
+ * First run after an update. An install that predates the gate keeps working
+ * — instantly bricking someone's privacy tool during a background update is
+ * indistinguishable from shipping a broken build.
+ */
+async function migrateEntitlement(reason) {
+  const data = await chrome.storage.local.get([ENT_KEY, COMPANY_KEY]);
+  if (data[ENT_KEY]) return;      // already decided, leave it alone
+  if (reason === "install") return; // genuinely new -> locked, as intended
+  await writeEntitlement(data[COMPANY_KEY] ? companyGrant(Date.now()) : grandfathered(Date.now()));
+}
+
+/** Turn a PostgREST error into something a person can act on. */
+function licenceError(raw) {
+  const text = String(raw || "");
+  if (text.includes("INVALID_KEY")) return "That licence key was not recognised. Check it and try again.";
+  if (text.includes("LICENCE_INACTIVE")) return "That licence is no longer active. Check your subscription.";
+  if (text.includes("LICENCE_EXPIRED")) return "That licence has expired.";
+  if (text.includes("DEVICE_LIMIT")) return "That licence is already in use on 3 devices. Deactivate one first.";
+  return "Could not reach GuardAI. Check your connection and try again.";
+}
+
+/** Supabase returns timestamptz as ISO text, or null for "never expires". */
+function parseValidUntil(v) {
+  if (v === null || v === undefined) return null;
+  const t = Date.parse(v);
+  return Number.isFinite(t) ? t : null;
+}
+
+async function activateLicence(code) {
+  if (!isConfigured()) throw new Error("Activation is not available in this build.");
+
+  let res;
+  try {
+    res = await fetch(rpcUrl("activate_licence"), {
+      method: "POST",
+      headers: rpcHeaders(),
+      body: JSON.stringify({ p_key: code }),
+    });
+  } catch (_) {
+    throw new Error(licenceError(""));
+  }
+
+  const payload = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(licenceError(payload && (payload.message || payload.hint)));
+  if (!payload || typeof payload.token !== "string") throw new Error(licenceError(""));
+
+  return {
+    token: payload.token,
+    plan: payload.plan === "review" ? "review" : "individual",
+    validUntil: parseValidUntil(payload.valid_until),
+  };
+}
+
+/**
+ * The single activation entry point. One field in the UI, routed by prefix,
+ * so nobody has to work out which kind of customer they are.
+ */
+async function activateCode(raw) {
+  const parsed = parseCode(raw);
+  if (!parsed) {
+    throw new Error("That doesn\u2019t look like a GuardAI code. Company codes start with GA-, licence keys with GK-.");
+  }
+
+  if (parsed.kind === "company") {
+    const conn = await connectCompany(parsed.code); // grants the entitlement itself
+    return { kind: "company", connection: conn };
+  }
+
+  const lic = await activateLicence(parsed.code);
+  // An individual licence never writes COMPANY_KEY, and recordEvents() only
+  // fires when COMPANY_KEY exists. That is the whole of the "individuals
+  // report nothing" guarantee: there is no branch to get wrong, because the
+  // key the reporting path reads is simply never written.
+  await applyOutcome({
+    result: "valid",
+    kind: lic.plan,
+    token: lic.token,
+    validUntil: lic.validUntil,
+  });
+  return { kind: lic.plan };
+}
+
+/**
+ * Opportunistic re-check. Called whenever the worker happens to be awake;
+ * needsRefresh() throttles it to once a day, and returns false outright for
+ * review builds and grandfathered installs, which have nothing to ask about.
+ */
+async function refreshIfStale() {
+  const rec = await readEntitlement();
+  if (!needsRefresh(rec, Date.now()) || !isConfigured()) return rec;
+
+  let res;
+  try {
+    res = await fetch(rpcUrl("refresh_entitlement"), {
+      method: "POST",
+      headers: rpcHeaders(),
+      body: JSON.stringify({ p_token: rec.token }),
+    });
+  } catch (_) {
+    return applyOutcome({ result: "error", reason: "network" });
+  }
+
+  // A 5xx, a 401, a proxy's login page: all of these are the server failing to
+  // answer, not answering "no". Fail open.
+  if (!res.ok) return applyOutcome({ result: "error", reason: "http-" + res.status });
+
+  const payload = await res.json().catch(() => null);
+  if (!payload || typeof payload.valid !== "boolean") {
+    return applyOutcome({ result: "error", reason: "malformed" });
+  }
+  if (!payload.valid) return applyOutcome({ result: "invalid" });
+
+  return applyOutcome({
+    result: "valid",
+    kind: rec.kind,
+    token: rec.token,
+    validUntil: parseValidUntil(payload.valid_until),
+  });
+}
+
+async function entitlementStatus() {
+  const rec = await readEntitlement();
+  return { state: describe(rec, Date.now()), record: rec, available: isConfigured() };
 }
 
 /**
@@ -215,7 +395,38 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       disconnectCompany().then(() => sendResponse({ ok: true }));
       return true;
 
+    case "GUARDAI_ENTITLEMENT_STATUS":
+      // Piggyback the daily re-check on a message we were woken for anyway,
+      // which is why this extension needs no "alarms" permission.
+      refreshIfStale().catch(() => {});
+      entitlementStatus().then((s) => sendResponse({ ok: true, ...s }));
+      return true;
+
+    case "GUARDAI_ACTIVATE":
+      activateCode(msg.code)
+        .then((out) => entitlementStatus().then((s) => sendResponse({ ok: true, ...out, ...s })))
+        .catch((err) => sendResponse({ ok: false, error: err.message }));
+      return true;
+
+    case "GUARDAI_DEACTIVATE":
+      Promise.all([writeEntitlement(null), chrome.storage.local.remove(COMPANY_KEY)])
+        .then(() => sendResponse({ ok: true }));
+      return true;
+
     default:
       return;
   }
 });
+
+/* ------------------------------------------------------------------ *
+ * Exported for tests only.
+ *
+ * Chrome loads this file as a service worker and never imports it, so these
+ * exports have no effect at runtime. They exist so the I/O half above can be
+ * driven directly in a test instead of raced through the message channel,
+ * where a fire-and-forget refresh would finish after the assertion.
+ * ------------------------------------------------------------------ */
+export {
+  activateCode, refreshIfStale, migrateEntitlement,
+  entitlementStatus, readEntitlement, writeEntitlement,
+};
