@@ -37,6 +37,7 @@ const SUITES = [
   { name: "gender-matched-names.cjs (stand-in gender matching + pool sizing)", file: "test/gender-matched-names.cjs" },
   // Licensing.
   { name: "entitlement.cjs (licence gate: fail-open, grace, grandfathering)", file: "test/entitlement.cjs" },
+  { name: "gate.cjs (locked vs master-off, restore survives a lapse, live unlock)", file: "test/gate.cjs" },
   // Section 1 core bug regressions.
   { name: "section1-bugs.cjs (licence/address/auto-replace)", file: "test/section1-bugs.cjs" },
   { name: "restore-name-integrity.cjs (name cross-contamination)", file: "test/restore-name-integrity.cjs" },

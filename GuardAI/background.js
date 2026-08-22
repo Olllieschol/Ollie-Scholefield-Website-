@@ -19,7 +19,7 @@
 import { buildEventBody, normaliseSite } from "./src/company.js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured } from "./src/company-config.js";
 import {
-  decide, sweep, needsRefresh, describe, parseCode,
+  decide, needsRefresh, describe, parseCode,
   grandfathered, companyGrant,
 } from "./src/entitlement.js";
 
@@ -190,16 +190,24 @@ async function disconnectCompany() {
  * explicitly says the licence is invalid.
  * ------------------------------------------------------------------ */
 
-/** @returns {Promise<object|null>} the live record, or null if locked. */
+/**
+ * The stored record, expired or not.
+ *
+ * An expired record is deliberately KEPT rather than deleted. It holds the
+ * device token, which is the only thing that can heal the situation: a
+ * subscription that renews after a lapse, or a machine whose clock jumped
+ * forward and back, both recover on the next refresh instead of forcing the
+ * user to dig out their licence key again. Deleting it would throw away the
+ * one field that fixes it.
+ *
+ * Nothing here decides whether the record still counts — isUnlocked() does,
+ * from hardStopAt alone.
+ *
+ * @returns {Promise<object|null>}
+ */
 async function readEntitlement() {
   const data = await chrome.storage.local.get(ENT_KEY);
-  const rec = data[ENT_KEY] || null;
-  const live = sweep(rec, Date.now());
-  // A record that has run out is deleted rather than left lying around, so
-  // that "expired" and "never activated" converge on the same single state
-  // instead of becoming two things every caller has to remember to check.
-  if (rec && !live) await chrome.storage.local.remove(ENT_KEY);
-  return live;
+  return data[ENT_KEY] || null;
 }
 
 async function writeEntitlement(rec) {
@@ -407,6 +415,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         .then((out) => entitlementStatus().then((s) => sendResponse({ ok: true, ...out, ...s })))
         .catch((err) => sendResponse({ ok: false, error: err.message }));
       return true;
+
+    case "GUARDAI_OPEN_ACTIVATION":
+      // The in-page locked notice cannot open the popup itself, and content
+      // scripts have no chrome.tabs, so it asks the worker. Creating a tab
+      // needs no "tabs" permission — only reading tab metadata does.
+      try { chrome.tabs.create({ url: chrome.runtime.getURL("settings.html") }); } catch (_) {}
+      return;
 
     case "GUARDAI_DEACTIVATE":
       Promise.all([writeEntitlement(null), chrome.storage.local.remove(COMPANY_KEY)])

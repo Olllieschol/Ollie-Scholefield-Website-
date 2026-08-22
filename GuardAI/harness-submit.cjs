@@ -20,6 +20,23 @@
 const fs = require("fs");
 const path = require("path");
 const { JSDOM } = require("jsdom");
+
+/**
+ * Every suite below this line is testing detection and masking, not the
+ * licence gate. A gated extension does nothing, so without an entitlement in
+ * storage they would all "pass" by proving that a locked GuardAI stays quiet
+ * — which is true, useless, and would hide every real regression.
+ *
+ * hardStopAt: null is the never-expires shape (what a review licence holds),
+ * so these fixtures cannot start failing on a date. The gate itself is tested
+ * in test/entitlement.cjs and test/gate.cjs, which set this up themselves.
+ */
+const LICENSED = () => ({
+  guardai_entitlement: {
+    status: "active", kind: "individual", token: "test-token",
+    validUntil: null, hardStopAt: null, lastVerifiedAt: Date.now(), lastError: null,
+  },
+});
 const DIR = __dirname;
 const read = (f) => fs.readFileSync(path.join(DIR, "src", f), "utf8");
 
@@ -102,7 +119,7 @@ function makeEnv({ profile }) {
   window.DataTransfer = function () { throw new Error("no DataTransfer"); };
   window.ClipboardEvent = window.Event;
 
-  const storage = {};
+  const storage = LICENSED();
   window.chrome = {
     storage: { local: {
       get: (k) => Promise.resolve((Array.isArray(k) ? k : [k]).reduce((o, kk) => { if (kk in storage) o[kk] = storage[kk]; return o; }, {})),

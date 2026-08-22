@@ -196,10 +196,66 @@
     // opening it IS the requested action there, not an unwanted side effect.
     lastMaskedText: null, // the masked text we just typed in; lets the user's
     // own manual send pass through without re-scanning/re-masking.
+    entitled: true, // licence gate. TRUE is the correct default and it is not
+    // an oversight: this value is only ever wrong when settings could not be
+    // read at all, and a storage failure is an error, not the server saying
+    // no. Defaulting to false would mean "Extension context invalidated"
+    // silently stops protecting someone — the exact failure the whole
+    // entitlement design exists to prevent, arriving through a side door.
+    // loadSettings() overwrites this with the real verdict a few ms later.
     aggressiveNames: false, // "Aggressive name detection" — opt-in, default OFF
     disabledCategories: [], // finding TYPEs the user switched off in "What
     // GuardAI masks" (settings.html). Empty by default — everything on.
   };
+
+  /* ------------------------------------------------------------------ *
+   * The licence gate.
+   *
+   * The policy lives in src/entitlement.js and runs in the service worker.
+   * This side does not re-derive it — it reads the verdict the worker already
+   * wrote, in one comparison. That is deliberate: two copies of a state
+   * machine drift, and the copy that drifts here is the one that decides
+   * whether somebody is still being protected.
+   *
+   * LOCKED IS NOT MASTER-OFF, and they must not be collapsed into one flag:
+   *
+   *   master-off  the user asked for silence. Give them silence.
+   *   locked      the user never asked for anything. Say so, once, and offer
+   *               the way out.
+   *
+   * The other half of that distinction is restore. Masking is the paid
+   * feature; being able to read your own already-masked conversations back is
+   * not, and holding it behind a lapsed subscription would leave someone
+   * staring at fake names in their own chat history with the real values
+   * sitting on their disk. So a locked device stops detecting and stops
+   * intercepting sends, but keeps swapping fakes back to real for as long as
+   * it has a mapping table. A brand-new install has an empty one, so it is
+   * inert exactly as intended.
+   * ------------------------------------------------------------------ */
+
+  /**
+   * Mirror of isUnlocked() in src/entitlement.js. Keep it this short — if it
+   * ever needs a second condition, the condition belongs in the worker and
+   * this should keep reading one field.
+   */
+  function entitledFrom(rec) {
+    if (!rec || typeof rec !== "object") return false;
+    // Not a finite number = "never expires" (review builds) or a damaged
+    // record. Both mean we cannot say it has run out, and not being able to
+    // say so never removes protection. Same rule as isUnlocked().
+    if (typeof rec.hardStopAt !== "number" || !isFinite(rec.hardStopAt)) return true;
+    return Date.now() < rec.hardStopAt;
+  }
+
+  /** May GuardAI detect, warn and mask? */
+  function isActive() {
+    return state.enabled && state.entitled;
+  }
+
+  /** May GuardAI put already-masked data back? See the note above. */
+  function canRestore() {
+    return state.enabled && (state.entitled || masker.size > 0);
+  }
 
   /* ------------------------------------------------------------------ *
    * Storage sync — keep local state in step with the dashboard toggles.
@@ -221,8 +277,10 @@
         "guardai_disabled_categories",
         "guardai_aggressive_names",
         "guardai_theme",
+        "guardai_entitlement",
       ]);
       state.enabled = data.guardai_enabled !== false; // default ON
+      state.entitled = entitledFrom(data.guardai_entitlement);
       state.maskingEnabled = data.guardai_masking_enabled === true; // default OFF
       state.autoRestore = data.guardai_auto_restore !== false; // default ON
       state.autoOpenPanel = data.guardai_autopanel_enabled === true; // default OFF
@@ -251,6 +309,13 @@
     if (area !== "local") return;
     if (changes.guardai_enabled) {
       state.enabled = changes.guardai_enabled.newValue !== false;
+      applyEnabledState();
+    }
+    if (changes.guardai_entitlement) {
+      // Activating in the popup must unlock the tabs the user already has
+      // open. Waiting for a reload would make a successful activation look
+      // like it had failed.
+      state.entitled = entitledFrom(changes.guardai_entitlement.newValue);
       applyEnabledState();
     }
     if (changes.guardai_masking_enabled) {
@@ -1322,12 +1387,81 @@
     } catch (_) { /* storage unavailable — don't nag */ }
   }
 
+  /* ------------------------------------------------------------------ *
+   * Locked notice.
+   *
+   * The visible half of "locked is not master-off". A device that has never
+   * been activated does nothing at all, and an extension that does nothing
+   * and says nothing is indistinguishable from a broken one — to a new user,
+   * and to whoever is reviewing the store listing. So it says so, once,
+   * with the way out one click away.
+   *
+   * Never shown when the master toggle is off: that silence was asked for.
+   * ------------------------------------------------------------------ */
+  const LOCK_NOTICE_KEY = "guardai_lock_notice_seen";
+  let lockedNoticeEl = null;
+
+  function removeLockedNotice() {
+    if (lockedNoticeEl) {
+      lockedNoticeEl.remove();
+      lockedNoticeEl = null;
+    }
+  }
+
+  function updateLockedNotice() {
+    // Locked AND switched on is the only combination that gets a notice.
+    if (!state.enabled || state.entitled) return removeLockedNotice();
+    if (lockedNoticeEl) return;
+
+    const build = () => {
+      if (lockedNoticeEl || !state.enabled || state.entitled) return;
+      const el = document.createElement("div");
+      el.className = "guardai-locked";
+      el.setAttribute("role", "status");
+      el.innerHTML =
+        `<div class="guardai-locked__head">` +
+        `<span class="guardai-locked__shield">${SHIELD_SVG}</span>` +
+        `<span class="guardai-locked__title">GuardAI is not active</span>` +
+        `<button class="guardai-locked__close" aria-label="Dismiss">&times;</button>` +
+        `</div>` +
+        `<p class="guardai-locked__body">Nothing is being masked on this page. ` +
+        `Enter your licence key or your workplace invite code to switch it on.</p>` +
+        `<button class="guardai-locked__ok">Activate GuardAI</button>`;
+      document.body.appendChild(el);
+      lockedNoticeEl = el;
+
+      // Dismissal is remembered for good. The popup and the settings page both
+      // show the locked state permanently, so this is a pointer to them rather
+      // than the notification itself — re-showing it on every page load would
+      // be nagging someone about a decision they have already made.
+      const dismiss = () => {
+        removeLockedNotice();
+        try {
+          chrome.storage.local.set({ [LOCK_NOTICE_KEY]: true }).catch(() => {});
+        } catch (_) { /* non-fatal */ }
+      };
+      el.querySelector(".guardai-locked__close").onclick = dismiss;
+      el.querySelector(".guardai-locked__ok").onclick = () => {
+        try {
+          chrome.runtime.sendMessage({ type: "GUARDAI_OPEN_ACTIVATION" });
+        } catch (_) { /* worker asleep — the popup still works */ }
+        dismiss();
+      };
+    };
+
+    try {
+      chrome.storage.local.get([LOCK_NOTICE_KEY]).then((d) => {
+        if (!d || !d[LOCK_NOTICE_KEY]) build();
+      }).catch(() => { /* storage unreadable — say nothing rather than nag */ });
+    } catch (_) { /* storage unavailable */ }
+  }
+
   function ensurePanel() {
     // Never show the panel while GuardAI is switched off, no matter which
     // code path got here (boot/soft-nav restoring a saved log, a stray
     // in-flight unmask pass finishing after the toggle, etc.) — the master
     // toggle must mean everything visibly goes away, not just new activity.
-    if (!state.enabled) return;
+    if (!canRestore()) return;
     if (panelEl) {
       panelEl.style.display = "";
       if (reopenEl) reopenEl.style.display = "none";
@@ -1564,7 +1698,7 @@
   function showReopen() {
     // Same invariant as ensurePanel(): the collapsed badge must never appear
     // while GuardAI is off.
-    if (!state.enabled) return;
+    if (!canRestore()) return;
     if (!reopenEl) {
       reopenEl = document.createElement("button");
       reopenEl.className = "guardai-reopen";
@@ -1681,7 +1815,7 @@
   }
 
   async function handleSendAttempt(editor) {
-    if (!state.enabled) return true; // extension off -> allow
+    if (!isActive()) return true; // off or unlicensed -> never block a send
 
     const text = getEditorText(editor).trim();
     if (!text) return true;
@@ -1782,7 +1916,7 @@
     "keydown",
     async (e) => {
       if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
-      if (!state.enabled) return; // master off — never intercept the send
+      if (!isActive()) return; // off or unlicensed — never intercept the send
       // During the mask flow's fill, block EVERY Enter outright (a stray user
       // Enter mid-fill must not submit a partial message). Cleared as soon as the
       // fill is done, so this never blocks a normal send.
@@ -1824,7 +1958,7 @@
     async (e) => {
       const btn = e.target.closest(CONFIG.sendButton.join(","));
       if (!btn) return;
-      if (!state.enabled) return; // master off — never intercept the send
+      if (!isActive()) return; // off or unlicensed — never intercept the send
       // Never intercept clicks inside GuardAI's own UI.
       if (btn.closest(".guardai-panel, .guardai-prompt")) return;
       // During the mask flow's fill, block site send-button clicks too.
@@ -2821,7 +2955,7 @@
    * response as it arrives.
    */
   function scheduleUnmask() {
-    if (!state.enabled) return; // master off — no monitoring
+    if (!canRestore()) return; // master off — no monitoring
     if (masker.size === 0) return; // nothing to swap back
     const now = Date.now();
     clearTimeout(unmaskTimer);
@@ -3502,10 +3636,13 @@
    */
   let decorateTimer = null;
   function scheduleDecorate() {
-    if (!state.enabled) return; // master off — no UI injection
+    // canRestore(), not isActive(): the per-message show-real/show-fake
+    // buttons belong to the restore path. On a fresh unlicensed install
+    // masker.size is 0, so nothing is injected and the page stays untouched.
+    if (!canRestore()) return;
     clearTimeout(decorateTimer);
     decorateTimer = setTimeout(async () => {
-      if (!state.enabled) return;
+      if (!canRestore()) return;
       await masker.load();
       decorateMessages(findResponseRoot());
     }, 120);
@@ -3548,7 +3685,8 @@
    * indistinguishable from having wiped their history.
    */
   function applyEnabledState() {
-    if (state.enabled) {
+    updateLockedNotice();
+    if (canRestore()) {
       scheduleUnmask();
       scheduleDecorate();
       // Put the activity UI back the way the user left it. Re-opening a panel
@@ -3783,6 +3921,7 @@
     nlp.init().catch(() => {});
 
     startObserving();
+    updateLockedNotice();
     console.info(`[GuardAI] active on ${CONFIG.name}. All processing is local. [build: 2026-07-09-upgrade-s1-s5]`);
   }
 

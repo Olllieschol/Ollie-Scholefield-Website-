@@ -13,6 +13,16 @@ const fs = require("fs");
 const path = require("path");
 const { JSDOM } = require("jsdom");
 
+/** See the note in test/_env.cjs: these suites test masking, not the licence
+ *  gate, so they run as a licensed install. */
+const LICENSED = () => ({
+  guardai_entitlement: {
+    status: "active", kind: "individual", token: "test-token",
+    validUntil: null, hardStopAt: null, lastVerifiedAt: Date.now(), lastError: null,
+  },
+});
+
+
 const ROOT = path.join(__dirname, "..");
 const read = (f) => fs.readFileSync(path.join(ROOT, "src", f), "utf8");
 
@@ -29,7 +39,7 @@ function loadWindow(seedStorage) {
     pretendToBeVisual: true,
   });
   const w = dom.window;
-  const storage = { ...seedStorage };
+  const storage = { ...LICENSED(), ...seedStorage };
   w.chrome = {
     storage: {
       local: {

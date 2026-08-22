@@ -13,6 +13,16 @@
 const fs = require("fs");
 const path = require("path");
 const { JSDOM } = require("jsdom");
+
+/** See the note in test/_env.cjs: these suites test masking, not the licence
+ *  gate, so they run as a licensed install. */
+const LICENSED = () => ({
+  guardai_entitlement: {
+    status: "active", kind: "individual", token: "test-token",
+    validUntil: null, hardStopAt: null, lastVerifiedAt: Date.now(), lastError: null,
+  },
+});
+
 const DIR = __dirname;
 const read = (f) => fs.readFileSync(path.join(DIR, "..", "src", f), "utf8");
 
@@ -84,7 +94,7 @@ function makeEnv({ profile, maskingEnabled }) {
   window.DataTransfer = function () { throw new Error("no DataTransfer"); };
   window.ClipboardEvent = window.Event;
 
-  const storage = { guardai_masking_enabled: !!maskingEnabled };
+  const storage = { ...LICENSED(), guardai_masking_enabled: !!maskingEnabled };
   window.chrome = {
     storage: { local: {
       get: (k) => Promise.resolve((Array.isArray(k) ? k : [k]).reduce((o, kk) => { if (kk in storage) o[kk] = storage[kk]; return o; }, {})),

@@ -328,12 +328,52 @@ const jsonRes = (status, body) => ({ ok: status >= 200 && status < 300, status, 
     env.restoreClock();
   }
   {
+    // An expired record is KEPT, not deleted. It holds the token, which is the
+    // only thing that can heal a lapse — deleting it would make a renewed
+    // subscription, or a clock that jumped forward and back, require the user
+    // to dig out their licence key again.
     const expired = { ...staleActive, hardStopAt: T0 + DAY };
-    const env = await loadWorker({ storage: { guardai_entitlement: expired }, now: T0 + 2 * DAY });
-    const rec = await env.mod.readEntitlement();
-    check(rec === null && env.storage.guardai_entitlement === undefined,
-      "an expired record is swept, so 'expired' and 'never activated' converge on one state");
+    const env = await loadWorker({
+      storage: { guardai_entitlement: { ...expired } },
+      now: T0 + 2 * DAY,
+      fetchImpl: () => jsonRes(200, { valid: true, plan: "individual", valid_until: "2026-06-01T00:00:00Z" }),
+    });
+    check(E.isUnlocked(await env.mod.readEntitlement(), T0 + 2 * DAY) === false,
+      "an expired record does not unlock anything");
+    const healed = await env.mod.refreshIfStale();
+    check(E.isUnlocked(healed, T0 + 2 * DAY),
+      "but its token heals it the moment the server says the licence is good again — a renewal just starts working");
     env.restoreClock();
+  }
+  {
+    // The attack this opens up: if an expired record survives, a refusal must
+    // not hand it a fresh 14-day warning window and thereby resurrect it.
+    const expired = { ...staleActive, hardStopAt: T0 + DAY };
+    const env = await loadWorker({
+      storage: { guardai_entitlement: { ...expired } },
+      now: T0 + 2 * DAY,
+      fetchImpl: () => jsonRes(200, { valid: false }),
+    });
+    const after = await env.mod.refreshIfStale();
+    check(E.isUnlocked(after, T0 + 2 * DAY) === false,
+      "a refusal cannot resurrect an already-expired licence for another fortnight",
+      "hardStopAt now " + F(after, "hardStopAt"));
+    env.restoreClock();
+  }
+  {
+    // A damaged record must fail OPEN. Being unable to read the deadline is us
+    // failing to know, and that never removes protection.
+    for (const [label, bad] of [
+      ["no hardStopAt at all", {}],
+      ["hardStopAt is a string", { hardStopAt: "soon" }],
+      ["hardStopAt is NaN", { hardStopAt: NaN }],
+      ["hardStopAt is Infinity", { hardStopAt: Infinity }],
+      ["hardStopAt is explicitly null (a review build)", { hardStopAt: null }],
+    ]) {
+      check(E.isUnlocked(bad, T0), `fails OPEN: ${label}`);
+    }
+    check(E.isUnlocked(null, T0) === false && E.isUnlocked(undefined, T0) === false,
+      "but NO record is still locked — corruption is not an activation route");
   }
   {
     const review = { status: "active", kind: "review", token: "44444444-4444-4444-4444-444444444444",

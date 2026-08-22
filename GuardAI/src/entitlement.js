@@ -77,7 +77,11 @@ export function parseCode(raw) {
  */
 export function isUnlocked(rec, now = Date.now()) {
   if (!rec) return false;
-  if (rec.hardStopAt === null || rec.hardStopAt === undefined) return true;
+  // null/undefined means "never expires" (review builds). Anything else that
+  // is not a finite number means the record is damaged, and a damaged record
+  // is us failing to know — which never removes protection. You cannot exploit
+  // this without having been granted a record in the first place.
+  if (typeof rec.hardStopAt !== "number" || !Number.isFinite(rec.hardStopAt)) return true;
   return now < rec.hardStopAt;
 }
 
@@ -151,6 +155,13 @@ export function decide(prev, outcome, now = Date.now()) {
   // hours, and the licence would never actually end.
   if (o.result === "invalid") {
     if (!prev) return null;
+    // Already run out. Without this, an expired record that is kept around so
+    // its token can heal it (see readEntitlement) would be handed a fresh
+    // 14-day window by the very response saying it is invalid — a refusal
+    // would resurrect the thing it refused.
+    if (!isUnlocked(prev, now)) {
+      return { ...prev, lastVerifiedAt: now, lastError: null };
+    }
     if (prev.status === "warned") {
       return { ...prev, lastVerifiedAt: now, lastError: null };
     }

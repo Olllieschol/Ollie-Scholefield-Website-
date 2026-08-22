@@ -15,6 +15,16 @@
 const fs = require("fs");
 const path = require("path");
 const { JSDOM } = require("jsdom");
+
+/** See the note in test/_env.cjs: these suites test masking, not the licence
+ *  gate, so they run as a licensed install. */
+const LICENSED = () => ({
+  guardai_entitlement: {
+    status: "active", kind: "individual", token: "test-token",
+    validUntil: null, hardStopAt: null, lastVerifiedAt: Date.now(), lastError: null,
+  },
+});
+
 const DIR = __dirname;
 const read = (f) => fs.readFileSync(path.join(DIR, "..", "src", f), "utf8");
 
@@ -83,6 +93,7 @@ function makeEnv({ autopanelEnabled }) {
   window.ClipboardEvent = window.Event;
 
   const storage = {
+    ...LICENSED(),
     guardai_masking_enabled: false, // exercise the plain warning-card + Mask & Send flow
     guardai_autopanel_enabled: !!autopanelEnabled,
   };

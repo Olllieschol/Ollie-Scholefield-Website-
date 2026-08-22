@@ -19,10 +19,27 @@ const fs = require("fs");
 const path = require("path");
 const { JSDOM } = require("jsdom");
 
+/**
+ * Every suite below this line is testing detection and masking, not the
+ * licence gate. A gated extension does nothing, so without an entitlement in
+ * storage they would all "pass" by proving that a locked GuardAI stays quiet
+ * — which is true, useless, and would hide every real regression.
+ *
+ * hardStopAt: null is the never-expires shape (what a review licence holds),
+ * so these fixtures cannot start failing on a date. The gate itself is tested
+ * in test/entitlement.cjs and test/gate.cjs, which set this up themselves.
+ */
+const LICENSED = () => ({
+  guardai_entitlement: {
+    status: "active", kind: "individual", token: "test-token",
+    validUntil: null, hardStopAt: null, lastVerifiedAt: Date.now(), lastError: null,
+  },
+});
+
 const DIR = __dirname;
 const read = (f) => fs.readFileSync(path.join(DIR, "src", f), "utf8");
 
-function makeEnv({ pasteWorks, seed }) {
+function makeEnv({ pasteWorks, seed, licensed = true, storageFails = false } = {}) {
   const dom = new JSDOM(`<!DOCTYPE html><html><body></body></html>`, {
     url: "https://chatgpt.com/c/abc123",
     runScripts: "dangerously",
@@ -115,14 +132,25 @@ function makeEnv({ pasteWorks, seed }) {
   // ---- chrome stub ----
   // `seed` pre-populates storage BEFORE content.js boots, so a test can set
   // a toggle without depending on listener timing.
-  const storage = Object.assign({}, seed || {});
+  // licensed:false boots the extension exactly as a user who has never
+  // entered a code sees it. Everything else defaults to a working licence —
+  // see the note on LICENSED().
+  const storage = Object.assign(licensed ? LICENSED() : {}, seed || {});
   const storageListeners = [];
+  const runtimeMessages = [];
   window.chrome = {
     storage: {
       local: {
-        get: (keys) => Promise.resolve(
-          (Array.isArray(keys) ? keys : [keys]).reduce((o, k) => { if (k in storage) o[k] = storage[k]; return o; }, {})
-        ),
+        // storageFails simulates "Extension context invalidated", which is a
+        // real and not-rare condition (it happens to every open tab when the
+        // extension reloads or updates). It has to be settable from before
+        // content.js is evaluated, because loadSettings() runs during boot and
+        // patching the stub afterwards is already too late.
+        get: (keys) => storageFails
+          ? Promise.reject(new Error("Extension context invalidated"))
+          : Promise.resolve(
+              (Array.isArray(keys) ? keys : [keys]).reduce((o, k) => { if (k in storage) o[k] = storage[k]; return o; }, {})
+            ),
         set: (obj) => {
           // Fire onChanged like real chrome.storage does. The old no-op stub
           // meant any setting written AFTER boot never reached content.js, so
@@ -146,7 +174,13 @@ function makeEnv({ pasteWorks, seed }) {
       },
       onChanged: { addListener(fn) { storageListeners.push(fn); } },
     },
-    runtime: { sendMessage() {}, lastError: null, getURL: (p) => "file://" + p },
+    runtime: {
+      // Recorded rather than dropped, so a test can assert that the locked
+      // notice actually asks the worker to open the activation page.
+      sendMessage(m) { runtimeMessages.push(m); },
+      lastError: null,
+      getURL: (p) => "file://" + p,
+    },
   };
 
   // Fallbacks for constructors jsdom may lack.
@@ -162,7 +196,7 @@ function makeEnv({ pasteWorks, seed }) {
     window.eval(read(f));
   }
 
-  return { window, document, EDITOR, sendBtn, sentMessages, SUBMIT };
+  return { runtimeMessages, storage, window, document, EDITOR, sendBtn, sentMessages, SUBMIT };
 }
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
