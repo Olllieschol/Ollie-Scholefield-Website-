@@ -36,6 +36,26 @@ function check(ok, label, detail) {
   else { failures++; console.log("FAIL  " + label + (detail ? " — " + detail : "")); }
 }
 
+/**
+ * Whole-word containment.
+ *
+ * These assertions mean "this token of the real name is gone", but a plain
+ * includes() answers a different question: "do these letters appear anywhere".
+ * The particles in names like "María de la Cruz" are two letters long and turn
+ * up inside perfectly ordinary stand-ins — "Quillan" contains "la", "Alden"
+ * contains "de" — so the check failed about one run in three depending on
+ * which fake name was drawn, with nothing wrong with the product. Found
+ * 2026-08-22; it had been flaky since these cases were added.
+ *
+ * \b is no use here because it is ASCII-only and these names are the reason
+ * this file exists, hence the explicit letter/mark lookarounds — the same
+ * boundary treatment detector.js uses.
+ */
+function containsWord(haystack, word) {
+  const esc = String(word).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![\\p{L}\\p{M}])${esc}(?![\\p{L}\\p{M}])`, "u").test(haystack);
+}
+
 (async () => {
   const w = loadWindow();
   const det = new w.GuardAI.Detector();
@@ -91,7 +111,7 @@ function check(ok, label, detail) {
     const text = `Contact ${name} on 0412 556 781`;
     const r = await maskText(w, text);
     const firstPart = name.split(/[\s'-]/)[0];
-    check(!r.masked.includes(firstPart),
+    check(!containsWord(r.masked, firstPart),
       `no fragment of ${JSON.stringify(name)} left behind (was "${firstPart}-...")`, r.masked);
   }
 
@@ -138,7 +158,7 @@ function check(ok, label, detail) {
     const text = `Contact ${name} on 0412 556 781`;
     const r = await maskText(w, text);
     for (const part of name.split(/\s+/)) {
-      check(!r.masked.includes(part),
+      check(!containsWord(r.masked, part),
         `no token of ${JSON.stringify(name)} survives masking (checked "${part}")`, r.masked);
     }
   }
