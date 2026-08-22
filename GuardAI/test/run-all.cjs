@@ -39,6 +39,8 @@ const SUITES = [
   { name: "entitlement.cjs (licence gate: fail-open, grace, grandfathering)", file: "test/entitlement.cjs" },
   { name: "gate.cjs (locked vs master-off, restore survives a lapse, live unlock)", file: "test/gate.cjs" },
   { name: "activation-ui.cjs (popup licence card + settings activation, all four states)", file: "test/activation-ui.cjs" },
+  { name: "backend-contract.cjs (SQL error codes + safety clauses match the extension)", file: "test/backend-contract.cjs" },
+  { name: "packaging.cjs (the store zip contains everything, and nothing else)", file: "test/packaging.cjs" },
   // Section 1 core bug regressions.
   { name: "section1-bugs.cjs (licence/address/auto-replace)", file: "test/section1-bugs.cjs" },
   { name: "restore-name-integrity.cjs (name cross-contamination)", file: "test/restore-name-integrity.cjs" },
