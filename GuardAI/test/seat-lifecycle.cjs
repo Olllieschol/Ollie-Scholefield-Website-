@@ -264,6 +264,62 @@ const seatOk = () => jsonRes(200, { valid: true, company_name: "Northwind Pty Lt
     env.restoreClock();
   }
 
+  /* ══ PART 5 — handing the seat back ═════════════════════════════════ */
+  console.log("\n--- 5. deactivating tells the server, and never depends on it ---");
+  {
+    const env = await loadWorker({
+      storage: {
+        guardai_company: { employeeId: SEAT, companyName: "N", connectedAt: T0 },
+        guardai_entitlement: E.companyGrant(SEAT, T0),
+      },
+      fetchImpl: () => jsonRes(200, null),
+    });
+    await env.mod.disconnectCompany();
+    check(env.fetchCalls.length === 1 && env.fetchCalls[0].url.endsWith("/release_seat"),
+      "deactivating calls release_seat",
+      JSON.stringify(env.fetchCalls.map((c) => c.url)));
+    check(env.fetchCalls[0].body.p_employee_id === SEAT,
+      "with the seat id, which it had to read before wiping it");
+    check(!("guardai_company" in env.storage) && !("guardai_entitlement" in env.storage),
+      "and the local side is gone afterwards");
+    env.restoreClock();
+  }
+  {
+    // The whole point of best-effort: a dead server cannot trap someone in a
+    // connection they are trying to leave.
+    const env = await loadWorker({
+      storage: {
+        guardai_company: { employeeId: SEAT, companyName: "N", connectedAt: T0 },
+        guardai_entitlement: E.companyGrant(SEAT, T0),
+      },
+      // no fetchImpl -> the release throws
+    });
+    let threw = false;
+    try { await env.mod.disconnectCompany(); } catch (_) { threw = true; }
+    check(!threw, "a failed release does not throw");
+    check(!("guardai_company" in env.storage),
+      "and deactivating still works offline — the local wipe never depends on the network");
+    env.restoreClock();
+  }
+  {
+    // An individual licence has no seat, so there is nothing to hand back and
+    // nothing should be sent.
+    const env = await loadWorker({
+      storage: {
+        guardai_entitlement: {
+          status: "active", kind: "individual", token: "tok-9",
+          validUntil: T0 + 30 * DAY, hardStopAt: T0 + 44 * DAY,
+          lastVerifiedAt: T0, lastError: null,
+        },
+      },
+      fetchImpl: () => jsonRes(200, null),
+    });
+    await env.mod.releaseSeat();
+    check(env.fetchCalls.length === 0,
+      "an individual licence releases nothing, because it never took a seat");
+    env.restoreClock();
+  }
+
   console.log(`\nSEAT-LIFECYCLE: ${failures === 0 ? "ALL PASS" : failures + " FAILURES"}`);
   process.exit(failures ? 1 : 0);
 })().catch((e) => { console.error("ERROR:", e); process.exit(1); });

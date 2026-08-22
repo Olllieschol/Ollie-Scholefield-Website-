@@ -168,7 +168,39 @@ async function connectCompany(code) {
   return conn;
 }
 
+/**
+ * Hand the seat back before letting go of it.
+ *
+ * Deactivating used to be purely local, so a seat stayed occupied on the
+ * dashboard forever and a company slowly filled up with people who had left.
+ * Nothing else can notice: there is no name, no device, no identity of any
+ * kind stored against a seat, so the server cannot work out on its own that
+ * this one is finished. Saying so is the only mechanism there is.
+ *
+ * Deliberately best-effort, and deliberately BEFORE the local wipe. A server
+ * that is down, slow, or unreachable must not be able to stop someone
+ * deactivating on their own machine, so every failure here is swallowed and
+ * the caller carries on. The cost of a dropped release is one leaked seat that
+ * an admin can remove by hand; the cost of blocking would be a user who cannot
+ * turn the thing off.
+ */
+async function releaseSeat() {
+  if (!isConfigured()) return;
+  const conn = await getConnection();
+  if (!conn) return;
+  try {
+    await fetch(rpcUrl("release_seat"), {
+      method: "POST",
+      headers: rpcHeaders(),
+      body: JSON.stringify({ p_employee_id: conn.employeeId }),
+    });
+  } catch (_) {
+    // Offline. The seat stays until an admin clears it.
+  }
+}
+
 async function disconnectCompany() {
+  await releaseSeat();
   await chrome.storage.local.remove(COMPANY_KEY);
   // Leaving your employer's dashboard also ends the entitlement it granted.
   const rec = await readEntitlement();
@@ -455,7 +487,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       return;
 
     case "GUARDAI_DEACTIVATE":
-      Promise.all([writeEntitlement(null), chrome.storage.local.remove(COMPANY_KEY)])
+      // Release first, then wipe. Unlike disconnectCompany this clears the
+      // entitlement whatever kind it is, because it is the settings page's
+      // "Deactivate" and an individual licence holder means it too;
+      // releaseSeat simply does nothing when there is no seat.
+      releaseSeat()
+        .then(() => Promise.all([writeEntitlement(null), chrome.storage.local.remove(COMPANY_KEY)]))
         .then(() => sendResponse({ ok: true }));
       return true;
 
@@ -475,4 +512,5 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 export {
   activateCode, refreshIfStale, migrateEntitlement,
   entitlementStatus, readEntitlement, writeEntitlement,
+  disconnectCompany, releaseSeat,
 };
