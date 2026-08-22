@@ -20,7 +20,7 @@ import { buildEventBody, normaliseSite } from "./src/company.js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured } from "./src/company-config.js";
 import {
   decide, needsRefresh, describe, parseCode,
-  grandfathered, companyGrant,
+  grandfathered, companyGrant, COMPANY_INITIAL_MS,
 } from "./src/entitlement.js";
 
 const STATS_KEY = "guardai_stats";
@@ -164,7 +164,7 @@ async function connectCompany(code) {
   // An invite code is the whole of the employee's activation. They are not the
   // one who pays, so redeeming it must unlock the product outright rather than
   // leave them hunting for a second code.
-  await writeEntitlement(companyGrant(Date.now()));
+  await writeEntitlement(companyGrant(conn.employeeId));
   return conn;
 }
 
@@ -231,7 +231,12 @@ async function migrateEntitlement(reason) {
   const data = await chrome.storage.local.get([ENT_KEY, COMPANY_KEY]);
   if (data[ENT_KEY]) return;      // already decided, leave it alone
   if (reason === "install") return; // genuinely new -> locked, as intended
-  await writeEntitlement(data[COMPANY_KEY] ? companyGrant(Date.now()) : grandfathered(Date.now()));
+  const conn = data[COMPANY_KEY];
+  await writeEntitlement(
+    conn && typeof conn.employeeId === "string"
+      ? companyGrant(conn.employeeId)
+      : grandfathered(Date.now())
+  );
 }
 
 /** Turn a PostgREST error into something a person can act on. */
@@ -310,16 +315,40 @@ async function activateCode(raw) {
  * needsRefresh() throttles it to once a day, and returns false outright for
  * review builds and grandfathered installs, which have nothing to ask about.
  */
+/**
+ * Attach the seat id to a company record issued before it carried one.
+ *
+ * Company grants used to be written with token: null, which makes
+ * needsRefresh() return false for them forever. They therefore never
+ * re-checked, and ran out on day 45 with nothing able to renew them. Every
+ * install connected before this change holds one of those records.
+ *
+ * This grants nothing and extends nothing. It only gives an existing record
+ * something to ask with, which is what lets a device that has ALREADY locked
+ * out heal itself: the next refresh answers "valid", and decide() resets the
+ * deadline. A device with no seat id in storage has nothing to adopt and is
+ * left exactly as it was.
+ */
+async function adoptSeatToken(rec) {
+  if (!rec || rec.kind !== "company" || rec.token) return rec;
+  const conn = await getConnection();
+  if (!conn) return rec;
+  return writeEntitlement({ ...rec, token: conn.employeeId });
+}
+
 async function refreshIfStale() {
-  const rec = await readEntitlement();
+  const rec = await adoptSeatToken(await readEntitlement());
   if (!needsRefresh(rec, Date.now()) || !isConfigured()) return rec;
 
+  // Two kinds of holder, two endpoints, one contract. A seat is re-checked by
+  // its own id; an individual key by the activation token it was given.
+  const seat = rec.kind === "company";
   let res;
   try {
-    res = await fetch(rpcUrl("refresh_entitlement"), {
+    res = await fetch(rpcUrl(seat ? "refresh_company" : "refresh_entitlement"), {
       method: "POST",
       headers: rpcHeaders(),
-      body: JSON.stringify({ p_token: rec.token }),
+      body: JSON.stringify(seat ? { p_employee_id: rec.token } : { p_token: rec.token }),
     });
   } catch (_) {
     return applyOutcome({ result: "error", reason: "network" });
@@ -339,7 +368,9 @@ async function refreshIfStale() {
     result: "valid",
     kind: rec.kind,
     token: rec.token,
-    validUntil: parseValidUntil(payload.valid_until),
+    // refresh_company deliberately returns no expiry: how long a seat is
+    // trusted between checks is our policy, and it lives in one place.
+    validUntil: seat ? Date.now() + COMPANY_INITIAL_MS : parseValidUntil(payload.valid_until),
   });
 }
 

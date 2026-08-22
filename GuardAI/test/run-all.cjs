@@ -38,6 +38,7 @@ const SUITES = [
   // Licensing.
   { name: "entitlement.cjs (licence gate: fail-open, grace, grandfathering)", file: "test/entitlement.cjs" },
   { name: "gate.cjs (locked vs master-off, restore survives a lapse, live unlock)", file: "test/gate.cjs" },
+  { name: "seat-lifecycle.cjs (a company seat over 400 days of clock)", file: "test/seat-lifecycle.cjs" },
   { name: "activation-ui.cjs (popup licence card + settings activation, all four states)", file: "test/activation-ui.cjs" },
   { name: "backend-contract.cjs (SQL error codes + safety clauses match the extension)", file: "test/backend-contract.cjs" },
   { name: "packaging.cjs (the store zip contains everything, and nothing else)", file: "test/packaging.cjs" },

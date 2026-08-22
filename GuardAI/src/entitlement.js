@@ -197,13 +197,22 @@ export function grandfathered(now = Date.now()) {
  * An install that was already connected to a company before the gate existed,
  * and a freshly redeemed invite code. Trusted for 30 days; the employee is not
  * the one who pays, so they must never be the one who gets locked out.
+ *
+ * The seat id IS the token, and it is not optional. This grant expires like
+ * any other, so without something to re-check with, needsRefresh() returns
+ * false forever and the record simply runs out on day 45 with no way to renew
+ * — which is exactly what used to happen. A caller with no seat id has nothing
+ * to grant, and gets null rather than a record that is guaranteed to die.
+ *
+ * @param {string} seatId anonymous employee id from connect_company
  */
-export function companyGrant(now = Date.now()) {
+export function companyGrant(seatId, now = Date.now()) {
+  if (typeof seatId !== "string" || !seatId) return null;
   const validUntil = now + COMPANY_INITIAL_MS;
   return {
     status: "active",
     kind: "company",
-    token: null,
+    token: seatId,
     validUntil,
     hardStopAt: validUntil + GRACE_MS,
     lastVerifiedAt: now,
