@@ -344,6 +344,21 @@ const owners = (w) =>
             <p>Anything else on NF-41900?</p>
           </div></div>
         </div>`],
+      ["table wrapped in positioning divs (MEASURED on grok.com)", `
+        <div class="turn">
+          <div class="q"><span>${Q}</span></div>
+          <div class="bubble"><div class="response-content-markdown">
+            <p>Here is a clean summary for Coastline Logistics.</p>
+            <div class="group-table"><div class="w-fit"><div class="rounded"><div class="table-container">
+              <table><tbody>
+                <tr><td>Coastline Logistics</td><td>NF-41900</td></tr>
+                <tr><td>Coastline Logistics</td><td>NF-41900</td></tr>
+              </tbody></table>
+            </div></div></div></div>
+            <p>Would you like anything else on NF-41900?</p>
+            <ul><li>Draft a note for NF-41900</li></ul>
+          </div></div>
+        </div>`],
       ["reply rendered as a table", `
         <div class="turn">
           <div class="q"><span>${Q}</span></div>
@@ -408,6 +423,12 @@ const owners = (w) =>
       check(stacked === 0, `${label}: none stacked`, String(stacked));
       check(buried === 0, `${label}: none buried inside a paragraph, bullet, cell or code block`,
         String(buried));
+      // A button on a narrow scroll wrapper renders squeezed against the table
+      // with its label wrapped onto two lines. It has to be on the message.
+      const inWrapper = w.document.querySelectorAll(
+        ".table-container .guardai-msgtoggle, .rounded .guardai-msgtoggle, .w-fit .guardai-msgtoggle"
+      ).length;
+      check(inWrapper === 0, `${label}: none inside a table/scroll wrapper`, String(inWrapper));
     }
   }
 

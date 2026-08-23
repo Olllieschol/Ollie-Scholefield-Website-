@@ -3664,43 +3664,61 @@
     "DD", "DT", "FIGCAPTION", "DETAILS", "SUMMARY",
   ]);
 
-  /** Is this element the rendered body of one message? */
-  function isProseBody(el) {
+  /**
+   * Does this element look like the rendered body of one message?
+   *
+   * Not "every child is a text tag" — that was too strict. Markdown renderers
+   * wrap tables and code blocks in layers of positioning divs, so a real reply
+   * body reads P, DIV, P, UL, P. Majority is the test.
+   */
+  function isMarkdownBody(el) {
     if (!el || !el.children || !el.children.length) return false;
+    let text = 0;
+    let total = 0;
     for (const k of el.children) {
       if (k.classList && k.classList.contains("guardai-msgtoggle")) continue;
-      if (!TEXT_BLOCK.has(k.tagName)) return false;
+      total++;
+      if (TEXT_BLOCK.has(k.tagName)) text++;
     }
-    return true;
+    if (!total) return false;
+    return text * 2 >= total;
   }
 
   /**
-   * Climb to the outermost rendered-text body containing this element.
+   * The OUTERMOST rendered body containing this element.
    *
-   * This is what stops one reply being chopped into one button per paragraph.
-   * A seed is the block around a matched value, so an answer that mentions
-   * masked data in an intro paragraph and again in four bullets produces five
-   * seeds — and growToBubble deliberately stops each climb as soon as it
-   * reaches a sibling seed, on the reasoning that a sibling seed means a
-   * different message. Inside one reply that reasoning is exactly backwards.
+   * Climbing only while each parent looks like prose was not enough. Measured
+   * on a live grok.com reply, the chain out of a table cell is:
    *
-   * Measured on a live perplexity.ai answer: six buttons where there should
-   * have been two, five of them stacked down the same reply. The reply body
-   * there is <div class="prose" data-renderer="lm"> whose children are p, p,
-   * p, ul, p, ul, p — all text. The turn container one level up has two DIV
-   * children, the question and the answer, so the climb stops there and the
-   * question keeps its own button.
+   *   td -> tr -> tbody -> table
+   *      -> div.table-container   [TABLE]              <- prose-looking
+   *      -> div.rounded-[16px]    [DIV]                <- NOT
+   *      -> div.w-fit             [DIV, DIV]           <- NOT
+   *      -> div.group/table       [DIV, DIV]           <- NOT
+   *      -> div.response-content-markdown [P,DIV,P,UL,P]  <- the message body
    *
-   * No per-site knowledge: every assistant reply is rendered markdown, so this
-   * shape holds wherever the reply is rendered from markdown at all.
+   * Stopping at the first non-prose parent left the button inside
+   * div.table-container, which is 398px wide — so it rendered squeezed against
+   * the table with its label wrapped onto two lines, instead of sitting at the
+   * bottom of the reply. Three positioning wrappers stood between the table
+   * and the body, so no "unwrap a single child" rule would have reached it
+   * either.
+   *
+   * So: climb all the way, and keep the outermost ancestor that still looks
+   * like one message body. Wrapper divs in between are simply passed through.
+   * The bound is the response root, and in every structure measured so far the
+   * element above the body is a wrapper whose children are divs — Grok's
+   * message-bubble is DIV,DIV,SECTION,DIV, Perplexity's turn is DIV,DIV — so
+   * the climb has nowhere further to go and cannot swallow the question.
    */
-  function proseBodyAncestor(el, root) {
+  function markdownBodyAncestor(el, root) {
     let best = null;
     let cur = el;
-    while (cur && cur !== root && cur.parentElement && cur.parentElement !== root) {
-      if (!isProseBody(cur.parentElement)) break;
-      best = cur.parentElement;
-      cur = best;
+    let hops = 0;
+    while (cur && cur !== root && cur.parentElement && cur.parentElement !== root && hops++ < 30) {
+      const parent = cur.parentElement;
+      if (isMarkdownBody(parent)) best = parent;
+      cur = parent;
     }
     return best;
   }
@@ -3752,7 +3770,7 @@
     }
     // Roll every candidate up into the rendered-text body that holds it, so
     // the paragraphs and bullets of ONE reply collapse to one message.
-    const merged = Array.from(new Set(found.map((el) => proseBodyAncestor(el, root) || el)));
+    const merged = Array.from(new Set(found.map((el) => markdownBodyAncestor(el, root) || el)));
     // A candidate that CONTAINS another candidate spans more than one message
     // (the height heuristic over-climbed, usually because the messages around
     // it are short). Keep the inner ones; one button per message is the point.
@@ -3830,7 +3848,7 @@
       // A rendered-text body is one message by definition, however many
       // paragraphs it grows. Without this the re-split would chop a streaming
       // reply back into one button per paragraph as it arrived.
-      if (isProseBody(outer)) { markBubble(outer); continue; }
+      if (isMarkdownBody(outer)) { markBubble(outer); continue; }
 
       // Hidden from itself, so discovery scoped inside it can see past the
       // mark; put it straight back unless we actually split it.
