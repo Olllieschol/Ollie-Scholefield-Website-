@@ -3266,6 +3266,61 @@
    * Each assistant message gets a small button so the user can flip that one
    * message between the fake text the AI actually stored and their real data.
    * ------------------------------------------------------------------ */
+  /**
+   * The elements a configured platform names as messages.
+   *
+   * WITHIN EACH ROLE THE FIRST SELECTOR THAT MATCHES WINS. These lists are
+   * fallbacks — "use this; if the site has renamed it, try that" — not a set
+   * to union. Unioning them is how Gemini ended up with two stacked buttons on
+   * one message bubble: user-query-content, .user-query-bubble-with-background
+   * and .query-text are the SAME message nested three deep, so every one that
+   * matched got its own button. Claude has the same shape on its assistant
+   * side (font-claude-response / font-claude-message / assistant-turn).
+   *
+   * ChatGPT never showed the bug and that is the tell: it is the only platform
+   * with exactly one selector per role, and its two roles cannot nest.
+   * Measured on a live thread — 1 user match, 1 assistant match, 0 nested, 2
+   * buttons, 0 duplicated owners.
+   */
+  function configuredMessages(root) {
+    const out = [];
+    for (const list of [CONFIG.responseMessage, CONFIG.userMessage]) {
+      if (!Array.isArray(list) || !list.length) continue;
+      for (const selector of list) {
+        let els = [];
+        try {
+          els = Array.from(root.querySelectorAll(selector));
+        } catch {
+          continue; // malformed selector — try the next fallback
+        }
+        if (els.length) { out.push(...els); break; }
+      }
+    }
+    return out;
+  }
+
+  /**
+   * One toggle per message, and none stranded on something that is no longer
+   * one. A belt-and-braces pass: even if candidate selection goes wrong after
+   * a site redesign, the user must never see two buttons stacked on the same
+   * bubble again.
+   */
+  function pruneToggles(root, msgs) {
+    const owners = new Set(msgs);
+    const claimed = new Set();
+    let btns = [];
+    try {
+      btns = Array.from(root.querySelectorAll(".guardai-msgtoggle"));
+    } catch {
+      return;
+    }
+    for (const btn of btns) {
+      const owner = btn.parentElement;
+      if (!owner || !owners.has(owner) || claimed.has(owner)) { btn.remove(); continue; }
+      claimed.add(owner);
+    }
+  }
+
   function messageSelectors() {
     // Decorate and keep in sync BOTH the AI's response bubbles and the user's
     // own sent bubbles, so each can flip between real data and the masked text
@@ -3630,15 +3685,7 @@
    */
   function messageElements(root, rules) {
     const out = [];
-    const sel = messageSelectors().join(",");
-    let configured = [];
-    if (sel) {
-      try {
-        configured = Array.from(root.querySelectorAll(sel));
-      } catch {
-        /* stale/malformed selector — discovery below covers it */
-      }
-    }
+    const configured = configuredMessages(root);
     out.push(...configured);
     try {
       out.push(...root.querySelectorAll("[" + MSG_ATTR + "]"));
@@ -3657,7 +3704,12 @@
         out.push(el);
       }
     }
-    return Array.from(new Set(out));
+    // One message may not contain another. Configured selectors no longer
+    // produce nested matches, previously-marked bubbles can after a redesign,
+    // and discovery can when it over-climbs — keep the inner one in every
+    // case, which is the message rather than the container around it.
+    const uniq = Array.from(new Set(out));
+    return uniq.filter((a) => !uniq.some((b) => b !== a && a.contains(b)));
   }
 
   /**
@@ -3759,6 +3811,7 @@
       });
       msgEl.appendChild(btn);
     });
+    pruneToggles(root, msgs);
   }
 
   /**

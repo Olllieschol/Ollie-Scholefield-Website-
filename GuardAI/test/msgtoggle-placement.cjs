@@ -235,6 +235,89 @@ const owners = (w) =>
     check(after.length === 2, "still two after the rest of the reply streams in", after.join(", "));
   }
 
+  /* ── 3c. Configured platforms: fallback selectors are FALLBACKS ──────── */
+  console.log("\n--- platforms with hand-tuned selectors ---");
+  {
+    /* Gemini's real selector lists name the same message nested three deep:
+       user-query-content > .user-query-bubble-with-background > .query-text,
+       and message-content > .model-response-text. Unioning them gave one
+       button per match — two stacked on the user's bubble on the live site. */
+    const GEMINI = `
+      <main>
+        <chat-window>
+          <user-query>
+            <user-query-content>
+              <div class="user-query-bubble-with-background">
+                <div class="query-text"><p>${QUESTION}</p></div>
+              </div>
+            </user-query-content>
+          </user-query>
+          <model-response>
+            <message-content>
+              <div class="model-response-text"><p>${ANSWER}</p></div>
+            </message-content>
+          </model-response>
+        </chat-window>
+        <div contenteditable="true">Ask Gemini</div>
+      </main>`;
+    const w = loadWindow("https://gemini.google.com/app/abc", GEMINI);
+    await new Promise((r) => setTimeout(r, 120));
+    await seed(w);
+    const hooks = w.GuardAI._decorateHooks;
+    hooks.decorateMessages(hooks.findResponseRoot());
+    hooks.decorateMessages(hooks.findResponseRoot());
+
+    const btns = [...w.document.querySelectorAll(".guardai-msgtoggle")];
+    check(btns.length === 2, "Gemini: exactly two buttons, not one per nested fallback selector",
+      `${btns.length}: ${owners(w).join(", ")}`);
+    const perOwner = new Map();
+    btns.forEach((b) => perOwner.set(b.parentElement, (perOwner.get(b.parentElement) || 0) + 1));
+    check([...perOwner.values()].every((n) => n === 1),
+      "and never two stacked on the same bubble", JSON.stringify([...perOwner.values()]));
+  }
+  {
+    /* Claude nests on the assistant side: font-claude-response wraps
+       font-claude-message, and both are in the list as renames of each other. */
+    const CLAUDE = `
+      <div role="feed">
+        <div data-testid="user-message"><p>${QUESTION}</p></div>
+        <div class="font-claude-response">
+          <div class="font-claude-message"><p>${ANSWER}</p></div>
+        </div>
+      </div>
+      <div contenteditable="true">Reply to Claude</div>`;
+    const w = loadWindow("https://claude.ai/chat/abc", CLAUDE);
+    await new Promise((r) => setTimeout(r, 120));
+    await seed(w);
+    const hooks = w.GuardAI._decorateHooks;
+    hooks.decorateMessages(hooks.findResponseRoot());
+    hooks.decorateMessages(hooks.findResponseRoot());
+    const btns = [...w.document.querySelectorAll(".guardai-msgtoggle")];
+    check(btns.length === 2, "Claude: two buttons, despite two nested names for the same reply",
+      `${btns.length}: ${owners(w).join(", ")}`);
+  }
+  {
+    /* ChatGPT is the control: one selector per role, roles cannot nest. It was
+       measured correct on a live thread and must stay that way. */
+    const CHATGPT = `
+      <main>
+        <article data-message-author-role="user"><div><p>${QUESTION}</p></div></article>
+        <article data-message-author-role="assistant"><div><p>${ANSWER}</p></div></article>
+        <div contenteditable="true" id="prompt-textarea">Ask anything</div>
+      </main>`;
+    const w = loadWindow("https://chatgpt.com/c/abc", CHATGPT);
+    await new Promise((r) => setTimeout(r, 120));
+    await seed(w);
+    const hooks = w.GuardAI._decorateHooks;
+    hooks.decorateMessages(hooks.findResponseRoot());
+    hooks.decorateMessages(hooks.findResponseRoot());
+    const btns = [...w.document.querySelectorAll(".guardai-msgtoggle")];
+    check(btns.length === 2, "ChatGPT: still exactly two", `${btns.length}`);
+    const roles = btns.map((b) => b.parentElement.getAttribute("data-message-author-role")).sort();
+    check(roles.join(",") === "assistant,user",
+      "one on the question, one on the reply", roles.join(","));
+  }
+
   /* ── 4. Alignment is the button's own, not the host page's ───────────── */
   console.log("\n--- always on the right, whatever the parent is ---");
   {
