@@ -3127,7 +3127,31 @@
   }
 
   /** Should this text node be left alone? (our UI, the live input editor). */
+  /* Tags whose text is not page content. A Next.js app embeds its whole
+   * serialised payload in <script> blobs, and grok.com carries the masked
+   * values in there — measured: two toggle buttons had been appended INSIDE
+   * <script> elements, and the restore pass had been rewriting fake values
+   * back to real ones inside that JSON. Invisible, so nobody would have
+   * noticed from looking, and precisely the sort of place real data should
+   * never be written. */
+  const NON_CONTENT_TAGS = new Set([
+    "SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "IFRAME", "OBJECT", "EMBED",
+    "CANVAS", "SVG", "HEAD", "TITLE", "META", "LINK",
+  ]);
+
+  /** Is this text node inside something that is not page content? */
+  function inNonContent(node) {
+    let el = node && node.parentElement;
+    let hops = 0;
+    while (el && hops++ < 40) {
+      if (NON_CONTENT_TAGS.has(el.tagName)) return true;
+      el = el.parentElement;
+    }
+    return false;
+  }
+
   function isProtectedNode(node, editor) {
+    if (inNonContent(node)) return true;
     const p = node.parentElement;
     if (
       p &&
@@ -3534,6 +3558,7 @@
   function hasSwappableData(msgEl, unmaskRules, remaskRules) {
     const walker = document.createTreeWalker(msgEl, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
+        if (inNonContent(node)) return NodeFilter.FILTER_REJECT;
         return node.nodeValue && node.nodeValue.trim()
           ? NodeFilter.FILTER_ACCEPT
           : NodeFilter.FILTER_REJECT;
@@ -3730,6 +3755,7 @@
     try {
       walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
         acceptNode(node) {
+          if (inNonContent(node)) return NodeFilter.FILTER_REJECT;
           return node.nodeValue && node.nodeValue.trim()
             ? NodeFilter.FILTER_ACCEPT
             : NodeFilter.FILTER_REJECT;
