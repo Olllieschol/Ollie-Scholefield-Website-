@@ -895,7 +895,18 @@ html.guardai-light .guardai-firstrun__close:hover { color: #0f172a; }
 
 /* ---- Per-message fake/real toggle button ---- */
 .guardai-msgtoggle {
-  display: inline-flex;
+  /* Block-level, not inline-flex. An inline element follows the host page's
+     text-align, which is why this button sat on the LEFT under a Perplexity
+     answer and on the RIGHT under a ChatGPT bubble — it was inheriting each
+     site's alignment instead of having one of its own. Block-level plus
+     width:fit-content plus the four alignment properties below put it on the
+     right in every parent layout the host sites use, with no per-site
+     knowledge:
+       margin-left: auto   block parents, and flex-row parents
+       justify-self: end   grid parents
+       align-self: flex-end  flex-column parents
+     Only one of them applies in any given parent; the rest are inert. */
+  display: flex;
   align-items: center;
   gap: 5px;
   margin-top: 8px;
@@ -920,8 +931,10 @@ html.guardai-light .guardai-firstrun__close:hover { color: #0f172a; }
    * (measured: the button became 576px wide, vs ~136px content-sized on the
    * assistant's plain `display: block` wrapper). `justify-self` only has an
    * effect inside a grid parent, so this is a no-op everywhere else. */
-  justify-self: start;
   width: fit-content;
+  margin-left: auto;
+  justify-self: end;
+  align-self: flex-end;
 }
 .guardai-msgtoggle:hover { opacity: 1; }
 .guardai-msgtoggle::before {

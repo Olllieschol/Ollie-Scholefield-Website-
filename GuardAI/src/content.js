@@ -3442,6 +3442,20 @@
    * same bubble again without re-deriving it (and after it has been rewritten
    * to the fake text, where the "real" rules may no longer match). */
   const MSG_ATTR = "data-guardai-msg";
+  /* Text length at the moment a bubble was marked. Re-deriving every marked
+   * bubble on every pass would mean a TreeWalker per message per DOM change,
+   * which on a long conversation is far more work than the decoration itself.
+   * A settled message has the same length it had last time and is skipped
+   * outright; only a bubble whose content actually changed is re-checked —
+   * which is exactly the one case that matters, a reply arriving inside
+   * something we already marked. */
+  const MSG_LEN = "data-guardai-msglen";
+
+  /** Mark an element as one message bubble, recording its size at that moment. */
+  function markBubble(el) {
+    el.setAttribute(MSG_ATTR, "1");
+    el.setAttribute(MSG_LEN, String((el.textContent || "").length));
+  }
 
   /** Things a message bubble is definitely not, and must never be grown into:
    * GuardAI's own UI (the panel lists real AND fake values, so it matches
@@ -3587,11 +3601,74 @@
     // platform whose selectors have stopped matching after a redesign.
     if (!configured.length) {
       for (const el of discoverMessages(root, rules)) {
-        el.setAttribute(MSG_ATTR, "1");
+        markBubble(el);
         out.push(el);
       }
     }
     return Array.from(new Set(out));
+  }
+
+  /**
+   * Marks are PROVISIONAL. A bubble that turns out to contain two bubbles was
+   * never a bubble.
+   *
+   * Generic discovery runs on a debounce, so it routinely runs while a turn is
+   * half-built: the question is on screen and the answer has not streamed in
+   * yet. With only one match on the page there is no second seed to stop the
+   * climb, and the height test compares a container against the one short
+   * message inside it — which does not clear 1.6x + 80px. So it climbs past
+   * the bubble, past the turn, and marks the whole conversation container.
+   *
+   * That mark is then permanent: discoverMessages() skips anything inside an
+   * already-marked element, so when the answer arrives it never gets a button,
+   * and the single button that does exist hangs off the end of the entire
+   * thread. Measured on perplexity.ai — one left-aligned button under the
+   * whole conversation, nothing on the user's own message. Platforms with
+   * hand-tuned selectors (ChatGPT, Claude) never hit it, because discovery
+   * does not run there at all; every genericConfig() site did.
+   *
+   * Re-deriving on each pass fixes it without any per-site knowledge, and
+   * self-corrects the same way for virtualised lists and site redesigns.
+   */
+  function resplitMarkedBubbles(root, rules) {
+    let marked;
+    try {
+      marked = Array.from(root.querySelectorAll("[" + MSG_ATTR + "]"));
+    } catch {
+      return;
+    }
+    for (const outer of marked) {
+      // Skip anything a previous iteration already split away or re-parented.
+      if (!outer.isConnected || !outer.hasAttribute(MSG_ATTR)) continue;
+      // Unchanged since it was marked: it cannot have grown a second message.
+      if (outer.getAttribute(MSG_LEN) === String((outer.textContent || "").length)) continue;
+
+      // Hidden from itself, so discovery scoped inside it can see past the
+      // mark; put it straight back unless we actually split it.
+      outer.removeAttribute(MSG_ATTR);
+      let inner = [];
+      try {
+        inner = discoverMessages(outer, rules).filter((el) => el !== outer && outer.contains(el));
+      } catch {
+        inner = [];
+      }
+      if (inner.length < 2) {
+        markBubble(outer); // still one message; re-baseline so it settles
+        continue;
+      }
+
+      // It spans more than one message. Keep the parts, drop the whole.
+      removeToggleFrom(outer);
+      outer.removeAttribute("data-guardai-view");
+      outer.removeAttribute("data-guardai-lock");
+      for (const el of inner) markBubble(el);
+    }
+  }
+
+  /** Take the toggle (and its wrapper, if any) off one element. */
+  function removeToggleFrom(el) {
+    if (!el) return;
+    el.querySelectorAll(":scope > .guardai-msgtoggle").forEach((b) => b.remove());
   }
 
   /** Add a toggle button to any assistant message that doesn't have one yet
@@ -3605,7 +3682,10 @@
     if (masker.size === 0) return; // nothing masked yet — nothing to toggle anywhere
     const unmaskRules = buildSwapRules("unmask");
     const remaskRules = buildSwapRules("remask");
-    const msgs = messageElements(root, unmaskRules.concat(remaskRules));
+    const allRules = unmaskRules.concat(remaskRules);
+    // Before trusting any existing mark, check it is still one message.
+    resplitMarkedBubbles(root, allRules);
+    const msgs = messageElements(root, allRules);
     msgs.forEach((msgEl) => {
       if (msgEl.querySelector(":scope > .guardai-msgtoggle")) return; // already done
       if (!hasSwappableData(msgEl, unmaskRules, remaskRules)) return; // nothing to show here

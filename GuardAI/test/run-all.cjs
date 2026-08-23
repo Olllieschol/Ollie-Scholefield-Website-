@@ -54,6 +54,7 @@ const SUITES = [
   { name: "site-config.cjs (per-platform selector consistency)", file: "test/site-config.cjs" },
   { name: "claude-selectors.cjs (claude.ai root + assistant bubble)", file: "test/claude-selectors.cjs" },
   { name: "generic-toggle.cjs (Show what AI sees on selector-less platforms)", file: "test/generic-toggle.cjs" },
+  { name: "msgtoggle-placement.cjs (one toggle per message, always right-aligned)", file: "test/msgtoggle-placement.cjs" },
   // Post-Section-5 fixes.
   { name: "toggle-off-hides-ui.cjs (master toggle hides all injected UI)", file: "test/toggle-off-hides-ui.cjs" },
   { name: "toggle-preserves-data.cjs (toggle pauses, never wipes history)", file: "test/toggle-preserves-data.cjs" },
