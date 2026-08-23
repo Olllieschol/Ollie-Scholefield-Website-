@@ -406,11 +406,79 @@
   /* ------------------------------------------------------------------ *
    * Editor read/write abstraction (textarea vs contenteditable).
    * ------------------------------------------------------------------ */
+  /**
+   * Is this element a composer someone could actually type in right now?
+   *
+   * grok.com ships a decoy: a 726x14 <textarea> at the very top of the page
+   * with visibility:hidden, sitting above the real composer, which is a
+   * contenteditable. genericConfig lists "textarea" before
+   * "div[contenteditable='true']", so findEditor() took the decoy, the masked
+   * text went into an invisible box, the send never fired, and the flow fell
+   * back to opening the review panel — which is what "Mask & Send does nothing
+   * but pop up a weird panel" actually was.
+   *
+   * Same shape as the message-selector bug: taking the first thing that
+   * matches is wrong when an earlier selector can match a decoy.
+   *
+   * A zero-sized rect is treated as UNKNOWN rather than unusable. Elements are
+   * routinely unlaid-out at document_start, and jsdom has no layout at all, so
+   * rejecting on size alone would mean finding no editor anywhere. Visibility
+   * is what actually settles it, and it is what settles Grok.
+   */
+  function isUsableEditor(el) {
+    if (!el) return false;
+    if (el.disabled === true || el.readOnly === true) return false;
+    if (el.getAttribute && el.getAttribute("aria-hidden") === "true") return false;
+    // Never return one of our own panel/overlay elements as the chat editor.
+    try {
+      if (el.closest(".guardai-panel, .guardai-prompt")) return false;
+    } catch { /* not an element we can test — fall through */ }
+    let style = null;
+    try {
+      style = window.getComputedStyle(el);
+    } catch { /* no layout engine — judge on the checks above */ }
+    if (style) {
+      if (style.visibility === "hidden" || style.display === "none" || style.opacity === "0") {
+        return false;
+      }
+    }
+    let rect = null;
+    try {
+      rect = el.getBoundingClientRect();
+    } catch { /* ignore */ }
+    // Only judge on size when there IS a size to judge.
+    if (rect && (rect.width || rect.height)) {
+      if (rect.width < 40 || rect.height < 16) return false;
+    }
+    return true;
+  }
+
+  /**
+   * The composer. Selectors are tried in order, as the fallbacks they are, but
+   * a selector only counts if it turns up something usable — and where one
+   * selector matches several, the biggest wins, because a composer is the
+   * large box on the page and a decoy generally is not.
+   */
   function findEditor() {
     for (const sel of CONFIG.editor) {
-      const el = document.querySelector(sel);
-      // Never return one of our own panel/overlay elements as the chat editor.
-      if (el && !el.closest(".guardai-panel, .guardai-prompt")) return el;
+      let els = [];
+      try {
+        els = document.querySelectorAll(sel);
+      } catch {
+        continue; // malformed selector — try the next fallback
+      }
+      let best = null;
+      let bestArea = -1;
+      for (const el of els) {
+        if (!isUsableEditor(el)) continue;
+        let area = 0;
+        try {
+          const r = el.getBoundingClientRect();
+          area = (r.width || 0) * (r.height || 0);
+        } catch { /* no layout — every candidate scores 0, first wins */ }
+        if (area > bestArea) { best = el; bestArea = area; }
+      }
+      if (best) return best;
     }
     return null;
   }
@@ -2749,6 +2817,10 @@
     discoverMessages,
     growToBubble,
     buildSwapRules,
+    // Composer resolution, so a decoy editor can be tested without driving a
+    // whole send flow. See test/editor-decoy.cjs.
+    findEditor,
+    isUsableEditor,
   };
 
   /** Swap the popup for a small input so the user can type their own fake. */
