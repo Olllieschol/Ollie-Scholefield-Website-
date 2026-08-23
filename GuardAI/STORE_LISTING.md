@@ -95,6 +95,26 @@ Shipping that is slow, exposes the adversarial test corpora, and invites
 questions about code that has no business being in a privacy extension.
 `test/packaging.cjs` checks the allowlist against the manifest on every run.
 
+## web_accessible_resources
+
+**Removed 2026-08-23.** The manifest declared `lib/*` and `models/*` for the
+optional Transformers.js NER layer. Neither directory ships, and in a Web Store
+build a user cannot add them, so the entry pointed at nothing — a loose end for
+a reviewer to ask about, and a way for any page to probe for the extension.
+
+`src/nlp-detector.js` still references those paths, but it is gated behind
+`ENABLE_NLP = false` and returns before it ever calls `getURL`, so nothing
+breaks and there is no console noise.
+
+**If the model is ever bundled, this must go back**, because a content script
+loading an extension resource needs it:
+
+```json
+"web_accessible_resources": [
+  { "resources": ["lib/*", "models/*"], "matches": [ ...the AI chat hosts... ] }
+]
+```
+
 ## Listing copy
 
 The current description promises masking without qualification. Since the

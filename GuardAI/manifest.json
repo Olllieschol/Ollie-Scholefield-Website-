@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "GuardAI \u2014 Local AI Privacy Guard",
+  "name": "GuardAI — Local AI Privacy Guard",
   "version": "1.0.0",
   "description": "Warns about and masks sensitive data before you send it to AI chatbots. Your message text never leaves your browser.",
   "author": "GuardAI",
@@ -146,43 +146,6 @@
       ],
       "run_at": "document_start",
       "all_frames": false
-    }
-  ],
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "lib/*",
-        "models/*"
-      ],
-      "matches": [
-        "https://chatgpt.com/*",
-        "https://chat.openai.com/*",
-        "https://claude.ai/*",
-        "https://gemini.google.com/*",
-        "https://bard.google.com/*",
-        "https://copilot.microsoft.com/*",
-        "https://*.bing.com/*",
-        "https://*.perplexity.ai/*",
-        "https://*.poe.com/*",
-        "https://*.character.ai/*",
-        "https://*.mistral.ai/*",
-        "https://*.groq.com/*",
-        "https://*.huggingface.co/*",
-        "https://*.you.com/*",
-        "https://*.writesonic.com/*",
-        "https://*.jasper.ai/*",
-        "https://*.copy.ai/*",
-        "https://*.rytr.me/*",
-        "https://*.pi.ai/*",
-        "https://*.inflection.ai/*",
-        "https://*.cohere.com/*",
-        "https://*.phind.com/*",
-        "https://*.deepseek.com/*",
-        "https://*.qwen.ai/*",
-        "https://*.grok.com/*",
-        "https://*.meta.ai/*",
-        "https://*.use.ai/*"
-      ]
     }
   ],
   "content_security_policy": {
