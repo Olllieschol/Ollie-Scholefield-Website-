@@ -3581,6 +3581,15 @@
   const TEXT_BLOCK = new Set([
     "P", "UL", "OL", "LI", "H1", "H2", "H3", "H4", "H5", "H6",
     "BLOCKQUOTE", "PRE", "TABLE", "HR", "FIGURE", "DL",
+    // Table internals belong here too. Without them the climb out of a <td>
+    // stops at its <tr> — TD is not a text block, so the row does not look
+    // like a prose body — and a reply rendered as a table gets ONE BUTTON PER
+    // CELL. Found by the structural battery, not by a site report, and it is
+    // the exact shape of the Gemini reply in the screenshots: a two-column
+    // contacts table with a masked value in every row.
+    "THEAD", "TBODY", "TFOOT", "TR", "TD", "TH", "CAPTION", "COLGROUP",
+    // Same reasoning for the other container-y text structures.
+    "DD", "DT", "FIGCAPTION", "DETAILS", "SUMMARY",
   ]);
 
   /** Is this element the rendered body of one message? */

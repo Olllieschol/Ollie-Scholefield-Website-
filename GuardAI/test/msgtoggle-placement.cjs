@@ -318,6 +318,99 @@ const owners = (w) =>
       "one on the question, one on the reply", roles.join(","));
   }
 
+  /* ── 3d. Structural battery ───────────────────────────────────────────
+   *
+   * The point of this section is to stop this bug class being found one
+   * platform at a time by the user. Rather than visit 28 sites, it enumerates
+   * the DOM SHAPES a chat UI can use and asserts the same invariant against
+   * every one: two messages in, two buttons out, never stacked, never inside a
+   * paragraph, list item or table cell.
+   *
+   * Two of these shapes were measured on live sites rather than invented —
+   * they are marked. The rest are structural variants that any of the ~20
+   * genericConfig platforms could present, since none of them has selectors
+   * and all take the same discovery path.
+   * ------------------------------------------------------------------ */
+  console.log("\n--- structural battery: two messages in, two buttons out ---");
+  {
+    const Q = QUESTION;
+    const A_PARA = `<p>Here is a summary for NF-41900 at Coastline Logistics.</p>`;
+    const SHAPES = [
+      ["prose body, p + ul (MEASURED on perplexity.ai)", `
+        <div class="turn">
+          <div class="q"><span>${Q}</span></div>
+          <div class="wrap"><div class="prose" data-renderer="lm">
+            ${A_PARA}<ul><li>Coastline Logistics &ndash; NF-41900</li><li>NF-41900 again</li></ul>
+            <p>Anything else on NF-41900?</p>
+          </div></div>
+        </div>`],
+      ["reply rendered as a table", `
+        <div class="turn">
+          <div class="q"><span>${Q}</span></div>
+          <div class="reply"><div class="md">
+            <p>Here you go for Coastline Logistics.</p>
+            <table><tbody>
+              <tr><td>Coastline Logistics</td><td>NF-41900</td></tr>
+              <tr><td>Coastline Logistics</td><td>NF-41900</td></tr>
+            </tbody></table>
+          </div></div>
+        </div>`],
+      ["reply with a fenced code block", `
+        <div class="turn">
+          <div class="q"><span>${Q}</span></div>
+          <div class="reply"><div class="md">
+            <p>Try this for NF-41900:</p>
+            <pre><code>lookup("Coastline Logistics", "NF-41900")</code></pre>
+            <p>That covers NF-41900.</p>
+          </div></div>
+        </div>`],
+      ["headings and blockquote in one reply", `
+        <div class="turn">
+          <div class="q"><span>${Q}</span></div>
+          <div class="reply"><div class="md">
+            <h2>Coastline Logistics</h2>
+            <p>Account NF-41900.</p>
+            <blockquote><p>NF-41900 is current.</p></blockquote>
+          </div></div>
+        </div>`],
+      ["bubbles as flex-column siblings", `
+        <div class="turn" style="display:flex;flex-direction:column">
+          <div class="q"><p>${Q}</p></div>
+          <div class="reply"><p>Noted for Coastline Logistics, NF-41900.</p><p>NF-41900 confirmed.</p></div>
+        </div>`],
+      ["user bubble wrapped in a grid", `
+        <div class="turn">
+          <div class="qgrid" style="display:grid;grid-template-columns:1fr">
+            <div class="q"><p>${Q}</p></div>
+          </div>
+          <div class="reply"><div class="md">${A_PARA}<p>NF-41900 noted.</p></div></div>
+        </div>`],
+    ];
+
+    for (const [label, body] of SHAPES) {
+      const w = loadWindow("https://www.perplexity.ai/search/abc",
+        `<main><div class="thread">${body}</div><div contenteditable="true">Ask</div></main>`);
+      await new Promise((r) => setTimeout(r, 120));
+      await seed(w);
+      const hooks = w.GuardAI._decorateHooks;
+      hooks.decorateMessages(hooks.findResponseRoot());
+      hooks.decorateMessages(hooks.findResponseRoot());
+
+      const btns = [...w.document.querySelectorAll(".guardai-msgtoggle")];
+      const perOwner = new Map();
+      btns.forEach((b) => perOwner.set(b.parentElement, (perOwner.get(b.parentElement) || 0) + 1));
+      const stacked = [...perOwner.values()].filter((n) => n > 1).length;
+      const buried = w.document.querySelectorAll(
+        "p .guardai-msgtoggle, li .guardai-msgtoggle, td .guardai-msgtoggle, pre .guardai-msgtoggle"
+      ).length;
+
+      check(btns.length === 2, `${label}: two buttons`, `${btns.length}: ${owners(w).join(", ")}`);
+      check(stacked === 0, `${label}: none stacked`, String(stacked));
+      check(buried === 0, `${label}: none buried inside a paragraph, bullet, cell or code block`,
+        String(buried));
+    }
+  }
+
   /* ── 4. Alignment is the button's own, not the host page's ───────────── */
   console.log("\n--- always on the right, whatever the parent is ---");
   {
