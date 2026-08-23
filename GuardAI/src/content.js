@@ -3520,6 +3520,55 @@
    * Find message bubbles on a platform we have no selectors for, by locating
    * the masked/real values and climbing out of them.
    */
+  /* Block-level text tags. A container whose element children are ALL of these
+   * is a rendered-text body — the markdown of one reply — not a list of
+   * messages. Two different messages are never siblings inside one. */
+  const TEXT_BLOCK = new Set([
+    "P", "UL", "OL", "LI", "H1", "H2", "H3", "H4", "H5", "H6",
+    "BLOCKQUOTE", "PRE", "TABLE", "HR", "FIGURE", "DL",
+  ]);
+
+  /** Is this element the rendered body of one message? */
+  function isProseBody(el) {
+    if (!el || !el.children || !el.children.length) return false;
+    for (const k of el.children) {
+      if (k.classList && k.classList.contains("guardai-msgtoggle")) continue;
+      if (!TEXT_BLOCK.has(k.tagName)) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Climb to the outermost rendered-text body containing this element.
+   *
+   * This is what stops one reply being chopped into one button per paragraph.
+   * A seed is the block around a matched value, so an answer that mentions
+   * masked data in an intro paragraph and again in four bullets produces five
+   * seeds — and growToBubble deliberately stops each climb as soon as it
+   * reaches a sibling seed, on the reasoning that a sibling seed means a
+   * different message. Inside one reply that reasoning is exactly backwards.
+   *
+   * Measured on a live perplexity.ai answer: six buttons where there should
+   * have been two, five of them stacked down the same reply. The reply body
+   * there is <div class="prose" data-renderer="lm"> whose children are p, p,
+   * p, ul, p, ul, p — all text. The turn container one level up has two DIV
+   * children, the question and the answer, so the climb stops there and the
+   * question keeps its own button.
+   *
+   * No per-site knowledge: every assistant reply is rendered markdown, so this
+   * shape holds wherever the reply is rendered from markdown at all.
+   */
+  function proseBodyAncestor(el, root) {
+    let best = null;
+    let cur = el;
+    while (cur && cur !== root && cur.parentElement && cur.parentElement !== root) {
+      if (!isProseBody(cur.parentElement)) break;
+      best = cur.parentElement;
+      cur = best;
+    }
+    return best;
+  }
+
   function discoverMessages(root, rules) {
     if (!rules || !rules.length) return [];
     const seeds = [];
@@ -3565,10 +3614,13 @@
       const bubble = growToBubble(seed, root, seeds);
       if (bubble && !found.includes(bubble)) found.push(bubble);
     }
+    // Roll every candidate up into the rendered-text body that holds it, so
+    // the paragraphs and bullets of ONE reply collapse to one message.
+    const merged = Array.from(new Set(found.map((el) => proseBodyAncestor(el, root) || el)));
     // A candidate that CONTAINS another candidate spans more than one message
     // (the height heuristic over-climbed, usually because the messages around
     // it are short). Keep the inner ones; one button per message is the point.
-    return found.filter((a) => !found.some((b) => b !== a && a.contains(b)));
+    return merged.filter((a) => !merged.some((b) => b !== a && a.contains(b)));
   }
 
   /**
@@ -3642,6 +3694,10 @@
       if (!outer.isConnected || !outer.hasAttribute(MSG_ATTR)) continue;
       // Unchanged since it was marked: it cannot have grown a second message.
       if (outer.getAttribute(MSG_LEN) === String((outer.textContent || "").length)) continue;
+      // A rendered-text body is one message by definition, however many
+      // paragraphs it grows. Without this the re-split would chop a streaming
+      // reply back into one button per paragraph as it arrived.
+      if (isProseBody(outer)) { markBubble(outer); continue; }
 
       // Hidden from itself, so discovery scoped inside it can see past the
       // mark; put it straight back unless we actually split it.

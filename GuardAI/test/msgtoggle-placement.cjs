@@ -104,6 +104,32 @@ const THREAD = (answer) => `
     <div contenteditable="true">Ask anything</div>
   </main>`;
 
+/* A real answer, copied in shape from a live perplexity.ai reply: the body is
+   a rendered-markdown container whose children are p, ul, p — and the matched
+   values appear in the intro paragraph AND in every bullet. That is five
+   separate seeds inside ONE message, which is what produced six buttons on the
+   page when there should have been two. The question is a sibling DIV of the
+   answer body, one level up, which is what keeps it a separate message. */
+const PROSE_THREAD = `
+  <main>
+    <div class="thread">
+      <div class="turn">
+        <div class="q"><span>${QUESTION}</span></div>
+        <div class="answerwrap">
+          <div class="prose" data-renderer="lm">
+            <p>I can see you want to follow up about NF-41900.</p>
+            <ul>
+              <li>Coastline Logistics &ndash; NF-41900</li>
+              <li>Coastline Logistics &ndash; NF-41900</li>
+            </ul>
+            <p>Tell me what kind of follow-up and I will draft it for NF-41900.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div contenteditable="true">Ask anything</div>
+  </main>`;
+
 const owners = (w) =>
   Array.from(w.document.querySelectorAll(".guardai-msgtoggle"))
     .map((b) => b.parentElement.className || b.parentElement.tagName);
@@ -167,6 +193,46 @@ const owners = (w) =>
 
     const after = owners(w);
     check(after.length === 4, "all four messages carry a toggle", `${after.length}: ${after.join(", ")}`);
+  }
+
+  /* ── 3b. One reply is ONE message, however many paragraphs it has ────── */
+  console.log("\n--- a reply with matches in several paragraphs ---");
+  {
+    const w = loadWindow("https://www.perplexity.ai/search/abc", PROSE_THREAD);
+    await new Promise((r) => setTimeout(r, 120));
+    await seed(w);
+    const hooks = w.GuardAI._decorateHooks;
+    hooks.decorateMessages(hooks.findResponseRoot());
+    hooks.decorateMessages(hooks.findResponseRoot());
+
+    const after = owners(w);
+    check(after.length === 2,
+      "EXACTLY TWO BUTTONS: one for what was sent, one for what came back — not one per paragraph",
+      `${after.length}: ${after.join(", ")}`);
+    check(after.includes("q"), "one is the question", after.join(", "));
+    check(after.filter((c) => c === "prose").length === 1,
+      "and the other is the whole reply body, once", after.join(", "));
+    const inList = w.document.querySelectorAll("li .guardai-msgtoggle, ul .guardai-msgtoggle").length;
+    check(inList === 0, "no button hanging off an individual bullet", String(inList));
+    const inPara = w.document.querySelectorAll("p .guardai-msgtoggle").length;
+    check(inPara === 0, "and none inside a paragraph", String(inPara));
+  }
+  {
+    // Streaming: paragraphs arrive one at a time. Each arrival must not chop
+    // the reply back up, which is what the re-split would otherwise do.
+    const w = loadWindow("https://www.perplexity.ai/search/abc", PROSE_THREAD);
+    await new Promise((r) => setTimeout(r, 120));
+    await seed(w);
+    const hooks = w.GuardAI._decorateHooks;
+    const prose = w.document.querySelector(".prose");
+    const finished = prose.innerHTML;
+    prose.innerHTML = "<p>I can see you want to follow up about NF-41900.</p>";
+    hooks.decorateMessages(hooks.findResponseRoot());
+    prose.innerHTML = finished;
+    hooks.decorateMessages(hooks.findResponseRoot());
+    hooks.decorateMessages(hooks.findResponseRoot());
+    const after = owners(w);
+    check(after.length === 2, "still two after the rest of the reply streams in", after.join(", "));
   }
 
   /* ── 4. Alignment is the button's own, not the host page's ───────────── */
