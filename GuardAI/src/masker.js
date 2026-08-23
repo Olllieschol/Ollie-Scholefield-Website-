@@ -410,6 +410,33 @@
   window.GuardAI = window.GuardAI || {};
   window.GuardAI.MASKABLE_TYPES = MASKABLE;
 
+  /**
+   * Does this stand-in reuse one of the real name's own words?
+   *
+   * Found 2026-08-22 by the name-matching suite, which failed roughly 1 run in
+   * 60: "Aisha Al-Rashid" was masked to "Aisha Halloway". The surname was
+   * replaced and the GIVEN NAME WAS SENT VERBATIM to the AI. The existing
+   * guard only rejected a fake equal to the whole real value, so a
+   * part-for-part collision walked straight through it — and with 40 names per
+   * pool it lands about 1 time in 40 whenever the real given name is one the
+   * pool also contains.
+   *
+   * Scoped to NAME_PII deliberately. ORG stand-ins are SUPPOSED to share a
+   * word: "Bellweather Logistics" -> "Coastline Logistics" keeps the sentence
+   * readable, and "Logistics" is a designator, not an identity. Names have no
+   * equivalent — every word in one is identifying.
+   */
+  function sharesNameToken(type, real, fake) {
+    if (type !== "NAME_PII") return false;
+    const words = (v) =>
+      String(v || "")
+        .toLowerCase()
+        .split(/[^\p{L}\p{M}]+/u)
+        .filter((t) => t.length > 1);
+    const realWords = new Set(words(real));
+    return words(fake).some((w) => realWords.has(w));
+  }
+
   function generateFake(type, real) {
     const gen = GENERATORS[type] || (() => "[redacted]");
     return gen(real, randomSeed());
@@ -508,7 +535,10 @@
       // real data the next time an unmask pass runs.
       let guard = 0;
       while (
-        (this.fakeToReal.has(fake) || fake === real || this.realToFake.has(fake)) &&
+        (this.fakeToReal.has(fake) ||
+          fake === real ||
+          this.realToFake.has(fake) ||
+          sharesNameToken(type, real, fake)) &&
         guard < 50
       ) {
         fake = generateFake(type, real + ":" + guard);
@@ -545,7 +575,11 @@
       // are masked in one pass, and stops a fake silently being identical to
       // ANY real data anywhere in the table.
       const taken = (f) =>
-        this.fakeToReal.has(f) || f === real || this.realToFake.has(f) || (avoid && avoid.has(f));
+        this.fakeToReal.has(f) ||
+        f === real ||
+        this.realToFake.has(f) ||
+        sharesNameToken(type, real, f) ||
+        (avoid && avoid.has(f));
       let fake = generateFake(type, real);
       let guard = 0;
       while (taken(fake) && guard < 100) {

@@ -35,6 +35,7 @@ const SUITES = [
   { name: "aggressive-names.cjs (opt-in standalone names, tiers, silent-mode escalation)", file: "test/aggressive-names.cjs" },
   { name: "lowercase-names.cjs (case-insensitive names + 60-message precision corpus)", file: "test/lowercase-names.cjs" },
   { name: "gender-matched-names.cjs (stand-in gender matching + pool sizing)", file: "test/gender-matched-names.cjs" },
+  { name: "fake-name-overlap.cjs (a stand-in never reuses a word of the real name)", file: "test/fake-name-overlap.cjs" },
   // Licensing.
   { name: "entitlement.cjs (licence gate: fail-open, grace, grandfathering)", file: "test/entitlement.cjs" },
   { name: "gate.cjs (locked vs master-off, restore survives a lapse, live unlock)", file: "test/gate.cjs" },
