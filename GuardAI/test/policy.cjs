@@ -908,6 +908,23 @@ const FLEXIBLE = { mode: "flexible", version: 8, locks: {}, company_name: "Acme 
         "every row carries the extension's own label rather than a re-worded one");
       check(!rows.some((r) => /aggressive|hard stop/i.test(r.label)),
         "and the two noise settings are not offered");
+
+      // Sections. The dashboard renders one <details> with a heading per
+      // group, so every row needs one and the groups must not interleave —
+      // a row landing back under an earlier heading would split a section.
+      check(rows.every((r) => r.group && r.group.length > 2),
+        "every row carries a section heading");
+      const order = rows.map((r) => r.group);
+      const firstSeen = [...new Set(order)];
+      check(JSON.stringify(order) === JSON.stringify(
+              firstSeen.flatMap((g) => order.filter((x) => x === g))),
+        "and the sections are contiguous — no group reappears after another starts");
+      const gTitles = [...settingsSrc.slice(gStart, settingsSrc.indexOf("\n  ];", gStart))
+        .matchAll(/\n    \{\n      title: "([^"]+)"/g)].map((m) => m[1]);
+      const catGroups = firstSeen.filter((g) => gTitles.includes(g));
+      check(JSON.stringify(catGroups) === JSON.stringify(gTitles),
+        "the category sections are the extension's own group titles, in its own order",
+        JSON.stringify(catGroups));
     }
   }
 
