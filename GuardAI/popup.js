@@ -78,17 +78,18 @@
     }
     const banner = $("policy-banner");
     if (!banner) return;
-    // The banner appears for any lock, not only the master switch: a person
-    // whose categories are pinned deserves the same explanation as one whose
-    // on/off switch is.
+    // The banner appears for any lock, not only the two switches on this
+    // screen: someone whose categories are pinned in Settings deserves the
+    // same explanation as someone whose on/off switch is.
+    //
+    // The wording names no specific setting on purpose. It used to promise
+    // that GuardAI "can't be switched off" and that "files and images are
+    // always checked", which was true when Enforced meant a fixed trio and is
+    // now simply wrong: an admin can pin any one setting on its own.
     const any = lockedOn || lockedMasking ||
       Boolean(policy && policy.mode === "enforced" && policy.locks &&
               Object.keys(policy.locks).length);
     banner.classList.toggle("is-on", any);
-    const who = $("policy-who");
-    if (who && any) {
-      who.textContent = (policy && policy.companyName) || "Your organisation";
-    }
   }
 
   /* ---- Load everything from storage and paint the UI ---- */

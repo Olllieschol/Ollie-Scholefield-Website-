@@ -67,9 +67,10 @@
     return pol.locks[name] === true;
   }
 
-  function setByLine(pol) {
-    const who = pol && pol.companyName ? pol.companyName : "your organisation";
-    return "Set by " + who + ".";
+  /** Mirrors setByLine() in src/policy.js. Not the company name: the badge is
+   *  uppercased and a company name is not written to be. */
+  function setByLine() {
+    return "Locked by admin";
   }
 
   /* The policy last read from storage. Cached rather than re-read inside
@@ -230,7 +231,7 @@
         `<span class="cat-row__desc">${escapeHtml(sw.desc)}</span>` +
         `<span class="cat-row__desc cat-row__warn">${escapeHtml(sw.note)}</span>` +
         (locked
-          ? `<span class="cat-row__badge cat-row__badge--set">${escapeHtml(setByLine(policy))}</span>`
+          ? `<span class="cat-row__badge cat-row__badge--set">${escapeHtml(setByLine())}</span>`
           : "") +
         `</div>` +
         `<label class="gd-switch">` +
@@ -242,7 +243,7 @@
         const sr = document.createElement("span");
         sr.id = "lockmsg-" + sw.key;
         sr.className = "sr-only";
-        sr.textContent = setByLine(policy) + " You cannot change this.";
+        sr.textContent = "Locked by your administrator. You cannot change this.";
         row.appendChild(sr);
       }
       list.appendChild(row);
@@ -330,7 +331,7 @@
           `<span class="cat-row__desc">${escapeHtml(cat.desc)}</span>` +
           `<span class="cat-row__badge">${cat.masked ? "Auto-masked" : "Flagged only"}</span>` +
           (locked
-            ? `<span class="cat-row__badge cat-row__badge--set">${escapeHtml(setByLine(policy))}</span>`
+            ? `<span class="cat-row__badge cat-row__badge--set">${escapeHtml(setByLine())}</span>`
             : "") +
           `</div>` +
           `<label class="gd-switch" title="${locked ? "Turned on by your organisation" : (cat.masked ? "Detect and auto-mask" : "Detect and flag") + " " + escapeHtml(cat.title.toLowerCase())}">` +

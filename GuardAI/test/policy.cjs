@@ -241,6 +241,11 @@ const FLEXIBLE = { mode: "flexible", version: 8, locks: {}, company_name: "Acme 
       JSON.stringify(parsed.locks));
   }
 
+  check(P.setByLine({ mode: "enforced", locks: { "cat:TFN": true } }) === "Locked by admin",
+    "the badge reads Locked by admin, not the company name");
+  check(P.setByLine({ mode: "flexible", locks: {} }) === "",
+    "and nothing at all when nothing is pinned");
+
   console.log("\n--- 4c. a category lock REMOVES from the off-list, never adds ---");
   {
     const pol = { mode: "enforced", version: 1, locks: { "cat:TFN": true, "cat:PASSWORD": true } };
@@ -697,8 +702,9 @@ const FLEXIBLE = { mode: "flexible", version: 8, locks: {}, company_name: "Acme 
       check(sw.checked === true, "popup: and shows ON, because it IS on — a locked switch never misreports the state");
       const banner = w.document.getElementById("policy-banner");
       check(banner && banner.classList.contains("is-on"), "popup: the banner explains why, rather than leaving a dead control");
-      check(w.document.getElementById("policy-who").textContent === "Acme Pty Ltd",
-        "popup: and names the company that set it");
+      check(!/switched off|files and images are always/i.test(
+              w.document.getElementById("policy-banner").textContent),
+        "popup: the banner no longer promises the old fixed trio, which per-setting locks made false");
       check(store.guardai_enabled === false,
         "popup: the user's own stored choice is NOT overwritten — it comes back when the policy relaxes");
       w.close();
@@ -730,8 +736,11 @@ const FLEXIBLE = { mode: "flexible", version: 8, locks: {}, company_name: "Acme 
       check(boxes.every((b) => b.disabled), "settings: both are disabled");
       check(boxes.every((b) => b.checked), "settings: and both show ON");
       const badges = [...w.document.querySelectorAll(".cat-row__badge--set")];
-      check(badges.length === 2 && badges.every((b) => /Acme Pty Ltd/.test(b.textContent)),
-        "settings: each says who set it");
+      check(badges.length === 2 && badges.every((b) => /^Locked by admin$/.test(b.textContent)),
+        "settings: each pinned switch is badged Locked by admin",
+        badges.map((b) => b.textContent).join(" | "));
+      check(!badges.some((b) => /Acme|Pty|Ltd/.test(b.textContent)),
+        "settings: and the badge does not carry the company name, which uppercases badly");
       check(store.guardai_file_scanning === false && store.guardai_image_scanning === false,
         "settings: the user's own choices are left in storage untouched");
       w.close();
@@ -770,8 +779,8 @@ const FLEXIBLE = { mode: "flexible", version: 8, locks: {}, company_name: "Acme 
       check(box("NAME_PII") && !box("NAME_PII").disabled && box("NAME_PII").checked,
         "settings: an untouched category is unaffected");
       const badges = [...w.document.querySelectorAll(".cat-row__badge--set")];
-      check(badges.length === 2 && badges.every((b) => /Acme Pty Ltd/.test(b.textContent)),
-        "settings: each pinned category says who set it", String(badges.length));
+      check(badges.length === 2 && badges.every((b) => /^Locked by admin$/.test(b.textContent)),
+        "settings: each pinned category is badged Locked by admin", String(badges.length));
       check(JSON.stringify(store.guardai_disabled_categories) === JSON.stringify(["TFN", "PASSWORD", "ORG"]),
         "settings: rendering a lock does not rewrite the user's off-list");
 

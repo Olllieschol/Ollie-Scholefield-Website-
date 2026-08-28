@@ -248,12 +248,15 @@ export function anyLocked(pol) {
 }
 
 /**
- * The line shown under a disabled switch. Named rather than anonymous ("your
- * organisation") wherever we know the name, because a person is entitled to
- * know who set the rule they are subject to.
+ * The badge shown beside a pinned switch.
+ *
+ * Deliberately not the company name. It used to read "Set by <company>", which
+ * on a real row came out as SET BY TEST CO GUARD AI V2. — the badge is
+ * uppercased, company names are not written to be uppercased, and the name
+ * adds nothing anyway: a person on their employer's machine knows who their
+ * admin is. The record still carries companyName, because the popup's fuller
+ * explanation has room for a sentence; a badge does not.
  */
 export function setByLine(pol) {
-  if (!anyLocked(pol)) return "";
-  const who = pol && pol.companyName ? pol.companyName : "your organisation";
-  return "Set by " + who + ".";
+  return anyLocked(pol) ? "Locked by admin" : "";
 }
