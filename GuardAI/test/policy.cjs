@@ -825,6 +825,92 @@ const FLEXIBLE = { mode: "flexible", version: 8, locks: {}, company_name: "Acme 
     }
   }
 
+  /* ══ PART 5b — one tick locks one thing ═════════════════════════════ */
+  console.log("\n--- 13b. ticking one setting leaves every other one free ---");
+  {
+    // The generated dashboard list is the set of things an admin can tick, so
+    // it is the right set to prove isolation over.
+    const LOCKS_JS = path.join(ROOT, "..", "..", "..", "Documents", "guardaigo-landing 44", "locks.js");
+    let names = null;
+    if (fs.existsSync(LOCKS_JS)) {
+      const src = fs.readFileSync(LOCKS_JS, "utf8");
+      const json = src.slice(src.indexOf("["), src.lastIndexOf("]") + 1);
+      names = JSON.parse(json).map((r) => r.name);
+      check(names.length === 29, `locks.js lists 29 toggles`, String(names.length));
+    } else {
+      console.log("skip  locks.js not found beside this checkout");
+    }
+
+    if (names) {
+      let leaks = 0;
+      for (const one of names) {
+        const pol = { mode: "enforced", version: 1, locks: { [one]: true } };
+        if (!P.isLocked(pol, one)) { leaks++; console.log(`      ${one} did not lock itself`); continue; }
+        for (const other of names) {
+          if (other === one) continue;
+          if (P.isLocked(pol, other)) {
+            leaks++;
+            console.log(`      locking ${one} also locked ${other}`);
+          }
+        }
+      }
+      check(leaks === 0,
+        `each of the ${names.length} settings locks itself and nothing else (${names.length * names.length} pairs)`,
+        leaks + " leaks");
+
+      // And the category half of that, through the off-list rather than a flag.
+      const cats = names.filter((n) => n.startsWith("cat:")).map((n) => n.slice(4));
+      let catLeaks = 0;
+      for (const one of cats) {
+        const pol = { mode: "enforced", version: 1, locks: { ["cat:" + one]: true } };
+        const eff = P.effectiveDisabled(cats, pol);
+        if (eff.includes(one)) { catLeaks++; console.log(`      ${one} stayed disabled despite its lock`); }
+        const freed = cats.filter((c) => !eff.includes(c));
+        if (freed.length !== 1 || freed[0] !== one) {
+          catLeaks++;
+          console.log(`      locking ${one} freed ${JSON.stringify(freed)}`);
+        }
+      }
+      check(catLeaks === 0,
+        `locking one category frees exactly that category and no other (${cats.length} checked)`,
+        catLeaks + " leaks");
+    }
+  }
+
+  console.log("\n--- 13c. the dashboard list is generated, not a second copy ---");
+  {
+    const SITE = path.join(ROOT, "..", "..", "..", "Documents", "guardaigo-landing 44");
+    const gen = path.join(SITE, "scripts", "gen-locks.mjs");
+    if (!fs.existsSync(gen)) {
+      console.log("skip  gen-locks.mjs not found beside this checkout");
+    } else {
+      const { spawnSync } = require("child_process");
+      const r = spawnSync(process.execPath, [gen, "--check", ROOT], { cwd: SITE, encoding: "utf8" });
+      check(r.status === 0,
+        "locks.js is in step with settings.js — add a category and forget to regenerate, and this fails",
+        (r.stderr || r.stdout || "").trim());
+
+      // Order matters: the list exists so an admin can read it beside the
+      // extension's own screens, which only works if it is in the same order.
+      const settingsSrc = fs.readFileSync(path.join(ROOT, "settings.js"), "utf8");
+      const gStart = settingsSrc.indexOf("const GROUPS = [");
+      const inOrder = [...settingsSrc.slice(gStart, settingsSrc.indexOf("\n  ];", gStart))
+        .matchAll(/\{ type: "([A-Z_]+)"/g)].map((m) => m[1]);
+      const src = fs.readFileSync(path.join(SITE, "locks.js"), "utf8");
+      const rows = JSON.parse(src.slice(src.indexOf("["), src.lastIndexOf("]") + 1));
+      const listedCats = rows.filter((r) => r.name.startsWith("cat:")).map((r) => r.name.slice(4));
+      check(JSON.stringify(listedCats) === JSON.stringify(inOrder),
+        "and in the same order the extension shows them");
+      check(rows.slice(0, 4).map((r) => r.name).join(",") === "enabled,masking,files,images",
+        "with the two popup switches first, then the two attachment ones",
+        rows.slice(0, 4).map((r) => r.name).join(","));
+      check(rows.every((r) => r.label && r.label.length > 2),
+        "every row carries the extension's own label rather than a re-worded one");
+      check(!rows.some((r) => /aggressive|hard stop/i.test(r.label)),
+        "and the two noise settings are not offered");
+    }
+  }
+
   /* ══ PART 6 — through the real content.js, end to end ════════════════ */
   console.log("\n--- 14. a pinned category is actually detected again ---");
   {
@@ -886,6 +972,19 @@ const FLEXIBLE = { mode: "flexible", version: 8, locks: {}, company_name: "Acme 
       await send(env);
       check(env.sentMessages.length === 1,
         "locking an unrelated category does not resurrect the rest of the off-list");
+    }
+    {
+      // The isolation property the brief asked for, end to end: pin the master
+      // switch and NOTHING else comes back with it.
+      const env = makeEnv({ seed: {
+        guardai_disabled_categories: ALL,
+        guardai_enabled: false,
+        guardai_policy: policyRec({ enabled: true }),
+      } });
+      await wait(90);
+      await send(env);
+      check(env.sentMessages.length === 1,
+        "pinning the master switch turns Guard4AI back on without un-disabling a single category");
     }
     {
       // Flexible mode with locks stored: they must do nothing at all.
