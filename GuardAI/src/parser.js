@@ -125,6 +125,128 @@ function extractText(bytes) {
 }
 
 /* ------------------------------------------------------------------ *
+ * OCR — images.
+ *
+ * tesseract.js, loaded ONLY when an image actually arrives, so document
+ * scans never pay its ~6 MB. Everything it needs ships in the extension
+ * (vendor/tesseract/): the worker script, the SIMD WASM core and the
+ * English model. workerBlobURL:false makes the worker load from our own
+ * chrome-extension: origin — the extension CSP allows no blob: scripts —
+ * and langPath points at the same directory, so the model fetch is a
+ * same-origin extension fetch. Nothing here can reach the network.
+ * ------------------------------------------------------------------ */
+let ocrWorkerPromise = null;
+let ocrProgress = null;  // set per-recognition; tesseract's logger is fixed at createWorker
+let ocrQueue = Promise.resolve();
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = chrome.runtime.getURL(src);
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("could not load " + src));
+    document.head.appendChild(s);
+  });
+}
+
+function ensureOcr(onStage) {
+  if (!ocrWorkerPromise) {
+    ocrWorkerPromise = (async () => {
+      if (onStage) onStage("loading");
+      await loadScript("vendor/tesseract/tesseract.min.js");
+      const worker = await window.Tesseract.createWorker("eng", 1, {
+        workerPath: chrome.runtime.getURL("vendor/tesseract/worker.min.js"),
+        corePath: chrome.runtime.getURL("vendor/tesseract/tesseract-core-simd-lstm.js"),
+        langPath: chrome.runtime.getURL("vendor/tesseract"),
+        workerBlobURL: false,
+        logger: (m) => {
+          if (ocrProgress && m && m.status === "recognizing text") ocrProgress(m.progress || 0);
+        },
+      });
+      // Adaptive thresholding, not the default global Otsu. Measured
+      // 2026-08-28: on a dark-theme chat screenshot the default returned
+      // ZERO characters — not garbled, empty, in every segmentation mode —
+      // because text is <1% of the pixels and the global threshold splits
+      // background-vs-bubble instead of ink-vs-paper. Method 1 (Leptonica
+      // adaptive Otsu) read the same image at confidence 92 and regressed
+      // nothing on light pages (19/19 either way where both could read).
+      await worker.setParameters({ thresholding_method: "1" });
+      return worker;
+    })().catch((err) => {
+      // A failed boot must not poison every later attempt.
+      ocrWorkerPromise = null;
+      throw err;
+    });
+  }
+  return ocrWorkerPromise;
+}
+
+/**
+ * OCR one image and return { text, confidence }. Recognitions are queued:
+ * there is one tesseract worker, and interleaved progress callbacks from
+ * two files would attribute percentages to the wrong card row.
+ */
+function ocrImage(bytes, mime, onProgress) {
+  const run = async () => {
+    const worker = await ensureOcr(onProgress ? (stage) => onProgress({ stage }) : null);
+    ocrProgress = onProgress ? (p) => onProgress({ pct: Math.round(p * 100) }) : null;
+    try {
+      const blob = new Blob([bytes], { type: mime || "image/png" });
+      const { data } = await worker.recognize(blob);
+      return { text: data.text || "", confidence: Number(data.confidence) || 0 };
+    } finally {
+      ocrProgress = null;
+    }
+  };
+  const result = ocrQueue.then(run, run);
+  ocrQueue = result.catch(() => {});
+  return result;
+}
+
+/**
+ * The image path. Refuses oversized images with a plain reason BEFORE
+ * decoding anything (dimensions come from the file header), reads the rest
+ * whole — never a crop, never a downscale (measured: below native
+ * resolution digits are destroyed, not fuzzed) — and reports one of three
+ * image-specific states. The extracted text is dropped here like every
+ * other extraction; only counts and two numbers (confidence, character
+ * count) cross the port.
+ */
+async function handleImage(req, port, cls) {
+  const dims = FileScan.imageDims(req.bytes);
+  const tooBig = FileScan.imageTooLarge(dims);
+  if (tooBig) {
+    port.postMessage(buildReply(req.id, cls,
+      { action: FileScan.ACTION.IMG_UNREADABLE, reason: tooBig }, 0));
+    return;
+  }
+
+  let ocr;
+  try {
+    ocr = await ocrImage(req.bytes, req.type, (p) => {
+      port.postMessage({ id: String(req.id), progress: p });
+    });
+  } catch (err) {
+    port.postMessage(buildReply(req.id, cls, {
+      action: FileScan.ACTION.IMG_UNREADABLE,
+      reason: "The image reader could not start" +
+        ((err && err.message) ? " (" + err.message + ")" : "") + ".",
+    }, 0));
+    return;
+  }
+
+  const findings = FileScan.scanLong(detector, ocr.text);
+  const summary = FileScan.summarise(findings);
+  const verdict = FileScan.ocrVerdict({
+    summary,
+    confidence: ocr.confidence,
+    textChars: ocr.text.replace(/\s+/g, "").length,
+  });
+  ocr = null;
+  port.postMessage(buildReply(req.id, cls, verdict, 0));
+}
+
+/* ------------------------------------------------------------------ *
  * The one reply shape.
  *
  * Built one field at a time, exactly like src/company.js and for the same
@@ -174,6 +296,11 @@ async function handle(req, port) {
   const early = FileScan.verdict({ kind: cls.kind, bytes: size });
   if (early.action === FileScan.ACTION.TOO_LARGE || early.action === FileScan.ACTION.UNSUPPORTED) {
     port.postMessage(buildReply(req.id, cls, early, 0));
+    return;
+  }
+
+  if (cls.kind === FileScan.KIND.IMAGE) {
+    await handleImage(req, port, cls);
     return;
   }
 
@@ -250,6 +377,14 @@ async function handleExtract(req, port) {
   const early = FileScan.verdict({ kind: cls.kind, bytes: size });
   if (early.action === FileScan.ACTION.TOO_LARGE || early.action === FileScan.ACTION.UNSUPPORTED) {
     refuse("This file cannot be read.");
+    return;
+  }
+  if (cls.kind === FileScan.KIND.IMAGE) {
+    // No text version of a screenshot exists — its meaning is its layout,
+    // and OCR output is not a faithful copy. The card never offers this for
+    // images; refusing here keeps a crafted request from getting OCR text
+    // out anyway.
+    refuse("A screenshot's meaning is its layout, so there is no text version to send.");
     return;
   }
   let extracted = null;

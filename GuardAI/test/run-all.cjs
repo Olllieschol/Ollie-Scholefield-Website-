@@ -48,6 +48,7 @@ const SUITES = [
   { name: "file-extract.cjs (a real PDF and DOCX, through pdf.js/mammoth into the detector)", file: "test/file-extract.cjs" },
   { name: "file-attach.cjs (quarantine an attachment, release it through the right input)", file: "test/file-attach.cjs" },
   { name: "file-suitability.cjs (send-as-text: the measured rule + per-site paste limits)", file: "test/file-suitability.cjs" },
+  { name: "file-image.cjs (image OCR policy: classify, header dims, the three honest states)", file: "test/file-image.cjs" },
   { name: "prose-values.cjs (values as documents write them: DOB/phone/org/title fixes)", file: "test/prose-values.cjs" },
   // Section 1 core bug regressions.
   { name: "section1-bugs.cjs (licence/address/auto-replace)", file: "test/section1-bugs.cjs" },

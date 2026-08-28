@@ -4756,9 +4756,22 @@
       }
     }
 
-    const blocked = results.filter((r) => r.res.action === "block");
+    const blocked = results.filter((r) =>
+      r.res.action === "block" || r.res.action === "img-found");
+    // Every image outcome is in here, including "nothing found" — an OCR
+    // read is a partial read by nature, so an image is NEVER auto-released
+    // the way a clean document is. The user decides, every time.
+    //
+    // And the membership test is inverted on purpose: anything that is not
+    // LITERALLY the clean-document verdict counts as unchecked. The first
+    // build listed the held actions instead, which meant an action string
+    // this router didn't know fell through BOTH lists and auto-released as
+    // clean — observed live when a stale content script met a newer parser
+    // frame: an image with findings sailed through with "Checked — nothing
+    // blocked". A verdict this code does not recognise is a file it cannot
+    // vouch for, and must fail CLOSED.
     const unchecked = results.filter((r) =>
-      ["unreadable", "unsupported", "too-large"].includes(r.res.action));
+      r.res.action !== "pass" && r.res.action !== "block" && r.res.action !== "img-found");
 
     reportFileStats(results);
 
@@ -4807,7 +4820,8 @@
     }
     reportStats({
       filesChecked: results.length,
-      filesBlocked: results.filter((r) => r.res.action === "block").length,
+      filesBlocked: results.filter(
+        (r) => r.res.action === "block" || r.res.action === "img-found").length,
       detected,
     });
     // reportCompanyCategories reads one field off each entry and builds a
@@ -5148,13 +5162,23 @@
     );
 
     return {
-      /** Per-page progress from the parser, for long PDFs. */
+      /**
+       * Live progress from the parser: per-page for long PDFs, and for
+       * images a stage line then a percentage. OCR on a text-dense retina
+       * screenshot measured 14 seconds — a card that sits silent that long
+       * reads as an extension that ate the attachment, so the percentage
+       * ticks with tesseract's own recognition progress rather than
+       * animating a guess.
+       */
       progress(file, p) {
         if (fileCardEl !== wrap) return;
         const row = wrap.querySelector(
           `.guardai-filecard__file[data-name="${CSS.escape(file.name)}"] .guardai-filecard__fmeta`
         );
-        if (row && p && p.total) row.textContent = `page ${p.page} of ${p.total}`;
+        if (!row || !p) return;
+        if (p.total) row.textContent = `page ${p.page} of ${p.total}`;
+        else if (p.stage === "loading") row.textContent = "starting the reader…";
+        else if (typeof p.pct === "number") row.textContent = `reading the image… ${p.pct}%`;
       },
 
       /** Read, nothing blocking. Brief, then gone. */
@@ -5181,7 +5205,12 @@
       /** Something blocks, or something could not be read. The user decides. */
       decide(results, handlers) {
         if (fileCardEl !== wrap) return;
-        const anyBlocked = results.some((r) => r.res.action === "block");
+        const anyBlocked = results.some(
+          (r) => r.res.action === "block" || r.res.action === "img-found");
+        // Only image results, none of which found anything: the header must
+        // not claim a check failed OR that the file is clean — "nothing in
+        // what it could read" is the whole truth available.
+        const onlyImgNothing = results.every((r) => r.res.action === "img-nothing");
 
         /* "Send as safe text": extract the text, mask it with the same rules,
            send it as a message instead of attaching the file. Offered ONLY
@@ -5198,7 +5227,7 @@
         const safeTextRow =
           single && suit && suit.offer
             ? `<div class="guardai-filecard__btns guardai-filecard__btns--safetext">` +
-              `<button class="guardai-filecard__btn guardai-filecard__btn--safetext">Send as safe text instead</button>` +
+              `<button class="guardai-act guardai-act--primary guardai-filecard__btn--safetext">Send as safe text instead</button>` +
               `</div><p class="guardai-filecard__textwhy"></p>`
             : single && suit && !suit.offer
               ? `<p class="guardai-filecard__textwhy">${escapeHtml('"Send as safe text" is not available: ' + suit.why)}</p>`
@@ -5238,6 +5267,38 @@
               );
             }
 
+            /* The three image states. None of them borrow the document
+               wording, because a document extractor reads every character
+               and OCR reads what it can see — "checked" and "clean" are
+               promises OCR cannot make. */
+            if (res.action === "img-unreadable") {
+              return (
+                `<li class="guardai-filecard__file guardai-filecard__file--unchecked">${title}` +
+                `<p class="guardai-filecard__why"><strong>GuardAI could not read this image properly.</strong> ` +
+                `${escapeHtml(res.reason || "")} Treat it as unchecked — attach it only if you know what it shows.</p></li>`
+              );
+            }
+            if (res.action === "img-nothing") {
+              return (
+                `<li class="guardai-filecard__file guardai-filecard__file--unchecked">${title}` +
+                `<p class="guardai-filecard__why">GuardAI read what it could see in this image and ` +
+                `nothing it read looks sensitive. It cannot read everything a person can — small print, ` +
+                `stylised text, a photo of a screen — so look it over yourself before attaching.</p></li>`
+              );
+            }
+
+            // Only the two found-something verdicts render category rows.
+            // Anything else that reaches this point is a verdict this build
+            // does not recognise — render it as unchecked, mirroring the
+            // fail-closed routing in reviewFiles.
+            if (res.action !== "block" && res.action !== "img-found") {
+              return (
+                `<li class="guardai-filecard__file guardai-filecard__file--unchecked">${title}` +
+                `<p class="guardai-filecard__why">GuardAI got a check result it does not recognise ` +
+                `for this file, so treat it as <strong>not checked</strong>.</p></li>`
+              );
+            }
+
             const s = res.summary || { blocking: [], other: [], counts: {}, pageHits: {} };
             const rows = (s.blocking || [])
               .map((type) => {
@@ -5267,23 +5328,34 @@
                 )}${(s.other || []).length > 5 ? ", and more" : ""}.</p>`
               : "";
 
+            // "img-found" reaches here too: same category rows, same counts,
+            // same vocabulary as a document — plus one line owning that an
+            // OCR read is a partial read even when it found something.
+            const partial = res.action === "img-found"
+              ? `<p class="guardai-filecard__why">Read from the image itself — GuardAI may not have read all of it.</p>`
+              : "";
+
             return (
               `<li class="guardai-filecard__file guardai-filecard__file--blocked">${title}` +
-              `<ul class="guardai-filecard__cats">${rows}</ul>${other}</li>`
+              `<ul class="guardai-filecard__cats">${rows}</ul>${other}${partial}</li>`
             );
           })
           .join("");
 
         render(
-          head(anyBlocked ? "Not attached — check this first" : "Not attached — GuardAI could not check it") +
+          head(anyBlocked
+            ? "Not attached — check this first"
+            : onlyImgNothing
+              ? "Not attached — nothing found, your call"
+              : "Not attached — GuardAI could not check it") +
             `<p class="guardai-filecard__platform">${escapeHtml(
               `Going to ${CONFIG.name}. ${CONFIG.note || ""}`
             )}</p>` +
             `<ul class="guardai-filecard__files">${body}</ul>` +
             safeTextRow +
             `<div class="guardai-filecard__btns">` +
-            `<button class="guardai-filecard__btn guardai-filecard__btn--cancel">Don't attach</button>` +
-            `<button class="guardai-filecard__btn guardai-filecard__btn--ghost guardai-filecard__btn--allow">Attach anyway</button>` +
+            `<button class="guardai-act guardai-act--secondary guardai-filecard__btn--cancel">Don't attach</button>` +
+            `<button class="guardai-act guardai-act--danger guardai-filecard__btn--allow">Attach anyway</button>` +
             `</div>`
         );
 

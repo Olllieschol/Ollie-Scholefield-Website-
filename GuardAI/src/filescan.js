@@ -30,6 +30,7 @@
     PDF: "pdf",
     DOCX: "docx",
     TEXT: "text",
+    IMAGE: "image",
     UNSUPPORTED: "unsupported",
   };
 
@@ -44,6 +45,21 @@
   };
 
   /**
+   * Images tesseract's bundled decoders read: PNG, JPEG, WebP. Screenshots
+   * are the case that matters — measured 2026-08-28, rendered screen text
+   * OCRs digit-exact at native resolution (19/19 planted values across seven
+   * realistic UIs). Every other image format stays in KNOWN_UNSUPPORTED:
+   * HEIC (iPhone photos) has no decoder here, and a photo of a document is a
+   * different, much harder input than a screenshot anyway.
+   */
+  const IMAGE_EXTS = {
+    png: "PNG screenshot / image",
+    jpg: "JPEG image",
+    jpeg: "JPEG image",
+    webp: "WebP image",
+  };
+
+  /**
    * Deliberately NOT supported in v1, listed by name so the warning can say
    * what the file is rather than "unsupported file". A user who attaches a
    * spreadsheet deserves to be told GuardAI cannot read spreadsheets yet, not
@@ -54,8 +70,7 @@
     pptx: "PowerPoint deck", ppt: "PowerPoint deck",
     doc: "Legacy Word document (.doc)",
     pages: "Pages document", numbers: "Numbers spreadsheet", key: "Keynote deck",
-    png: "Image", jpg: "Image", jpeg: "Image", gif: "Image", webp: "Image",
-    heic: "Image", heif: "Image", svg: "Image", bmp: "Image", tiff: "Image",
+    gif: "Image", heic: "Image", heif: "Image", svg: "Image", bmp: "Image", tiff: "Image",
     zip: "Archive", rar: "Archive", "7z": "Archive", tar: "Archive", gz: "Archive",
     mp3: "Audio", wav: "Audio", m4a: "Audio", mp4: "Video", mov: "Video",
     odt: "OpenDocument text", ods: "OpenDocument spreadsheet",
@@ -86,6 +101,7 @@
     if (ext === "pdf") return { kind: KIND.PDF, label: "PDF document", ext };
     if (ext === "docx") return { kind: KIND.DOCX, label: "Word document", ext };
     if (TEXT_EXTS[ext]) return { kind: KIND.TEXT, label: TEXT_EXTS[ext], ext };
+    if (IMAGE_EXTS[ext]) return { kind: KIND.IMAGE, label: IMAGE_EXTS[ext], ext };
     if (KNOWN_UNSUPPORTED[ext]) {
       return { kind: KIND.UNSUPPORTED, label: KNOWN_UNSUPPORTED[ext], ext };
     }
@@ -95,6 +111,9 @@
       if (type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
         return { kind: KIND.DOCX, label: "Word document", ext };
       }
+      if (type === "image/png") return { kind: KIND.IMAGE, label: IMAGE_EXTS.png, ext };
+      if (type === "image/jpeg") return { kind: KIND.IMAGE, label: IMAGE_EXTS.jpg, ext };
+      if (type === "image/webp") return { kind: KIND.IMAGE, label: IMAGE_EXTS.webp, ext };
       if (type.startsWith("text/")) return { kind: KIND.TEXT, label: "Text file", ext };
     }
 
@@ -296,12 +315,24 @@
    * credentials, government identifiers, and instruments that move money.
    * Everything else is counted and shown, and passes.
    *
-   * Two categories that look like they belong here and do not:
+   * Three categories that look like they belong here and do not:
    *
    *   HEALTH is a topic detector, not a data detector — its pattern matches
    *   "therapy", "symptoms", "medication", "mental health". It fires on any
    *   HR policy or leave clause. Blocking on it reintroduces exactly the
    *   noise this list exists to avoid. It is counted, not blocked.
+   *
+   *   IMMIGRATION is the same shape, and was in this list until 2026-08-28
+   *   by oversight rather than decision. Its pattern matches the WORDS
+   *   "immigration", "sponsorship", "permanent residency", "visa" — and
+   *   "Visa" is also a payment card, so measured on 14 payment-sense
+   *   sentences it flagged 14 of them: "We accept Visa, Mastercard and Amex"
+   *   blocked a document as an immigration matter. It also captures no
+   *   identifier at all — on "Visa grant number EGO4821577, subclass 482" it
+   *   returns "Visa" and "subclass 482" and misses the grant number, which
+   *   is the only actual identifier in the sentence. A rule that cannot
+   *   capture the identifier cannot be protecting one. Counted, not blocked,
+   *   for exactly HEALTH's reason.
    *
    *   ABN and ACN are public register data. Every Australian invoice carries
    *   one and looking them up is the point of the register.
@@ -316,7 +347,6 @@
     "MEDICARE",      // checksummed government identifier
     "PASSPORT",      // government identifier
     "LICENCE",       // government identifier
-    "IMMIGRATION",   // visa / immigration status identifiers
   ]);
 
   /**
@@ -384,6 +414,16 @@
     UNREADABLE: "unreadable",   // right file type, no text came out
     UNSUPPORTED: "unsupported", // we do not read this file type at all
     TOO_LARGE: "too-large",     // refused before reading
+
+    // Images get their OWN three states rather than reusing the document
+    // ones, because the document states carry promises OCR cannot make.
+    // "pass" means "read it, nothing blocks" — and a document extractor
+    // really did read every character. OCR reads what it can see, which is
+    // not the same thing, so an image is NEVER auto-released and never
+    // shown the document wording. All three land on the decide card.
+    IMG_FOUND: "img-found",           // OCR read text and the rules fired
+    IMG_NOTHING: "img-nothing",       // OCR read text; nothing it read matched
+    IMG_UNREADABLE: "img-unreadable", // OCR could not read this image properly
   };
 
   /** Files above this are refused rather than read into memory. */
@@ -447,6 +487,161 @@
     };
   }
 
+
+  /* ------------------------------------------------------------------ *
+   * Image scanning policy.
+   *
+   * Everything here was measured 2026-08-28 against a corpus of realistic
+   * rendered screenshots (banking, ATO, payroll, Medicare, dark-mode chat,
+   * email; retina and 1x) with checksum-valid planted values, plus degraded
+   * variants. The numbers that matter:
+   *
+   *   - native-resolution screenshots: 19/19 rule hits, all digit-exact
+   *   - JPEG recompression to quality 15: still 4/4 exact
+   *   - BELOW native resolution the cliff is sharp: at 60% of 1x the same
+   *     page scored confidence 27 with destroyed digits ("sims 2811
+   *     70685008" for a card number); at 40% OCR returned nothing at all
+   *   - readable pages scored confidence 61–95; the gap between 27 and 61
+   *     is where the unreadable line goes
+   *
+   * The one non-negotiable: OCR reads what it can see, so an image verdict
+   * can never claim the file is clean. IMG_NOTHING means "nothing in what
+   * we could read", and the card wording owns that out loud.
+   * ------------------------------------------------------------------ */
+
+  /**
+   * Pixel dimensions from the file header, without decoding the image.
+   * PNG, JPEG and WebP (VP8 / VP8L / VP8X) — the three formats classify()
+   * admits. Returns { width, height } or null when the header cannot be
+   * read, and null is NOT "small": the caller must treat it as unknown.
+   */
+  function imageDims(bytes) {
+    const b = bytes instanceof Uint8Array ? bytes : bytes && bytes.byteLength != null ? new Uint8Array(bytes) : null;
+    if (!b || b.length < 16) return null;
+
+    // PNG: 8-byte signature, then IHDR with big-endian width/height.
+    if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) {
+      if (b.length < 24) return null;
+      const be = (o) => (b[o] << 24 | b[o + 1] << 16 | b[o + 2] << 8 | b[o + 3]) >>> 0;
+      const w = be(16), h = be(20);
+      return w && h ? { width: w, height: h } : null;
+    }
+
+    // JPEG: walk the markers to the first frame header (SOF0–SOF15, minus
+    // the ones that are not frames: DHT C4, JPG C8, DAC CC).
+    if (b[0] === 0xff && b[1] === 0xd8) {
+      let o = 2;
+      while (o + 9 < b.length) {
+        if (b[o] !== 0xff) { o++; continue; }
+        const marker = b[o + 1];
+        if (marker === 0xff) { o++; continue; }
+        if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+          const h = (b[o + 5] << 8) | b[o + 6];
+          const w = (b[o + 7] << 8) | b[o + 8];
+          return w && h ? { width: w, height: h } : null;
+        }
+        if (marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd9)) { o += 2; continue; }
+        const len = (b[o + 2] << 8) | b[o + 3];
+        if (len < 2) return null;
+        o += 2 + len;
+      }
+      return null;
+    }
+
+    // WebP: RIFF....WEBP, then one of three chunk layouts.
+    if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 &&
+        b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) {
+      if (b.length < 30) return null;
+      const tag = String.fromCharCode(b[12], b[13], b[14], b[15]);
+      if (tag === "VP8X") {
+        // 24-bit little-endian canvas size, stored minus one.
+        const w = 1 + (b[24] | (b[25] << 8) | (b[26] << 16));
+        const h = 1 + (b[27] | (b[28] << 8) | (b[29] << 16));
+        return { width: w, height: h };
+      }
+      if (tag === "VP8 ") {
+        // Lossy: frame header at chunk payload + 6, 14-bit little-endian each.
+        const w = (b[26] | (b[27] << 8)) & 0x3fff;
+        const h = (b[28] | (b[29] << 8)) & 0x3fff;
+        return w && h ? { width: w, height: h } : null;
+      }
+      if (tag === "VP8L") {
+        if (b[20] !== 0x2f) return null; // signature byte
+        const bits = b[21] | (b[22] << 8) | (b[23] << 16) | (b[24] << 24);
+        const w = 1 + (bits & 0x3fff);
+        const h = 1 + ((bits >> 14) & 0x3fff);
+        return { width: w, height: h };
+      }
+      return null;
+    }
+
+    return null;
+  }
+
+  /**
+   * Never scan part of an image. Above this we refuse with a plain reason
+   * rather than downscaling (measured: below native resolution digits are
+   * DESTROYED, not fuzzed — a downscaled scan would read wrong, not partial)
+   * or silently cropping. 24MP is about four full retina screens stacked —
+   * room for any real screenshot including tall full-page captures, while a
+   * 60MP scan that would take minutes gets an honest no.
+   */
+  const IMG_MAX_PIXELS = 24 * 1000 * 1000;
+
+  /** The one plain line for an oversized image, or null when it fits. */
+  function imageTooLarge(dims) {
+    if (!dims || !dims.width || !dims.height) return null;
+    const mp = dims.width * dims.height;
+    if (mp <= IMG_MAX_PIXELS) return null;
+    return (
+      "This image is too large to read reliably (" +
+      Math.round(mp / 1000000) + " megapixels; the limit is " +
+      Math.round(IMG_MAX_PIXELS / 1000000) + "). It has not been read."
+    );
+  }
+
+  /**
+   * The unreadable line. Measured floors: every page OCR read correctly
+   * scored confidence 61+; the degraded page that produced destroyed digits
+   * scored 27; a page OCR could not segment at all scored 0 with no text.
+   * The cut sits in the gap. Both floors exist because they fail
+   * differently: low confidence is "what came out is probably wrong", and
+   * too-few characters is "nothing meaningful came out" — a confident read
+   * of three stray letters must not count as having read the image.
+   */
+  const OCR_MIN_CONF = 45;
+  const OCR_MIN_CHARS = 20;
+
+  /**
+   * Three states, and FOUND wins over unreadable on purpose: if the rules
+   * fired on what OCR managed to read, that warning is true regardless of
+   * how badly the rest of the image read. The reverse ordering would let a
+   * blurry screenshot suppress a real TFN hit.
+   *
+   * @param {object} input
+   * @param {object} [input.summary]    from summarise(), if scanning ran
+   * @param {number} input.confidence   tesseract mean confidence, 0–100
+   * @param {number} input.textChars    non-whitespace chars OCR produced
+   */
+  function ocrVerdict(input) {
+    const it = input || {};
+    const summary = it.summary || summarise([]);
+    const conf = Number.isFinite(it.confidence) ? it.confidence : 0;
+    const chars = Number.isFinite(it.textChars) ? it.textChars : 0;
+
+    if (summary.total > 0) {
+      return { action: ACTION.IMG_FOUND, summary };
+    }
+    if (conf < OCR_MIN_CONF || chars < OCR_MIN_CHARS) {
+      return {
+        action: ACTION.IMG_UNREADABLE,
+        reason: chars < OCR_MIN_CHARS
+          ? "GuardAI could not make out text in this image."
+          : "The text in this image is too unclear to read reliably.",
+      };
+    }
+    return { action: ACTION.IMG_NOTHING, summary };
+  }
 
   /* ------------------------------------------------------------------ *
    * "Send as safe text" suitability.
@@ -670,12 +865,14 @@
 
   const api = {
     KIND, ACTION, MAX_BYTES, MIN_TEXT_CHARS, CHUNK, OVERLAP, BLOCKING_TYPES,
-    TEXT_EXTS, KNOWN_UNSUPPORTED,
+    TEXT_EXTS, KNOWN_UNSUPPORTED, IMAGE_EXTS,
     classify, chunk, scanLong, summarise, verdict, pageLookup, extensionOf,
     joinTextItems,
     windowSize,
     textShape, layoutShape, suitability, pasteLimitFor,
     PASTE_LIMITS, PASTE_LIMIT_DEFAULT,
+    imageDims, imageTooLarge, ocrVerdict,
+    IMG_MAX_PIXELS, OCR_MIN_CONF, OCR_MIN_CHARS,
   };
 
   if (typeof window !== "undefined") {

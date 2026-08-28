@@ -847,7 +847,7 @@ console.log("\n--- 10d. a fill that cannot land does not send ---");
   w.document.execCommand = realExec;
 }
 
-console.log("\n--- 10e. both cards teach ONE button language ---");
+console.log("\n--- 10e. all three cards teach ONE button language ---");
 {
   /**
    * Reported 2026-08-28: the text card and the file preview offered the same
@@ -880,10 +880,31 @@ console.log("\n--- 10e. both cards teach ONE button language ---");
     check(!!f && f.includes(role), `file preview: ${label} is ${role}`, f || "not found");
   }
 
+  /* The DECISION card — the one the user meets first, and the last to join
+     the shared component (2026-08-28). Its "Attach anyway" is the same kind
+     of action as "Send anyway": it hands over unprotected data. It was a
+     plain grey ghost sitting beside a bright filled "Don't attach", so the
+     riskiest button on the card read as the safest one. */
+  const allowBtn = buttonMarkup("filecard__btn--allow");
+  const cancelBtn = buttonMarkup("filecard__btn--cancel");
+  const safeTextBtn = buttonMarkup("filecard__btn--safetext");
+  check(!!allowBtn && allowBtn.includes("guardai-act--danger"),
+    "decision card: Attach anyway is the danger role", allowBtn || "not found");
+  check(!!allowBtn && !allowBtn.includes("--ghost"),
+    "…and no longer wears the ghost treatment it had", allowBtn || "not found");
+  check(!!cancelBtn && cancelBtn.includes("guardai-act--secondary"),
+    "decision card: Don't attach is secondary — safe, but not the loudest thing on the card",
+    cancelBtn || "not found");
+  check(!!safeTextBtn && safeTextBtn.includes("guardai-act--primary"),
+    "decision card: Send as safe text is primary — the protected path, same green as Mask & Send",
+    safeTextBtn || "not found");
+  check(!!cancelBtn && !!allowBtn && cancelBtn.includes("guardai-act ") && allowBtn.includes("guardai-act "),
+    "…and both sit on the shared component, so the row cannot mismatch in height or radius");
+
   // The one that matters most, stated on its own: the risky action keeps its
-  // warning treatment on BOTH cards.
+  // warning treatment on EVERY card that offers it.
   const dangerCount = (src.match(/guardai-act--danger/g) || []).length;
-  check(dangerCount === 2, "exactly two buttons carry the danger role — one per card",
+  check(dangerCount === 3, "exactly three buttons carry the danger role — one per card",
     String(dangerCount));
 
   // Rendered, not just declared: the live preview's buttons carry the roles.
@@ -919,6 +940,11 @@ console.log("\n--- 10e. both cards teach ONE button language ---");
   for (const stray of [
     ".guardai-prompt__btn--send {", ".guardai-prompt__btn--edit", ".guardai-prompt__btn--ghost",
     ".guardai-prompt__btn--anyway", ".guardai-fileprev__btn--ghost", ".guardai-fileprev__btn--masksend",
+    // The decision card's old private set. --ghost is the one that made
+    // "Attach anyway" look safe; --safetext and the __btn base are gone with
+    // it so the card cannot drift back to its own metrics.
+    ".guardai-filecard__btn--ghost", ".guardai-filecard__btn--safetext",
+    ".guardai-filecard__btn {",
   ]) {
     check(!css.includes(stray), `no per-card override left for ${stray.trim()}`);
   }
@@ -942,6 +968,40 @@ console.log("\n--- 10e. both cards teach ONE button language ---");
   check(new Set(bodies).size === 3, "control: the three roles are visually distinct from each other");
   check(/2e5c43/.test(bodies[0]), "primary is the muted file-card green", bodies[0].trim().slice(0, 60));
   check(/f0883e/.test(bodies[2]), "danger is the text-card warning orange", bodies[2].trim().slice(0, 60));
+
+  /* Rendered, on every decision-card state. Declared markup is not enough:
+     the three image states and the document states run through the same
+     render() but are assembled by different branches, and it is the state
+     with NOTHING found where a neutral "Attach anyway" would be most
+     tempting to click without reading. */
+  for (const [label, res] of [
+    ["found something", { kind: "image", label: "PNG screenshot / image", action: "img-found", pages: 0,
+      summary: { counts: { MEDICARE: 1 }, blocking: ["MEDICARE"], other: [], blockingCount: 1, total: 1, pageHits: {} } }],
+    ["read it, found nothing", { kind: "image", label: "PNG screenshot / image", action: "img-nothing", pages: 0,
+      summary: { counts: {}, blocking: [], other: [], blockingCount: 0, total: 0, pageHits: {} } }],
+    ["could not read it", { kind: "image", label: "JPEG image", action: "img-unreadable", pages: 0,
+      reason: "The text in this image is too unclear to read reliably." }],
+    ["a blocked document", { kind: "docx", label: "Word document", action: "block", pages: 0,
+      summary: { counts: { TFN: 1 }, blocking: ["TFN"], other: [], blockingCount: 1, total: 1, pageHits: {} } }],
+  ]) {
+    const ww = loadPage(CHATGPT);
+    await settle(10);
+    ww.GuardAI._fileHooks.setParser(async () => res);
+    const inp = ww.document.getElementById("upload-files");
+    const f = makeFile(ww, "x.png", 5000, "image/png");
+    inp.files = Object.assign([f], { item: () => f });
+    inp.dispatchEvent(new ww.Event("change", { bubbles: true }));
+    await settle(12);
+    const c = ww.GuardAI._fileHooks.cardEl();
+    const allow = c && c.querySelector(".guardai-filecard__btn--allow");
+    const cancel = c && c.querySelector(".guardai-filecard__btn--cancel");
+    check(!!allow && allow.classList.contains("guardai-act--danger"),
+      `rendered [${label}]: Attach anyway wears the warning orange`,
+      allow ? allow.className : "no button");
+    check(!!cancel && !cancel.classList.contains("guardai-act--danger"),
+      `rendered [${label}]: …and Don't attach does not`,
+      cancel ? cancel.className : "no button");
+  }
 }
 
 console.log("\n--- 11. withheld, and it says why ---");
@@ -1046,6 +1106,140 @@ console.log("\n--- 9. the master switch means hands off ---");
   in2.dispatchEvent(new on.Event("change", { bubbles: true }));
   await settle(10);
   check(saw2 === 0, "control: with the switch on, the same file IS held", `${saw2}`);
+}
+
+console.log("\n--- 13. images: three states, three different screens, none of them 'clean' ---");
+{
+  /* (a) Found something: the same category rows and counts as a document,
+     plus the line owning that OCR is a partial read. Held until decided. */
+  const w = loadPage(CHATGPT);
+  await settle(10);
+  const H = w.GuardAI._fileHooks;
+  H.setParser(async () => ({
+    kind: "image", label: "PNG screenshot / image", action: "img-found", pages: 0,
+    summary: { counts: { TFN: 1, BSB: 2 }, blocking: ["BSB", "TFN"], other: [],
+               blockingCount: 3, total: 3, pageHits: {} },
+  }));
+  let released = 0;
+  w.document.querySelector("main").addEventListener("change", () => { released++; });
+  const shot = makeFile(w, "shot.png", 5000, "image/png");
+  const photos = w.document.getElementById("upload-photos");
+  photos.files = Object.assign([shot], { item: () => shot });
+  photos.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await settle(10);
+
+  const card = H.cardEl();
+  check(!!card && released === 0, "a screenshot with findings is held", `released=${released}`);
+  check(/check this first/.test(card.textContent), "under the same header a document gets");
+  const cats = [...card.querySelectorAll(".guardai-filecard__catname")].map((el) => el.textContent);
+  check(cats.length === 2 && /BSB/i.test(cats.join(" ")), "categories are named, with counts", cats.join(", "));
+  check(/may not have read all of it/.test(card.textContent),
+    "and the card owns that an OCR read is partial EVEN when it found something");
+  check(!card.querySelector(".guardai-filecard__btn--safetext") && !card.querySelector(".guardai-filecard__textwhy"),
+    "no 'Send as safe text', and no absence-reason either — a screenshot has no text version");
+  card.querySelector(".guardai-filecard__btn--allow").click();
+  await settle(10);
+  check(released === 1 && !H.cardEl(), "'Attach anyway' releases it through the same path as a document");
+
+  /* (b) Nothing found: the dangerous state. It must HOLD — auto-releasing
+     here is exactly the bank-statement-looks-clean outcome — and its words
+     must not borrow the document flow's "checked/clean" promises. */
+  const w2 = loadPage(CHATGPT);
+  await settle(10);
+  const H2 = w2.GuardAI._fileHooks;
+  H2.setParser(async () => ({
+    kind: "image", label: "PNG screenshot / image", action: "img-nothing", pages: 0,
+    summary: { counts: {}, blocking: [], other: [], blockingCount: 0, total: 0, pageHits: {} },
+  }));
+  let released2 = 0;
+  w2.document.querySelector("main").addEventListener("change", () => { released2++; });
+  const shot2 = makeFile(w2, "clean.png", 5000, "image/png");
+  const photos2 = w2.document.getElementById("upload-photos");
+  photos2.files = Object.assign([shot2], { item: () => shot2 });
+  photos2.dispatchEvent(new w2.Event("change", { bubbles: true }));
+  await settle(10);
+
+  const card2 = H2.cardEl();
+  check(!!card2 && released2 === 0,
+    "CONTROL (the dangerous direction): nothing-found does NOT auto-release", `released=${released2}`);
+  check(/nothing found, your call/.test(card2.textContent), "the header hands the judgement over");
+  check(/look it over yourself/.test(card2.textContent), "and the body says to");
+  check(/cannot read everything a person can/.test(card2.textContent),
+    "…because OCR reads less than a person — photos of screens included",
+    card2.textContent.slice(0, 200));
+  check(!/Checked — nothing blocked/.test(card2.textContent) && !/found nothing sensitive/.test(card2.textContent),
+    "the document flow's 'checked/clean' wording appears NOWHERE on it");
+  card2.querySelector(".guardai-filecard__btn--cancel").click();
+  await settle(4);
+  check(!H2.cardEl() && released2 === 0, "'Don't attach' closes without releasing");
+
+  /* (c) Could not read it: unmistakable, and marked unchecked. */
+  const w3 = loadPage(CHATGPT);
+  await settle(10);
+  const H3 = w3.GuardAI._fileHooks;
+  H3.setParser(async () => ({
+    kind: "image", label: "JPEG image", action: "img-unreadable", pages: 0,
+    reason: "The text in this image is too unclear to read reliably.",
+  }));
+  let released3 = 0;
+  w3.document.querySelector("main").addEventListener("change", () => { released3++; });
+  const blurry = makeFile(w3, "blurry.jpg", 5000, "image/jpeg");
+  const photos3 = w3.document.getElementById("upload-photos");
+  photos3.files = Object.assign([blurry], { item: () => blurry });
+  photos3.dispatchEvent(new w3.Event("change", { bubbles: true }));
+  await settle(10);
+
+  const card3 = H3.cardEl();
+  check(!!card3 && released3 === 0, "an unreadable image is held", `released=${released3}`);
+  check(/could not read this image properly/.test(card3.textContent),
+    "and says so in exactly those words");
+  check(/too unclear to read reliably/.test(card3.textContent), "with the parser's plain reason");
+  check(/Treat it as unchecked/.test(card3.textContent), "and tells the user how to treat it");
+  check(/could not check it/.test(card3.textContent), "under the could-not-check header");
+
+  /* (d2) An action string this build does not recognise must fail CLOSED.
+     Caught live: a version skew (stale content script, newer parser frame)
+     produced an action the router had no list for, and the file — an image
+     WITH findings — auto-released under "Checked — nothing blocked". The
+     router now treats anything that is not literally the clean-document
+     verdict as unchecked. */
+  const w5 = loadPage(CHATGPT);
+  await settle(10);
+  const H5 = w5.GuardAI._fileHooks;
+  H5.setParser(async () => ({ kind: "mystery", label: "File", action: "verdict-from-the-future", pages: 0 }));
+  let released5 = 0;
+  w5.document.querySelector("main").addEventListener("change", () => { released5++; });
+  const odd = makeFile(w5, "odd.png", 5000, "image/png");
+  const photos5 = w5.document.getElementById("upload-photos");
+  photos5.files = Object.assign([odd], { item: () => odd });
+  photos5.dispatchEvent(new w5.Event("change", { bubbles: true }));
+  await settle(10);
+  const card5 = H5.cardEl();
+  check(!!card5 && released5 === 0,
+    "an unrecognised verdict is HELD, never released as clean", `released=${released5}`);
+  check(card5 && /not checked/.test(card5.textContent),
+    "and rendered as unchecked, not as an empty findings list");
+  check(card5 && !/nothing blocked|nothing sensitive/i.test(card5.textContent),
+    "with no trace of the clean-file wording");
+
+  /* (d) Control in the other direction: the doc flow still auto-releases a
+     clean PDF, so holding every image did not quietly start holding
+     everything. */
+  const w4 = loadPage(CHATGPT);
+  await settle(10);
+  const H4 = w4.GuardAI._fileHooks;
+  H4.setParser(async () => ({
+    kind: "pdf", label: "PDF document", action: "pass", pages: 2,
+    summary: { counts: {}, blocking: [], other: [], blockingCount: 0, total: 0, pageHits: {} },
+  }));
+  let released4 = 0;
+  w4.document.querySelector("main").addEventListener("change", () => { released4++; });
+  const pdf = makeFile(w4, "clean.pdf", 5000, "application/pdf");
+  const files4 = w4.document.getElementById("upload-files");
+  files4.files = Object.assign([pdf], { item: () => pdf });
+  files4.dispatchEvent(new w4.Event("change", { bubbles: true }));
+  await settle(10);
+  check(released4 === 1, "control: a clean DOCUMENT still releases on its own", `released=${released4}`);
 }
 
 console.log("\n--- 10. an unlicensed install never intercepts ---");

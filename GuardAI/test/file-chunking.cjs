@@ -156,7 +156,8 @@ Commercial in confidence. Invoice BF-40912 for $14,220.55 is due 14 July.`;
   control(v1.action !== v2.action, "adding a credential is what changed the verdict");
 
   // The categories we consciously do NOT block on.
-  for (const t of ["NAME_PII", "ADDRESS", "PHONE", "EMAIL", "ABN", "MONEY", "DOB", "HEALTH", "CONFIDENTIAL"]) {
+  for (const t of ["NAME_PII", "ADDRESS", "PHONE", "EMAIL", "ABN", "MONEY", "DOB", "HEALTH",
+                   "IMMIGRATION", "CONFIDENTIAL"]) {
     check(!F.BLOCKING_TYPES.has(t), `${t} is counted, not blocked`);
   }
   for (const t of ["PASSWORD", "CREDIT_CARD", "TFN", "MEDICARE", "BSB", "BANK_ACCOUNT", "PASSPORT", "LICENCE"]) {
@@ -176,6 +177,50 @@ A medical certificate is required for absences longer than two consecutive days.
     `${hits.length} hits: ${hits.map((h) => JSON.stringify(h.value)).join(" ")}`);
   const v = F.verdict({ kind: "pdf", bytes: 900, text: policy, summary: F.summarise(F.scanLong(det, policy)) });
   check(v.action === "pass", "so an HR policy is not blocked by them");
+}
+
+console.log("\n--- 6b. IMMIGRATION is the same shape, and blocked every invoice ---");
+{
+  /**
+   * Removed from BLOCKING_TYPES 2026-08-28. The rule matches the WORD "visa",
+   * and Visa is a payment card, so measured across 14 payment-sense sentences
+   * it flagged 14 — every invoice, receipt and expense claim blocked as an
+   * immigration matter. It is a topic detector like HEALTH: it captures no
+   * identifier, so it cannot be protecting one.
+   *
+   * The word-sense fix (bare "visa" needs an immigration cue; payment cues
+   * veto) is limits-list #18 and deliberately NOT done here — with blocking
+   * off, a false positive only adds a line to a category list, and the
+   * category is warning-only so it never rewrites text.
+   */
+  const invoice = `Tax invoice 4471. Payment method: Visa ending 4242.
+We accept Visa, Mastercard and Amex. The Visa surcharge is 1.4%.
+Refunds go back to the original Visa within 5 business days.`;
+  const hits = F.scanLong(det, invoice).filter((f) => f.type === "IMMIGRATION");
+  check(hits.length >= 3, "IMMIGRATION still fires on an ordinary invoice — the rule is unchanged",
+    `${hits.length} hits: ${hits.map((h) => JSON.stringify(h.value)).join(" ")}`);
+  const v = F.verdict({ kind: "pdf", bytes: 900, text: invoice,
+    summary: F.summarise(F.scanLong(det, invoice)) });
+  check(v.action === "pass", "…but an invoice full of them is no longer blocked");
+  check((v.summary.other || []).includes("IMMIGRATION"),
+    "…and it is still COUNTED, in the 'also present' list rather than silently dropped",
+    JSON.stringify(v.summary.other));
+
+  // The rule captures the topic word and misses the identifier beside it —
+  // the evidence that it was never protecting an identifier.
+  const grant = "Visa grant number EGO4821577, subclass 482, granted 12 March 2025.";
+  const got = det.scan(grant).filter((f) => f.type === "IMMIGRATION").map((f) => f.value);
+  check(got.length > 0 && !got.some((v2) => /EGO4821577/.test(v2)),
+    "control: it captures the topic words and NOT the grant number beside them",
+    JSON.stringify(got));
+
+  // Control in the other direction: removing it must not have loosened the
+  // real identifiers that can appear in the same sentence.
+  const withIds = "Passport N1234567 and TFN 123 456 782 on the visa file.";
+  const blocked = F.verdict({ kind: "pdf", bytes: 900, text: withIds,
+    summary: F.summarise(F.scanLong(det, withIds)) });
+  check(blocked.action === "block",
+    "control: a real government identifier in the same sentence still blocks", blocked.action);
 }
 
 console.log("\n--- 7. unreadable and unsupported never look like clean ---");

@@ -1333,26 +1333,12 @@ html.guardai-light .guardai-locked__close:hover { color: #0f172a; }
   gap: 8px;
   margin-top: 14px;
 }
-.guardai-filecard__btn {
-  all: unset;
-  flex: 1 1 0;
-  text-align: center;
-  cursor: pointer;
-  padding: 9px 12px;
-  border-radius: 10px;
-  font-size: 13px;
-  font-weight: 600;
-  background: #f4f4f5;
-  color: #0a0a0a;
-}
-.guardai-filecard__btn:hover { filter: brightness(0.92); }
-.guardai-filecard__btn--ghost {
-  background: transparent;
-  color: #a1a1aa;
-  border: 1px solid #2c2c2c;
-  font-weight: 500;
-}
-.guardai-filecard__btn--ghost:hover { background: #2c2c2c; color: #f4f4f5; filter: none; }
+/* The decision card's buttons are .guardai-act, like every other card's — see
+ * the palette at the foot of this file. It had its own set until 2026-08-28,
+ * and the cost was exactly what that shared component exists to prevent:
+ * "Attach anyway" — the ONE action that sends unprotected data — was a plain
+ * grey ghost next to a bright filled "Don't attach", so the riskiest button on
+ * the card read as the safest. Only the layout wrapper lives here now. */
 
 html.guardai-light .guardai-filecard {
   background: #ffffff;
@@ -1376,21 +1362,12 @@ html.guardai-light .guardai-filecard__fname { color: #0f172a; }
 html.guardai-light .guardai-filecard__why { color: #475569; }
 html.guardai-light .guardai-filecard__catcount { background: #fee2e2; color: #b91c1c; }
 html.guardai-light .guardai-filecard__where { color: #64748b; }
-html.guardai-light .guardai-filecard__btn { background: #0a0a0a; color: #ffffff; }
-html.guardai-light .guardai-filecard__btn--ghost {
-  background: transparent; color: #475569; border-color: #e2e8f0;
-}
-html.guardai-light .guardai-filecard__btn--ghost:hover { background: #f1f5f9; color: #0f172a; }
 
 /* ---- "Send as safe text" ---- */
 .guardai-filecard__btns--safetext { margin-top: 14px; }
 .guardai-filecard__btns--safetext + .guardai-filecard__btns { margin-top: 8px; }
-.guardai-filecard__btn--safetext {
-  background: #2e5c43;
-  color: #e9f6ee;
-}
-.guardai-filecard__btn--safetext:hover { filter: brightness(1.12); }
-.guardai-filecard__btn--safetext:disabled { opacity: 0.6; cursor: default; }
+/* The button itself is .guardai-act--primary — the same muted green as
+ * "Mask & Send", because it is the same kind of action: the protected path. */
 .guardai-filecard__textwhy {
   margin: 8px 2px 0;
   color: #a1a1aa;
@@ -1459,7 +1436,6 @@ html.guardai-light .guardai-filecard__btn--ghost:hover { background: #f1f5f9; co
 }
 .guardai-fileprev__btns { display: flex; gap: 8px; margin-top: 14px; flex: 0 0 auto; }
 
-html.guardai-light .guardai-filecard__btn--safetext { background: #14532d; color: #ffffff; }
 html.guardai-light .guardai-filecard__textwhy { color: #64748b; }
 html.guardai-light .guardai-fileprev {
   background: #ffffff; color: #0f172a; border-color: #e2e8f0;

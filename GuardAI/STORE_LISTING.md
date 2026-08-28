@@ -87,7 +87,7 @@ explicitly disabled.
 bash tools/package.sh
 ```
 
-Produces `dist/guardai-<version>.zip` (~176 KB) from an explicit allowlist.
+Produces `dist/guardai-<version>.zip` (~4.7 MB) from an explicit allowlist.
 
 **Do not zip the folder by hand.** It is 26 MB, of which 25 MB is
 `node_modules` — jsdom and its dependency tree, pulled in for the test suite.
@@ -125,28 +125,74 @@ frame URL resolves and that has not been tested against every host.
 
 ## Permissions — unchanged
 
-File scanning added **no new `permissions` entry** and no new host permission.
-Reading an attachment is ordinary DOM work on a `File` the user handed to the
-page, and the parsing libraries are bundled rather than fetched. `storage` is
-still the only permission, so the install-time warning string does not change.
+File scanning added **no new `permissions` entry** and no new host permission,
+and **image OCR added none either**. Reading an attachment is ordinary DOM work
+on a `File` the user handed to the page, and every parsing library — pdf.js,
+mammoth, and now tesseract — is bundled rather than fetched. `storage` is still
+the only permission, so the install-time warning string does not change.
+
+The manifest's existing `content_security_policy.extension_pages` already
+carries `'wasm-unsafe-eval'`, which is what tesseract's WebAssembly core needs,
+so OCR required no CSP change either.
 
 ## Package size
 
-Went from 185 KB to roughly 900 KB zipped, entirely from three vendored files:
+Went from 185 KB to roughly 900 KB when file scanning landed, and to **4.7 MB**
+when image OCR did. Every byte is vendored third-party code:
 
 | File | Purpose | Raw |
 |---|---|---|
 | `vendor/pdf.min.mjs` | pdf.js API | 455 KB |
 | `vendor/pdf.worker.min.mjs` | pdf.js parsing worker | 1.26 MB |
 | `vendor/mammoth.browser.min.js` | DOCX raw-text extraction | 636 KB |
+| `vendor/tesseract/tesseract.min.js` | tesseract.js API | 63 KB |
+| `vendor/tesseract/worker.min.js` | tesseract.js worker | 111 KB |
+| `vendor/tesseract/tesseract-core-simd-lstm.wasm` | OCR engine (WASM) | 2.86 MB |
+| `vendor/tesseract/eng.traineddata.gz` | English OCR model | 2.95 MB |
 
-Both are Mozilla/Apache-2.0 and BSD-2-Clause respectively, vendored unmodified
-from npm (`pdfjs-dist@6.2.108`, `mammoth@1.12.1`). A reviewer asking about
-minified third-party code should be pointed at those exact versions.
+Vendored unmodified from npm: `pdfjs-dist@6.2.108` (Apache-2.0),
+`mammoth@1.12.1` (BSD-2-Clause), `tesseract.js@6` and `tesseract.js-core@6`
+(Apache-2.0), with the English model from `@tesseract.js-data/eng` (Apache-2.0).
+A reviewer asking about minified third-party code should be pointed at those
+exact versions.
+
+Only the **SIMD LSTM** core is shipped, not all six builds tesseract.js-core
+publishes — that alone is the difference between 2.9 MB and 17 MB of WASM. It
+does mean OCR requires WebAssembly SIMD, which Chrome has had since 91; the
+fallback cores would add ~3 MB each for hardware far older than anything else
+in this extension supports.
+
+**Nothing is fetched at runtime.** tesseract.js defaults to pulling its core
+and language model from the jsdelivr CDN; `src/parser.js` overrides `corePath`,
+`workerPath` and `langPath` to `chrome.runtime.getURL()` paths and sets
+`workerBlobURL: false`, so the worker, the WASM and the model all load from the
+extension's own origin. This is the same "no remote code" claim the rest of the
+extension makes, and it is the reason the CSP needs no `blob:` allowance.
+
+OCR loads **lazily**: the scripts are injected the first time an image is
+actually attached, so a user who only scans documents never pays the cost
+beyond disk.
 
 pdf.js 6.2 calls `Uint8Array.prototype.toHex()`, which Chrome shipped in 140.
 `src/compat.js` polyfills it rather than setting `minimum_chrome_version`, so
 the extension still installs and works on older Chrome.
+
+## Image scanning — what it claims, and what it does not
+
+OCR reads what it can see, which is less than a person can. So an image never
+gets the document flow's "checked / nothing found" wording and is **never
+auto-attached the way a clean document is**. There are three outcomes and they
+read differently on purpose:
+
+| Outcome | What the card says |
+|---|---|
+| Found something | Same category rows and counts as a document, plus "GuardAI may not have read all of it" |
+| Read it, found nothing | "Nothing found, your call" — it read what it could see, cannot read everything a person can, look it over yourself |
+| Could not read it | "GuardAI could not read this image properly" — treat as unchecked |
+
+PNG, JPEG and WebP. There is no "send the text instead" option for an image: a
+screenshot's meaning is its layout, so there is nothing faithful to paste, and
+the parser frame refuses an extract request for an image even if one is made.
 
 ## What the parser frame is for, if a reviewer asks
 
