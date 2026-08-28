@@ -217,7 +217,14 @@
     const line = text.slice(ls, le);
     const delims = (line.match(/,|\||\t/g) || []).length;
     if (delims < 3) return false;
-    const lc = lowerCached(text);
+    // The keyword must be inside the WINDOW around this value — a header row
+    // within ~500 chars — not merely anywhere in the document. The old
+    // document-wide search meant that in any file whose text said "birth"
+    // once, EVERY date on a comma-rich line became a DOB: a job offer's
+    // commencement date was labelled DOB because the letter mentioned
+    // "date of birth" nine hundred characters later. Found 2026-08-28 on a
+    // real offer letter; the same over-reach applied to TFN and Medicare.
+    const lc = text.slice(winStart, winEnd).toLowerCase();
     return words.some((w) => hasWord(lc, w));
   }
 
@@ -434,9 +441,20 @@
   }
 
   function detectPhone(text, out) {
+    // 0) Bracketed area code: "(02) 9147 3388". A first-class format, not a
+    //    rescue: the context path used to catch these starting INSIDE the
+    //    bracket — its middle class allows ")" but its anchor is \d, so it
+    //    captured "02) 9147 3388", and masking produced "(0477 415 302" with
+    //    the orphaned "(" left in the sentence. Capturing both brackets makes
+    //    the replacement span balanced by construction.
+    const bracketed = /\(0[2-9]\)[\s.-]?\d{4}[\s.-]?\d{4}\b/g;
+    let m;
+    while ((m = bracketed.exec(text))) {
+      out.push(finding("PHONE", "Phone number", m[0].trim(), m.index, "medium"));
+    }
+
     // 1) Standard AU: +61 / 61 / 0 prefix + 9 more digits in any separator layout.
     const re = /(?:\+?61|\b0)(?:[\s.-]?\d){9}\b/g;
-    let m;
     while ((m = re.exec(text))) {
       const raw = m[0];
       const digits = raw.replace(/\D/g, "");
@@ -597,6 +615,25 @@
    * never cut). If the cut would leave nothing, the value is left alone and
    * the finding is dropped instead.
    */
+  /**
+   * If a finding contains one side of a bracket pair and the missing side sits
+   * immediately against it in the text, widen the span to include it. Only
+   * ever widens by the single adjacent character, so it cannot swallow prose.
+   */
+  function balanceBrackets(text, out) {
+    for (const f of out) {
+      if (typeof f.value !== "string" || typeof f.index !== "number") continue;
+      const opens = (f.value.match(/\(/g) || []).length;
+      const closes = (f.value.match(/\)/g) || []).length;
+      if (closes === opens + 1 && text[f.index - 1] === "(") {
+        f.index -= 1;
+        f.value = "(" + f.value;
+      } else if (opens === closes + 1 && text[f.index + f.value.length] === ")") {
+        f.value = f.value + ")";
+      }
+    }
+  }
+
   function clampToSentence(out) {
     for (let i = out.length - 1; i >= 0; i--) {
       const f = out[i];
@@ -995,14 +1032,24 @@
   function detectDOB(text, out) {
     const months =
       "Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?";
+    // Day-first, with the optional "of" letters actually write ("14th of
+    // March 1991"), and month-first ("March 14, 1991"). Both stay behind the
+    // same birth-context gate as every other form, so a contract's ordinary
+    // dates are untouched. Documents write dates in prose; chat messages
+    // mostly don't — found 2026-08-28 when a real offer letter's
+    // "date of birth as 14 March 1991" reached the model unmasked.
     const written = new RegExp(
-      `\\b(0?[1-9]|[12]\\d|3[01])(?:st|nd|rd|th)?\\s+(?:${months})\\.?\\s+(?:19|20)\\d\\d\\b`,
+      `\\b(0?[1-9]|[12]\\d|3[01])(?:st|nd|rd|th)?(?:\\s+of)?\\s+(?:${months})\\.?,?\\s+(?:19|20)\\d\\d\\b`,
+      "gi"
+    );
+    const monthFirst = new RegExp(
+      `\\b(?:${months})\\.?\\s+(0?[1-9]|[12]\\d|3[01])(?:st|nd|rd|th)?,?\\s+(?:19|20)\\d\\d\\b`,
       "gi"
     );
     const numeric = /\b(0?[1-9]|[12]\d|3[01])[\/.-](0?[1-9]|1[0-2])[\/.-](?:19|20)\d\d\b/g;
     const iso = /\b(?:19|20)\d\d-(?:0?[1-9]|1[0-2])-(?:0?[1-9]|[12]\d|3[01])\b/g;
     const ctx = ["born", "dob", "d.o.b", "date of birth", "birthday", "birthdate", "b-day", "birth"];
-    for (const re of [written, numeric, iso]) {
+    for (const re of [written, monthFirst, numeric, iso]) {
       let m;
       while ((m = re.exec(text))) {
         // Prose: keyword within 25 chars. Tables: keyword in the header row
@@ -1176,6 +1223,26 @@
 
     const desc = new RegExp("\\b" + LEAD + "\\s+(?:" + ORG_DESCRIPTOR + ")(?![A-Za-z])", "g");
     while ((m = desc.exec(text))) push(m, "descriptor");
+
+    // ALL-CAPS letterheads: "MERIDIAN FACILITIES GROUP PTY LTD". The token
+    // pattern above happily matches all-caps words, but the DESIGNATOR lists
+    // are Title-case literals, so the whole match failed at "PTY LTD" — a
+    // real letter masked the signature's "Meridian Facilities Group" and kept
+    // the header verbatim: the same entity, two treatments. Uppercasing the
+    // designator patterns is done character-wise so regex escapes ("\\s",
+    // "\\.") survive; a blanket toUpperCase() would turn \\s into \\S.
+    // Tokens must be >= 2 caps so "A GROUP" stays prose.
+    const TOK_UC = "(?:[A-Z][A-Z0-9'\u2019&\\-]+)";
+    const LEAD_UC = "((?:" + TOK_UC + "\\s+){0,3}" + TOK_UC + ")";
+    const legalUC = new RegExp("\\b" + LEAD_UC + "\\s+(?:" + ucPattern(ORG_LEGAL) + ")(?![A-Za-z])", "g");
+    while ((m = legalUC.exec(text))) push(m, "legal");
+    const descUC = new RegExp("\\b" + LEAD_UC + "\\s+(?:" + ucPattern(ORG_DESCRIPTOR) + ")(?![A-Za-z])", "g");
+    while ((m = descUC.exec(text))) push(m, "descriptor");
+  }
+
+  /** Uppercase the literal letters of a pattern, leaving escapes intact. */
+  function ucPattern(src) {
+    return src.replace(/\\.|[a-z]/g, (ch) => (ch.length === 2 ? ch : ch.toUpperCase()));
   }
 
   function detectBusiness(text, out) {
@@ -1608,6 +1675,44 @@
     "motors",
   ]);
 
+  /**
+   * Words that end a person-name candidate: job titles, organisational units,
+   * and geographic descriptors. The ordinary name rule has NO positive
+   * evidence that a capitalised pair is a person — once any identifier exists
+   * in the message, "Site Coordinator" and "Southern Region" fit the shape
+   * exactly, and masking then replaces a job title with a person's name
+   * ("The Robin Radcliffe has grown quickly this year"). Found 2026-08-28 on
+   * a real offer letter.
+   *
+   * Deliberately its OWN set, not COMMON_WORDS: that list also feeds
+   * detectOrg's lead-word trimmer, and "southern" there would truncate
+   * "Southern Cross Group" to "Cross Group". This one is consulted only by
+   * isNameWord below, so organisations keep their compass points and unit
+   * words while person-candidates lose them.
+   *
+   * The trade, stated: a real person surnamed "Region" does not exist; ones
+   * surnamed "Western" or "Officer" barely do. Under-capture is the safe
+   * failure — a missed rare surname leaks one word, an over-capture rewrites
+   * the user's sentence.
+   */
+  const NON_PERSON_WORDS = new Set([
+    // roles and titles
+    "coordinator", "manager", "director", "supervisor", "officer",
+    "administrator", "executive", "assistant", "analyst", "engineer",
+    "specialist", "secretary", "treasurer", "chairperson", "chairman",
+    "president", "vice", "principal", "superintendent", "controller",
+    "representative", "technician", "apprentice", "trainee", "intern",
+    // organisational units
+    "region", "regions", "district", "division", "department", "branch",
+    "precinct", "zone", "territory", "team", "committee", "board", "council",
+    "faculty", "bureau", "directorate", "secretariat",
+    // places-of-work descriptors
+    "site", "depot", "campus", "facility", "facilities", "headquarters",
+    "warehouse", "office", "offices",
+    // compass adjectives — "Southern Region", "Western District"
+    "northern", "southern", "eastern", "western", "central",
+  ]);
+
   function detectNames(text, out, hasIdentifier) {
     // Also detect when the user explicitly introduces themselves, even in a short
     // message with no other identifier (e.g. "my name is John Smith").
@@ -1677,6 +1782,8 @@
       // what stops the widened run from turning "James Whitfield Consulting"
       // into a three-word person instead of a person beside a company.
       if (NAME_CONTEXT_WORDS.has(lc) || COMMON_WORDS.has(lc)) return false;
+      // Titles, units and geography are never part of a person's name.
+      if (NON_PERSON_WORDS.has(lc)) return false;
       // A bare initial ("J K Rowling") is not enough on its own.
       if (letterCount(tok) < 2) return false;
       return true;
@@ -2111,6 +2218,16 @@
         retypeLabelledNumbers(text, out);
       } catch (err) {
         console.warn("[GuardAI] label re-typing failed, continuing:", err);
+      }
+
+      // A captured span must never be bracket-unbalanced: replacing
+      // "02) 9147 3388" leaves an orphaned "(" welded to the fake. Extend to
+      // take the neighbouring bracket when the text has one; otherwise leave
+      // the finding alone — a trim here could split a value and leak half.
+      try {
+        balanceBrackets(text, out);
+      } catch (err) {
+        console.warn("[GuardAI] bracket balance failed, continuing:", err);
       }
 
       // Whatever a detector captured, it must not span a sentence boundary.

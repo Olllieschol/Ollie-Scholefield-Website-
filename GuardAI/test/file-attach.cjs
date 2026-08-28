@@ -674,6 +674,44 @@ console.log("\n--- 10. Send as safe text: offered, previewed, inserted ---");
   check(!H.previewEl() && !H.cardEl(), "preview and card are both done");
 }
 
+console.log("\n--- 10b. the document flow's own masking policy ---");
+{
+  // DOB masks HERE despite being warn-only in chat (the chat card interrupts;
+  // this flow has no card for non-blocking types — a real date of birth went
+  // to the model verbatim through it). MONEY stays visible on purpose. And
+  // one organisation in two costumes gets ONE stand-in, wearing each
+  // surface's own case and designators.
+  const w = loadPage(CHATGPT);
+  await settle();
+  const H = w.GuardAI._fileHooks;
+  const DOC =
+    "MERIDIAN FACILITIES GROUP PTY LTD\n" +
+    "We confirm your salary of $92,400 per annum. TFN 412 336 907. " +
+    "We have your date of birth as 14 March 1991 on file.\n" +
+    "People and Culture, Meridian Facilities Group";
+  const { masked, items } = await H.maskDocumentText(DOC);
+
+  check(!masked.includes("14 March 1991"), "the DOB is masked in the document flow");
+  const dob = items.find((i) => i.type === "DOB");
+  check(!!dob && /^\d{1,2} [A-Z][a-z]+ (19|20)\d\d$/.test(dob.fake),
+    "…with a stand-in in the same written format", dob && dob.fake);
+  check(masked.includes("$92,400"), "the salary stays visible — it is what the user is asking about");
+  check(!masked.includes("MERIDIAN FACILITIES GROUP"), "letterhead org masked");
+  check(!masked.includes("Meridian Facilities Group"), "signature org masked");
+  const orgs = items.filter((i) => i.type === "ORG");
+  check(orgs.length === 2, "two surfaces, two registered mappings", String(orgs.length));
+  const hdr = orgs.find((o) => o.real.includes("PTY"));
+  const sig = orgs.find((o) => !o.real.includes("PTY"));
+  const stemOf = (v) => v.toLowerCase().replace(/\b(pty|ltd|limited|group|holdings)\b/g, "").trim();
+  check(!!hdr && !!sig && stemOf(hdr.fake) === stemOf(sig.fake),
+    "…but ONE entity: the stand-ins share a stem",
+    orgs.map((o) => o.fake).join(" | "));
+  check(hdr && hdr.fake === hdr.fake.toUpperCase() && /GROUP PTY LTD$/.test(hdr.fake),
+    "the letterhead stand-in is ALL-CAPS with its full designators", hdr && hdr.fake);
+  check(sig && /Group$/.test(sig.fake) && sig.fake !== sig.fake.toUpperCase(),
+    "the signature stand-in keeps its own case and tail", sig && sig.fake);
+}
+
 console.log("\n--- 11. withheld, and it says why ---");
 {
   const w = loadPage(CHATGPT);

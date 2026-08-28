@@ -4744,16 +4744,71 @@
    * the composer: a preview the user cancels leaves no trace in the mapping
    * store, and a fill that comes up short registers nothing it cannot honour.
    */
+  /**
+   * Trailing company designators, for linking case/suffix variants of ONE
+   * organisation. "MERIDIAN FACILITIES GROUP PTY LTD" in a letterhead and
+   * "Meridian Facilities Group" in the signature are the same entity; masking
+   * them independently gave the same company two unrelated stand-ins in one
+   * document (worse than either treatment alone, because the reader infers
+   * two companies). Stem = lowercased value minus these tail words.
+   */
+  const ORG_TAIL_WORDS = new Set([
+    "pty", "ltd", "limited", "inc", "incorporated", "llc", "llp", "plc",
+    "corp", "corporation", "p/l", "group", "holdings", "co",
+  ]);
+  function orgSplit(value) {
+    const words = value.trim().split(/\s+/);
+    let cut = words.length;
+    while (cut > 1 && ORG_TAIL_WORDS.has(words[cut - 1].toLowerCase().replace(/[^a-z/]/gi, "").toLowerCase())) cut--;
+    return { stem: words.slice(0, cut).join(" ").toLowerCase(), tail: words.slice(cut).join(" ") };
+  }
+  const isAllCaps = (v) => !/\p{Ll}/u.test(v) && /\p{Lu}/u.test(v);
+  const titleCase = (v) => v.replace(/\p{L}[\p{L}'\u2019-]*/gu,
+    (w) => w[0].toUpperCase() + w.slice(1).toLowerCase());
+
   async function maskDocumentText(text) {
     const findings = await scanText(text);
-    const usable = findings.filter((f) => masker.isMaskable(f.type));
+    // DOB is deliberately NOT auto-masked in the CHAT flow (see the policy
+    // note above MASKABLE in masker.js): the warning card lists it and the
+    // manual flow is one click away. This flow has neither for non-blocking
+    // types, and a real date of birth went to the model verbatim through it
+    // (found 2026-08-28, live, on a real offer letter). So documents mask
+    // DOB. MONEY stays visible on purpose — a salary is usually the thing
+    // the user is asking about, and it is not identity data.
+    const usable = findings.filter((f) => masker.isMaskable(f.type) || f.type === "DOB");
     const fakeByReal = new Map();
     const usedFakes = new Set();
+    const orgFakeByStem = new Map();
     const spans = [];
     for (const f of usable) {
       let entry = fakeByReal.get(f.value);
       if (!entry) {
-        entry = { fake: masker.previewFake(f.type, f.value, usedFakes), type: f.type };
+        let fake = null;
+        if (f.type === "ORG") {
+          const { stem, tail } = orgSplit(f.value);
+          const known = orgFakeByStem.get(stem);
+          if (known) {
+            // Same entity, new surface: reuse the stand-in's stem, wear this
+            // surface's own tail and case.
+            fake = (known.fakeStem + (tail ? " " + tail : "")).trim();
+            if (isAllCaps(f.value)) fake = fake.toUpperCase();
+          } else {
+            const generated = masker.previewFake(f.type, f.value, usedFakes);
+            const fakeStem = titleCase(orgSplit(generated).stem);
+            orgFakeByStem.set(stem, { fakeStem });
+            // The FIRST surface is rebuilt the same way as later ones —
+            // stand-in stem plus THIS surface's own tail — rather than taking
+            // the generator's shape raw. The generator may normalise the
+            // designators ("... GROUP PTY LTD" came back "... Pty Ltd"), and
+            // the letterhead losing its GROUP while the signature kept its
+            // is the two-treatments defect at one remove.
+            fake = (fakeStem + (tail ? " " + tail : "")).trim();
+            if (isAllCaps(f.value)) fake = fake.toUpperCase();
+          }
+        } else {
+          fake = masker.previewFake(f.type, f.value, usedFakes);
+        }
+        entry = { fake, type: f.type };
         fakeByReal.set(f.value, entry);
         usedFakes.add(entry.fake);
       }

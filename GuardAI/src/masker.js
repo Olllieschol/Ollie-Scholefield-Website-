@@ -177,6 +177,23 @@
     },
     PHONE(real, seed) {
       const d = seededDigits(seed, 8);
+      // Mirror a bracketed landline: "(02) 9147 3388" gets "(03) 8241 5590",
+      // not a bare mobile — a stand-in should match the shape it replaces.
+      const src = String(real || "");
+      const area = src.match(/^\((0[2-9])\)/);
+      if (area) {
+        const codes = ["02", "03", "07", "08"];
+        let code = codes[seed % codes.length];
+        if (code === area[1]) code = codes[(seed + 1) % codes.length];
+        return `(${code}) ${8 + (seed % 2)}${d.slice(0, 3)} ${d.slice(3, 7)}`;
+      }
+      if (/^0[2-9][\s.-]/.test(src) && !/^04/.test(src)) {
+        // Unbracketed landline ("02 9147 3388"): keep the landline shape.
+        const codes = ["02", "03", "07", "08"];
+        let code = codes[seed % codes.length];
+        if (src.startsWith(code)) code = codes[(seed + 1) % codes.length];
+        return `${code} ${8 + (seed % 2)}${d.slice(0, 3)} ${d.slice(3, 7)}`;
+      }
       return `04${d.slice(0, 2)} ${d.slice(2, 5)} ${d.slice(5, 8)}`;
     },
     CREDIT_CARD(real, seed) {
@@ -247,7 +264,35 @@
       const month = ((seed >>> 5) % 12) + 1;
       const year = 1960 + ((seed >>> 9) % 45); // 1960-2004
       const pad = (n) => String(n).padStart(2, "0");
-      return `${pad(day)}/${pad(month)}/${year}`;
+      // Mirror the REAL value's format. Documents write dates in prose, and a
+      // stand-in that flips "14 March 1991" to "22/08/1987" mid-sentence is
+      // conspicuous in exactly the place a stand-in should be invisible.
+      const src = String(real || "");
+      const FULL = ["January", "February", "March", "April", "May", "June", "July",
+                    "August", "September", "October", "November", "December"];
+      const monthWord = (abbrev) => (abbrev ? FULL[month - 1].slice(0, 3) : FULL[month - 1]);
+      const ord = (n) => {
+        if (n % 100 >= 11 && n % 100 <= 13) return n + "th";
+        return n + (["th", "st", "nd", "rd"][n % 10] || "th");
+      };
+      const monthRe = /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)([a-z]*)\b/i;
+      const mw = src.match(monthRe);
+      if (mw) {
+        const abbrev = !mw[2]; // "Mar" vs "March"
+        const hasOrd = /\d(?:st|nd|rd|th)\b/i.test(src);
+        const hasOf = /\bof\b/i.test(src);
+        const dayTxt = hasOrd ? ord(day) : String(day);
+        const comma = src.includes(",") ? "," : "";
+        // Month-first ("March 14, 1991") vs day-first ("14 March 1991").
+        const dayPos = src.search(/\d/);
+        if (dayPos > src.toLowerCase().indexOf(mw[1].toLowerCase())) {
+          return `${monthWord(abbrev)} ${dayTxt}${comma} ${year}`;
+        }
+        return `${dayTxt}${hasOf ? " of" : ""} ${monthWord(abbrev)}${comma} ${year}`;
+      }
+      if (/^(?:19|20)\d\d-/.test(src)) return `${year}-${pad(month)}-${pad(day)}`;
+      const sep = (src.match(/[\/.-]/) || ["/"])[0];
+      return `${pad(day)}${sep}${pad(month)}${sep}${year}`;
     },
     GPS(real, seed) {
       const lat = -(33 + ((seed % 400) / 100)).toFixed(4); // ~-33 to -37
@@ -391,6 +436,15 @@
    *
    * Everything not in this set is still DETECTED and still listed on the
    * warning card; it just isn't swapped automatically.
+   *
+   * ONE EXCEPTION: "Send as safe text" (content.js maskDocumentText) masks
+   * DOB despite this set. Every leg of the reasoning above assumes the chat
+   * flow — an interrupting card that lists the DOB, and a manual-mask step
+   * one click away. The document flow has neither for non-blocking types, so
+   * a real date of birth sailed through it verbatim (found 2026-08-28 on a
+   * real offer letter). MONEY stays unmasked there too, deliberately: a
+   * salary is the thing the user is asking the AI about, and it is not
+   * identity data.
    */
   const MASKABLE = new Set([
     // people and organisations
