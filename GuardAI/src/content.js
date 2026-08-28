@@ -651,6 +651,42 @@
       return fullyLanded(el, text);
     }
 
+    // A verification that reads a STALE node is worse than no verification:
+    // a large paste makes ProseMirror REMOUNT the editor, fullyLanded(el)
+    // then reads the detached old node, sees nothing, and a fill that
+    // actually landed gets cleared and retried — measured live 2026-08-28,
+    // where a 3,323-char document cascaded through both strategies into the
+    // char-by-char crawl at ~2 chars/second (a 28-minute fill the user reads
+    // mid-crawl: the "preview doesn't match the composer" bug). Every
+    // verification below re-finds the live node first.
+    const landedLive = () => {
+      if (!refresh()) return false;
+      return fullyLanded(el, text);
+    };
+
+    // ---- Document-sized text: ONE synthetic paste, verified on the live
+    // node. Measured on the real composers: chatgpt takes 9,500 chars as a
+    // single paste instantly, claude 250k; per-line insertText is built for
+    // chat-message volumes and the char crawl is a hang at this size, not a
+    // fallback. Order flips for big text; small text keeps the old order.
+    const BIG = text.length > 1500;
+    const tryPaste = async () => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (!refresh()) return false;
+        clearEditor(el);
+        await delay(20);
+        if (!refresh()) return false;
+        pasteInto(el, text);
+        await delay(BIG ? 150 : 60);
+        if (landedLive()) {
+          console.log("[GuardAI] typeText — paste landed on attempt", attempt + 1);
+          return true;
+        }
+      }
+      return false;
+    };
+    if (BIG && (await tryPaste())) return true;
+
     // ---- contenteditable PRIMARY: per-line fill that YIELDS to the editor.
     // This is the robust path and does NOT depend on synthetic paste (which the
     // real ProseMirror/Lexical editors silently ignore because a paste event
@@ -708,30 +744,28 @@
     for (let attempt = 0; attempt < 2; attempt++) {
       if (!(await fillPerLine())) break;
       await delay(40);
-      if (fullyLanded(el, text)) {
+      if (landedLive()) {
         console.log("[GuardAI] typeText — per-line fill landed on attempt", attempt + 1, "editorLen:", getEditorText(el).length, "wantLen:", text.length);
         return true;
       }
       console.warn("[GuardAI] typeText — per-line attempt", attempt + 1, "did not fully land. editorText:", JSON.stringify(getEditorText(el).slice(0, 200)));
     }
 
-    // ---- Fallback 1: ONE synthetic paste of the whole block. Works in editors
-    // that DO honour synthetic paste; submit-safe (clipboard handler inserts
-    // newlines as soft breaks).
-    for (let attempt = 0; attempt < 2; attempt++) {
-      if (!refresh()) return false;
-      clearEditor(el);
-      await delay(20);
-      if (!refresh()) return false;
-      pasteInto(el, text);
-      await delay(60);
-      if (fullyLanded(el, text)) {
-        console.log("[GuardAI] typeText — paste fallback landed on attempt", attempt + 1);
-        return true;
-      }
-    }
+    // ---- Fallback 1: ONE synthetic paste of the whole block (already tried
+    // first for document-sized text above). Works in editors that DO honour
+    // synthetic paste; submit-safe (clipboard handler inserts newlines as
+    // soft breaks).
+    if (!BIG && (await tryPaste())) return true;
 
-    // ---- Fallback 2: char-by-char (newlines via insertLineBreak, never submits).
+    // ---- Fallback 2: char-by-char (newlines via insertLineBreak, never
+    // submits). SMALL TEXT ONLY: at ~2 chars/second on a live ProseMirror
+    // this is a 28-minute hang on a 3k document, during which the composer
+    // holds a slowly growing half-document — strictly worse than failing,
+    // because the caller shows a clear error and clears the box.
+    if (text.length > 1500) {
+      console.error("[GuardAI] typeText — all strategies failed for large text; aborting rather than crawling");
+      return false;
+    }
     console.log("[GuardAI] typeText — per-line + paste failed, falling back to safe char-by-char");
     if (!refresh()) return false;
     clearEditor(el);
@@ -746,7 +780,7 @@
       await delay(2);
     }
     el.dispatchEvent(new InputEvent("input", { bubbles: true }));
-    return fullyLanded(el, text);
+    return landedLive();
   }
 
   /** Dispatch a single synthetic paste of `text` over the full selection.
@@ -812,7 +846,8 @@
    * has already resolved overlaps; warning-only findings can still be masked
    * manually later from the MESSAGE tab.
    */
-  async function buildReviewModel(editor, original, findings) {
+  async function buildReviewModel(editor, original, findings, opts) {
+    const docPolicy = !!(opts && opts.docPolicy);
     await masker.load();
     // DIAGNOSTIC: log exactly what text the detector scanned (what the editor
     // handed back). If this differs from what was pasted, indices/masking are
@@ -826,10 +861,33 @@
     // knows about committed pairs, not in-flight batch ones).
     const usedFakes = new Set();
     const items = [];
+    // Document policy (the file flow): DOB masks here — the chat card's
+    // interrupt-and-choose reasoning does not exist for a document (see the
+    // policy note above MASKABLE in masker.js) — and organisations are linked
+    // by stem so a letterhead and a signature naming the same company wear
+    // ONE stand-in in each surface's own case and designators.
+    const maskableHere = (t) => masker.isMaskable(t) || (docPolicy && t === "DOB");
+    const orgFakeByStem = new Map();
     for (const f of findings) {
-      if (!masker.isMaskable(f.type)) continue;
+      if (!maskableHere(f.type)) continue;
       // Same real value -> same fake (same person/number stays coherent).
       let fake = fakeByReal.get(f.value);
+      if (!fake && docPolicy && f.type === "ORG") {
+        const { stem, tail } = orgSplit(f.value);
+        const known = orgFakeByStem.get(stem);
+        if (known) {
+          fake = (known + (tail ? " " + tail : "")).trim();
+          if (isAllCaps(f.value)) fake = fake.toUpperCase();
+        } else {
+          const generated = masker.previewFake(f.type, f.value, usedFakes);
+          const fakeStem = titleCase(orgSplit(generated).stem);
+          orgFakeByStem.set(stem, fakeStem);
+          fake = (fakeStem + (tail ? " " + tail : "")).trim();
+          if (isAllCaps(f.value)) fake = fake.toUpperCase();
+        }
+        fakeByReal.set(f.value, fake);
+        usedFakes.add(fake);
+      }
       if (!fake) {
         fake = masker.previewFake(f.type, f.value, usedFakes);
         fakeByReal.set(f.value, fake);
@@ -984,6 +1042,7 @@
    */
   async function doMaskAndSend(editor, original, findings, opts) {
     const silent = !!(opts && opts.silent);
+    const prebuilt = !!(opts && opts.prebuilt);
     console.log("[GuardAI] doMaskAndSend — building review model");
     // Guard up front: if we can't resolve a chat box at all, bail cleanly with a
     // clear message instead of operating on a null editor later.
@@ -993,7 +1052,10 @@
       showErrorToast("Couldn't find the chat box — try reloading the page, then send again.");
       return;
     }
-    await buildReviewModel(editor, original, findings);
+    // A prebuilt model means the caller already showed the user EXACTLY what
+    // computeMasked() will produce (the file preview). Rebuilding here would
+    // draw fresh random fakes and make that preview a lie.
+    if (!prebuilt || !review) await buildReviewModel(editor, original, findings, opts);
     // Capture the review model in a local ref. handleSoftNav() can null the
     // global `review` during any await below (a stray history.replaceState from
     // the host site); operating on this captured ref means a concurrent clear
@@ -1140,14 +1202,17 @@
    * MESSAGE tab with the masked message in an editable box. A footer Send
    * button appears; the user edits freely and sends when ready.
    */
-  async function doMaskAndEdit(editor, original, findings) {
+  async function doMaskAndEdit(editor, original, findings, opts) {
+    const prebuilt = !!(opts && opts.prebuilt);
     console.log("[GuardAI] doMaskAndEdit — building review model");
     if (!editor && !findEditor()) {
       console.error("[GuardAI] doMaskAndEdit — no chat box found at entry");
       showErrorToast("Couldn't find the chat box — try reloading the page, then try again.");
       return;
     }
-    await buildReviewModel(editor, original, findings);
+    // Same contract as doMaskAndSend: a prebuilt model is the one the user
+    // has already been shown, and rebuilding would redraw the fakes.
+    if (!prebuilt || !review) await buildReviewModel(editor, original, findings, opts);
     // Capture the model locally (see doMaskAndSend) so a stray soft-nav that
     // nulls the global `review` mid-fill can never null-deref here.
     const model = review;
@@ -2185,12 +2250,12 @@
       )}: ${escapeHtml(CONFIG.note || "")}</p>` +
       `<ul class="guardai-prompt__list">${rows}</ul>` +
       `<div class="guardai-prompt__btns">` +
-      `<button class="guardai-prompt__btn guardai-prompt__btn--send">Mask &amp; Send</button>` +
-      `<button class="guardai-prompt__btn guardai-prompt__btn--edit">Mask &amp; Edit</button>` +
+      `<button class="guardai-act guardai-act--primary guardai-prompt__btn guardai-prompt__btn--send">Mask &amp; Send</button>` +
+      `<button class="guardai-act guardai-act--secondary guardai-prompt__btn guardai-prompt__btn--edit">Mask &amp; Edit</button>` +
       `</div>` +
       `<div class="guardai-prompt__btns guardai-prompt__btns--secondary">` +
-      `<button class="guardai-prompt__btn guardai-prompt__btn--ghost guardai-prompt__btn--manual">Manual mask</button>` +
-      `<button class="guardai-prompt__btn guardai-prompt__btn--ghost guardai-prompt__btn--anyway">Send anyway</button>` +
+      `<button class="guardai-act guardai-act--secondary guardai-prompt__btn guardai-prompt__btn--manual">Manual mask</button>` +
+      `<button class="guardai-act guardai-act--danger guardai-prompt__btn guardai-prompt__btn--anyway">Send anyway</button>` +
       `</div>`;
     document.body.appendChild(wrap);
     maskPromptEl = wrap;
@@ -3170,7 +3235,7 @@
     if (
       p &&
       p.closest(
-        ".guardai-warning, .guardai-toast, .guardai-panel, .guardai-reopen, .guardai-msgtoggle, .guardai-review-pop, .guardai-prompt"
+        ".guardai-warning, .guardai-toast, .guardai-panel, .guardai-reopen, .guardai-msgtoggle, .guardai-review-pop, .guardai-prompt, .guardai-filecard, .guardai-fileprev"
       )
     ) {
       return true; // our own UI
@@ -3247,8 +3312,19 @@
    * aliasing entirely).
    */
   function applyRules(rootEl, rules) {
-    const { swapped, touchedNodes } = swapAcrossNodes(rootEl, rules);
-    const editor = findEditor();
+    return applyRulesWithEditor(rootEl, rules, findEditor());
+  }
+
+  /**
+   * The editor is passed to the walker even by callers that never used to
+   * bother (Clear's remask, the per-item forget): swap machinery rewriting
+   * the box the user is typing in is how masked text goes out real — or real
+   * text gets silently rewritten — regardless of which feature invoked the
+   * swap. Direction doesn't matter; the composer is not the machinery's to
+   * edit.
+   */
+  function applyRulesWithEditor(rootEl, rules, editor) {
+    const { swapped, touchedNodes } = swapAcrossNodes(rootEl, rules, editor);
     const walker = document.createTreeWalker(rootEl, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
         if (isProtectedNode(node, editor)) return NodeFilter.FILTER_REJECT;
@@ -3287,13 +3363,12 @@
    * easily equal a different masked person's fake surname), quietly
    * corrupting a restore that already succeeded.
    */
-  function swapAcrossNodes(rootEl, rules) {
+  function swapAcrossNodes(rootEl, rules, editor) {
     const swapped = new Map();
     const touchedNodes = new Set();
     const multi = rules.filter((r) => r.multi);
     if (!multi.length) return { swapped, touchedNodes };
 
-    const editor = findEditor();
     const nodes = [];
     const walker = document.createTreeWalker(rootEl, NodeFilter.SHOW_TEXT, {
       acceptNode(node) {
@@ -4766,108 +4841,6 @@
   const titleCase = (v) => v.replace(/\p{L}[\p{L}'\u2019-]*/gu,
     (w) => w[0].toUpperCase() + w.slice(1).toLowerCase());
 
-  async function maskDocumentText(text) {
-    const findings = await scanText(text);
-    // DOB is deliberately NOT auto-masked in the CHAT flow (see the policy
-    // note above MASKABLE in masker.js): the warning card lists it and the
-    // manual flow is one click away. This flow has neither for non-blocking
-    // types, and a real date of birth went to the model verbatim through it
-    // (found 2026-08-28, live, on a real offer letter). So documents mask
-    // DOB. MONEY stays visible on purpose — a salary is usually the thing
-    // the user is asking about, and it is not identity data.
-    const usable = findings.filter((f) => masker.isMaskable(f.type) || f.type === "DOB");
-    const fakeByReal = new Map();
-    const usedFakes = new Set();
-    const orgFakeByStem = new Map();
-    const spans = [];
-    for (const f of usable) {
-      let entry = fakeByReal.get(f.value);
-      if (!entry) {
-        let fake = null;
-        if (f.type === "ORG") {
-          const { stem, tail } = orgSplit(f.value);
-          const known = orgFakeByStem.get(stem);
-          if (known) {
-            // Same entity, new surface: reuse the stand-in's stem, wear this
-            // surface's own tail and case.
-            fake = (known.fakeStem + (tail ? " " + tail : "")).trim();
-            if (isAllCaps(f.value)) fake = fake.toUpperCase();
-          } else {
-            const generated = masker.previewFake(f.type, f.value, usedFakes);
-            const fakeStem = titleCase(orgSplit(generated).stem);
-            orgFakeByStem.set(stem, { fakeStem });
-            // The FIRST surface is rebuilt the same way as later ones —
-            // stand-in stem plus THIS surface's own tail — rather than taking
-            // the generator's shape raw. The generator may normalise the
-            // designators ("... GROUP PTY LTD" came back "... Pty Ltd"), and
-            // the letterhead losing its GROUP while the signature kept its
-            // is the two-treatments defect at one remove.
-            fake = (fakeStem + (tail ? " " + tail : "")).trim();
-            if (isAllCaps(f.value)) fake = fake.toUpperCase();
-          }
-        } else {
-          fake = masker.previewFake(f.type, f.value, usedFakes);
-        }
-        entry = { fake, type: f.type };
-        fakeByReal.set(f.value, entry);
-        usedFakes.add(entry.fake);
-      }
-      spans.push({ start: f.index, end: f.index + f.value.length, value: f.value, fake: entry.fake });
-    }
-    spans.sort((a, b) => a.start - b.start);
-    let masked = text;
-    for (let i = spans.length - 1; i >= 0; i--) {
-      const it = spans[i];
-      if (masked.slice(it.start, it.end) === it.value) {
-        masked = masked.slice(0, it.start) + it.fake + masked.slice(it.end);
-      } else {
-        // Index drifted (overlapping earlier replacement) — swap by value.
-        masked = masked.split(it.value).join(it.fake);
-      }
-    }
-    const items = [...fakeByReal.entries()].map(([real, e]) => ({ type: e.type, real, fake: e.fake }));
-    return { masked, items, findingsCount: usable.length };
-  }
-
-  /**
-   * Put the masked text into the composer. Returns true only when the WHOLE
-   * text verifiably landed — Gemini's composer hard-caps at 32,000 characters
-   * and truncates SILENTLY past it (measured), and a partial paste the user
-   * cannot see is this feature's worst failure. So: fill through the same
-   * typeText the mask flow uses, verify with fullyLanded, and only then
-   * register the mappings that make the reply unmaskable.
-   */
-  async function insertDocText(masked, items) {
-    const editor = findEditor();
-    if (!editor) {
-      showErrorToast("Could not find the chat input — click in the chat box and try again.");
-      return false;
-    }
-    suppressSends = true;
-    let ok;
-    try {
-      ok = await typeText(editor, masked);
-    } finally {
-      suppressSends = false;
-    }
-    const live = liveEditor() || editor;
-    if (!ok || !fullyLanded(live, masked)) {
-      showErrorToast(
-        "The text didn't fully load into the chat box, so nothing was sent. Check the box before sending anything."
-      );
-      return false;
-    }
-    for (const it of items) masker.registerManual(it.real, it.fake, it.type);
-    await masker.save();
-    logActivity("mask", items);
-    reportStats({ masked: items.length });
-    reportCompanyCategories(items);
-    // The user's own Enter on this exact text passes without a re-scan, the
-    // same as after Mask & Edit.
-    state.lastMaskedText = masked;
-    return true;
-  }
-
   /* ---- the preview ---- */
 
   let filePreviewEl = null;
@@ -4908,10 +4881,15 @@
         ? `masked ${items.length} item${items.length === 1 ? "" : "s"}: ${breakdown}.`
         : "nothing needed masking.") +
       ` This text replaces the file; the reply unmasks as usual.</p>` +
+      `` +
       `<div class="guardai-fileprev__text" tabindex="0"></div>` +
       `<div class="guardai-fileprev__btns">` +
-      `<button class="guardai-fileprev__btn guardai-fileprev__btn--insert">Insert into chat</button>` +
-      `<button class="guardai-fileprev__btn guardai-fileprev__btn--ghost guardai-fileprev__btn--cancel">Cancel</button>` +
+      `<button class="guardai-act guardai-act--primary guardai-fileprev__btn guardai-fileprev__btn--masksend">Mask &amp; Send</button>` +
+      `<button class="guardai-act guardai-act--secondary guardai-fileprev__btn guardai-fileprev__btn--maskedit">Mask &amp; Edit</button>` +
+      `</div>` +
+      `<div class="guardai-fileprev__btns guardai-fileprev__btns--secondary">` +
+      `<button class="guardai-act guardai-act--secondary guardai-fileprev__btn guardai-fileprev__btn--manual">Manual mask</button>` +
+      `<button class="guardai-act guardai-act--danger guardai-fileprev__btn guardai-fileprev__btn--anyway">Send anyway</button>` +
       `</div>`;
     wrap.querySelector(".guardai-fileprev__text").textContent = masked;
 
@@ -4926,15 +4904,27 @@
 
     const done = () => dismissFilePreview();
     wrap.querySelector(".guardai-fileprev__close").onclick = () => { done(); handlers.onCancel(); };
-    wrap.querySelector(".guardai-fileprev__btn--cancel").onclick = () => { done(); handlers.onCancel(); };
-    wrap.querySelector(".guardai-fileprev__btn--insert").onclick = async (e) => {
-      const btn = e.currentTarget;
-      btn.disabled = true;
-      btn.textContent = "Inserting…";
-      const ok = await handlers.onInsert();
-      if (ok) done();
-      else { btn.disabled = false; btn.textContent = "Insert into chat"; }
+    // The same four actions as the text card, wired to the same handlers —
+    // the preview is a presentation layer over the ordinary mask flow, not a
+    // second implementation of it.
+    const wire = (sel, label, fn) => {
+      wrap.querySelector(sel).onclick = async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        btn.textContent = "Working…";
+        try {
+          done();
+          await fn();
+        } catch (err) {
+          console.error("[GuardAI] " + label + " (file) failed:", err);
+          showErrorToast(label + " failed — please reload the page and try again.");
+        }
+      };
     };
+    wire(".guardai-fileprev__btn--masksend", "Mask & Send", handlers.onMaskSend);
+    wire(".guardai-fileprev__btn--maskedit", "Mask & Edit", handlers.onMaskEdit);
+    wire(".guardai-fileprev__btn--manual", "Manual mask", handlers.onManual);
+    wire(".guardai-fileprev__btn--anyway", "Send anyway", handlers.onSendAnyway);
   }
 
   /**
@@ -4950,14 +4940,70 @@
         if (statusEl) statusEl.textContent = (ex && ex.why) || "Could not read the text out of this file.";
         return;
       }
-      const { masked, items } = await maskDocumentText(ex.text);
-      showSafeTextPreview(file, masked, items, {
-        onInsert: async () => {
-          const ok = await insertDocText(masked, items);
-          if (ok) dismissFileCard();
-          return ok;
+      const editor = findEditor();
+      if (!editor) {
+        if (statusEl) statusEl.textContent = "Could not find the chat input on this page.";
+        return;
+      }
+      const text = ex.text;
+      const findings = await scanText(text);
+      // ONE model for everything the preview leads to. The preview string is
+      // computeMasked() over this exact model, and the Mask & Send / Mask &
+      // Edit buttons hand the SAME model on via {prebuilt:true} — so the
+      // masked text the user reads is, by construction, the masked text that
+      // can be sent. Two separate fake draws is how a preview lies.
+      await buildReviewModel(editor, text, findings, { docPolicy: true });
+      if (!review) {
+        if (statusEl) statusEl.textContent = "Something interrupted masking — please try again.";
+        return;
+      }
+      const masked = computeMasked();
+      const docOpts = { docPolicy: true, prebuilt: true };
+      // A soft-nav can null the global `review` while the preview sits open;
+      // prebuilt would then rebuild with FRESH fakes and the preview would
+      // lie. Capture the model and put it back before any action runs.
+      const model = review;
+      const restoreModel = () => { if (!review) review = model; };
+      showSafeTextPreview(file, masked, review.items, {
+        onMaskSend: async () => {
+          dismissFileCard();
+          restoreModel();
+          await doMaskAndSend(editor, text, findings, docOpts);
         },
-        onCancel: () => {},
+        onMaskEdit: async () => {
+          dismissFileCard();
+          restoreModel();
+          await doMaskAndEdit(editor, text, findings, docOpts);
+        },
+        onManual: async () => {
+          dismissFileCard();
+          review = null; // manual builds its own state from the original text
+          await doManualMask(editor, text);
+        },
+        onSendAnyway: async () => {
+          // The same deliberate step the text card offers: the ORIGINAL text,
+          // unmasked, sent as the user's own choice. Fill, verify, send.
+          dismissFileCard();
+          review = null;
+          suppressSends = true;
+          let ok;
+          try {
+            ok = await typeText(editor, text);
+          } finally {
+            suppressSends = false;
+          }
+          const live = liveEditor() || editor;
+          if (!ok || normalize(getEditorText(live)) !== normalize(text)) {
+            try { clearEditor(live); } catch (_) { /* nothing to recover */ }
+            showErrorToast("The text couldn't be placed into the chat box, so nothing was sent.");
+            return;
+          }
+          state.lastMaskedText = text; // their own send passes without a re-scan
+          reportStats({ sentUnmasked: findings.length });
+          bypassNext = true;
+          makeResender(live)();
+        },
+        onCancel: () => { review = null; },
       });
     } catch (err) {
       console.warn("[GuardAI] send-as-text failed:", err);
@@ -5268,9 +5314,17 @@
     approvedFiles,
     catLabel,
     setParser: (fn) => { parserTransport = fn; },
-    maskDocumentText,
-    insertDocText,
     startSafeText,
+    // Builds the SAME model + masked string the preview and all four actions
+    // share, then clears the global so tests can assert on it in isolation.
+    buildDocPreview: async (text) => {
+      const findings = await scanText(text);
+      await buildReviewModel(findEditor(), text, findings, { docPolicy: true });
+      const masked = computeMasked();
+      const items = review ? review.items : [];
+      review = null;
+      return { masked, items };
+    },
     previewEl: () => filePreviewEl,
     getLastMaskedText: () => state.lastMaskedText,
     isReleasing: () => releasingFiles,

@@ -589,7 +589,7 @@ console.log("\n--- 8d. no composer, no problem ---");
   check(left >= 8, "not pinned to the edge");
 }
 
-console.log("\n--- 10. Send as safe text: offered, previewed, inserted ---");
+console.log("\n--- 10. Send as safe text: one model, four standard actions ---");
 {
   const w = loadPage(CHATGPT);
   await settle();
@@ -620,67 +620,58 @@ console.log("\n--- 10. Send as safe text: offered, previewed, inserted ---");
   await settle(20);
 
   const card = H.cardEl();
-  const btn = card && card.querySelector(".guardai-filecard__btn--safetext");
-  check(!!btn, "the third option is on the card");
-  check(btn && /send as safe text/i.test(btn.textContent), "…and says what it does", btn && btn.textContent);
-  const whyEl = card.querySelector(".guardai-filecard__textwhy");
-  check(whyEl && !whyEl.textContent.trim(), "no reason line when the option is offered");
-
-  const sizeBefore = w.GuardAI._restoreHooks.masker.size;
-
-  btn.click();
+  card.querySelector(".guardai-filecard__btn--safetext").click();
   await settle(20);
-  check(calls.includes("extract"), "clicking asks the frame for the text", calls.join(","));
 
   const prev = H.previewEl();
-  check(!!prev, "the preview appears before anything touches the composer");
-  const shown = prev ? prev.querySelector(".guardai-fileprev__text").textContent : "";
-  check(shown.length > 100, "it shows the text in full", String(shown.length));
-  check(!shown.includes(REAL_TFN), "the REAL TFN is not in the preview");
-  check(shown !== DOC_TEXT, "…because the text really was masked");
-  check(/Clause 4\./.test(shown), "…while the surrounding sentence survived");
-  check(w.GuardAI._restoreHooks.masker.size === sizeBefore,
-    "previewing registers NOTHING in the mapping store", `${w.GuardAI._restoreHooks.masker.size}`);
+  check(!!prev, "the preview appears");
+  // The SAME four options as the text card — reused handlers, not a second set.
+  for (const [sel, label] of [
+    [".guardai-fileprev__btn--masksend", "Mask & Send"],
+    [".guardai-fileprev__btn--maskedit", "Mask & Edit"],
+    [".guardai-fileprev__btn--manual", "Manual mask"],
+    [".guardai-fileprev__btn--anyway", "Send anyway"],
+  ]) {
+    check(!!prev.querySelector(sel), `it offers ${label}`);
+  }
+  check(!prev.querySelector(".guardai-fileprev__btn--insert"), "the old lone Insert button is gone");
 
-  // Cancel: no trace anywhere.
-  prev.querySelector(".guardai-fileprev__btn--cancel").click();
+  const shown = prev.querySelector(".guardai-fileprev__text").textContent;
+  check(!shown.includes(REAL_TFN), "the REAL TFN is not in the preview");
+  check(/Clause 4\./.test(shown), "…while the surrounding sentence survived");
+
+  const sizeBefore = w.GuardAI._restoreHooks.masker.size;
+  // Cancel: no trace — nothing registered, composer untouched.
+  prev.querySelector(".guardai-fileprev__close").click();
   await settle();
-  check(!H.previewEl(), "cancel closes the preview");
-  check(!!H.cardEl(), "…and the card is still there to decide about the file");
-  check(w.GuardAI._restoreHooks.masker.size === sizeBefore, "…and the store is still untouched");
+  check(!H.previewEl(), "closing the preview cancels");
+  check(w.GuardAI._restoreHooks.masker.size === sizeBefore, "…and registers nothing");
   const editor = w.document.getElementById("prompt-textarea");
   check(!(editor.textContent || "").trim(), "…and the composer is still empty");
 
-  // Round two: confirm.
+  // Round two: Mask & Edit — the real doMaskAndEdit fills, registers, no send.
   card.querySelector(".guardai-filecard__btn--safetext").click();
   await settle(20);
-  H.previewEl().querySelector(".guardai-fileprev__btn--insert").click();
-  // typeText's per-line fill awaits REAL timers between operations (that is
-  // the volume fix), so tick-counting under-waits and asserts mid-fill.
-  // Wait for the observable end state: the preview closing on success.
-  for (let i = 0; i < 40 && H.previewEl(); i++) await new Promise((r) => setTimeout(r, 50));
+  const prev2 = H.previewEl();
+  const shown2 = prev2.querySelector(".guardai-fileprev__text").textContent;
+  prev2.querySelector(".guardai-fileprev__btn--maskedit").click();
+  for (let i = 0; i < 60 && !(editor.textContent || "").trim(); i++) await new Promise((r) => setTimeout(r, 50));
+  await new Promise((r) => setTimeout(r, 200));
 
   const landed = editor.textContent || "";
-  check(landed.length > 100, "confirming fills the composer", String(landed.length));
+  check(landed.length > 100, "Mask & Edit fills the composer", String(landed.length));
   check(!landed.includes(REAL_TFN), "the REAL TFN never reaches the composer");
-  check(/Clause 4\./.test(landed), "…and the prose around it landed intact");
-  check(w.__submits.length === 0, "nothing was submitted — inserting is not sending",
-    w.__submits.join(","));
-  check(w.GuardAI._restoreHooks.masker.size === sizeBefore + 1,
-    "the mapping registers ON INSERT, so the reply can unmask",
-    `${w.GuardAI._restoreHooks.masker.size} vs ${sizeBefore}+1`);
-  check(H.getLastMaskedText() === landed || !!H.getLastMaskedText(),
-    "the user's own send of this exact text will pass without a re-scan");
-  check(!H.previewEl() && !H.cardEl(), "preview and card are both done");
+  check(landed === shown2, "what landed is BYTE-IDENTICAL to what the preview showed");
+  check(w.__submits.length === 0, "…and nothing was sent", w.__submits.join(","));
+  check(w.GuardAI._restoreHooks.masker.size > sizeBefore, "…and the mappings registered so the reply can unmask");
 }
 
 console.log("\n--- 10b. the document flow's own masking policy ---");
 {
-  // DOB masks HERE despite being warn-only in chat (the chat card interrupts;
-  // this flow has no card for non-blocking types — a real date of birth went
-  // to the model verbatim through it). MONEY stays visible on purpose. And
-  // one organisation in two costumes gets ONE stand-in, wearing each
-  // surface's own case and designators.
+  // DOB masks HERE despite being warn-only in chat; MONEY stays visible; one
+  // organisation in two costumes gets ONE stand-in. All through the SHARED
+  // model builder (buildReviewModel + docPolicy) — the same code path every
+  // preview button consumes.
   const w = loadPage(CHATGPT);
   await settle();
   const H = w.GuardAI._fileHooks;
@@ -689,7 +680,7 @@ console.log("\n--- 10b. the document flow's own masking policy ---");
     "We confirm your salary of $92,400 per annum. TFN 412 336 907. " +
     "We have your date of birth as 14 March 1991 on file.\n" +
     "People and Culture, Meridian Facilities Group";
-  const { masked, items } = await H.maskDocumentText(DOC);
+  const { masked, items } = await H.buildDocPreview(DOC);
 
   check(!masked.includes("14 March 1991"), "the DOB is masked in the document flow");
   const dob = items.find((i) => i.type === "DOB");
@@ -699,17 +690,258 @@ console.log("\n--- 10b. the document flow's own masking policy ---");
   check(!masked.includes("MERIDIAN FACILITIES GROUP"), "letterhead org masked");
   check(!masked.includes("Meridian Facilities Group"), "signature org masked");
   const orgs = items.filter((i) => i.type === "ORG");
-  check(orgs.length === 2, "two surfaces, two registered mappings", String(orgs.length));
-  const hdr = orgs.find((o) => o.real.includes("PTY"));
-  const sig = orgs.find((o) => !o.real.includes("PTY"));
+  check(orgs.length === 2, "two surfaces, two mappings", String(orgs.length));
+  const hdr = orgs.find((o) => o.value.includes("PTY"));
+  const sig = orgs.find((o) => !o.value.includes("PTY"));
   const stemOf = (v) => v.toLowerCase().replace(/\b(pty|ltd|limited|group|holdings)\b/g, "").trim();
   check(!!hdr && !!sig && stemOf(hdr.fake) === stemOf(sig.fake),
-    "…but ONE entity: the stand-ins share a stem",
-    orgs.map((o) => o.fake).join(" | "));
+    "…but ONE entity: the stand-ins share a stem", orgs.map((o) => o.fake).join(" | "));
   check(hdr && hdr.fake === hdr.fake.toUpperCase() && /GROUP PTY LTD$/.test(hdr.fake),
     "the letterhead stand-in is ALL-CAPS with its full designators", hdr && hdr.fake);
   check(sig && /Group$/.test(sig.fake) && sig.fake !== sig.fake.toUpperCase(),
     "the signature stand-in keeps its own case and tail", sig && sig.fake);
+
+  // Chat flow unchanged by the doc policy: the same text through the ordinary
+  // model (no docPolicy) must NOT mask the DOB — that is the card-mediated
+  // choice the chat card exists for.
+  const chat = await (async () => {
+    const RH = w.GuardAI._restoreHooks;
+    return null; // chat-path DOB behaviour is pinned by masking-policy.cjs
+  })();
+}
+
+console.log("\n--- 10c. the preview IS what lands — byte for byte, through the remount ---");
+{
+  /**
+   * Live failure, 2026-08-28: the fill machinery verified against a STALE
+   * editor node (a big paste makes ProseMirror remount the editor), decided
+   * the landed fill had failed, cleared it, and cascaded into the
+   * char-by-char crawl at ~2 chars/second. The user read a composer 94 chars
+   * into a 28-minute fill and reported "the preview does not match what was
+   * inserted" — which it didn't, and in the worst possible way.
+   *
+   * The fixture's editor REPLACES ITSELF when a paste lands, exactly like
+   * the live ProseMirror. The flow is the REAL one: card -> preview ->
+   * Mask & Edit.
+   */
+  const w = loadPage(CHATGPT);
+  await settle();
+  const H = w.GuardAI._fileHooks;
+
+  const LONG =
+    ("Clause. The parties acknowledge the obligations described here survive termination, " +
+     "and any waiver must be written. ").repeat(22) +
+    "Tax file number 412 336 907 is held for payroll. Contact Priya Raghunathan on 0413 887 220.";
+  H.setParser(async (file, onProgress, mode) => {
+    if (mode === "extract") return { ok: true, text: LONG };
+    return { kind: "docx", label: "Word document", action: "block", pages: 0,
+      summary: { counts: { TFN: 1 }, blocking: ["TFN"], other: [], blockingCount: 1, total: 1, pageHits: {} },
+      suit: { offer: true, why: "" } };
+  });
+
+  let pastes = 0, inserts = 0;
+  const wirePaste = (node) => node.addEventListener("paste", (e) => {
+    pastes++;
+    const t = e.clipboardData && e.clipboardData.getData ? e.clipboardData.getData("text/plain") : "";
+    const fresh = w.document.createElement("div");
+    fresh.setAttribute("contenteditable", "true");
+    fresh.id = "prompt-textarea";
+    fresh.setAttribute("data-x", "345"); fresh.setAttribute("data-w", "560"); fresh.setAttribute("data-h", "40");
+    fresh.textContent = t;
+    wirePaste(fresh);
+    node.replaceWith(fresh);   // the remount that broke live verification
+  });
+  wirePaste(w.document.getElementById("prompt-textarea"));
+  const realExec = w.document.execCommand;
+  w.document.execCommand = function (cmd, ui, value) {
+    if (String(cmd).toLowerCase() === "inserttext") inserts++;
+    return realExec.call(this, cmd, ui, value);
+  };
+
+  const input = w.document.getElementById("upload-files");
+  const file = makeFile(w, "long.docx", 9000, "");
+  input.files = Object.assign([file], { item: () => file });
+  input.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await settle(20);
+  H.cardEl().querySelector(".guardai-filecard__btn--safetext").click();
+  await settle(20);
+  const prev = H.previewEl();
+  const shown = prev.querySelector(".guardai-fileprev__text").textContent;
+  check(shown.length > 1500, "fixture: the previewed text is document-sized", String(shown.length));
+
+  prev.querySelector(".guardai-fileprev__btn--maskedit").click();
+  const liveNode = () => w.document.getElementById("prompt-textarea");
+  for (let i = 0; i < 80 && (liveNode().textContent || "").length < shown.length; i++) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  await new Promise((r) => setTimeout(r, 200));
+
+  check(pastes >= 1, "the fill went via the paste path, not a crawl", `${pastes} paste(s)`);
+  check(inserts < 15, "…with no char-by-char fallback", `${inserts} insertText calls`);
+  check(liveNode().textContent === shown,
+    "the inserted string is BYTE-IDENTICAL to the previewed string",
+    liveNode().textContent === shown ? "" :
+      `lens ${liveNode().textContent.length} vs ${shown.length}`);
+  check(w.__submits.length === 0, "Mask & Edit sent nothing");
+
+  // The reverse direction — the dangerous one. Mappings registered; run BOTH
+  // swap directions over the page. Nothing may rewrite the composer (masked
+  // text going out REAL) and nothing may rewrite GuardAI's own file UI.
+  const RH = w.GuardAI._restoreHooks;
+  const before = liveNode().textContent;
+  RH.applyRules(w.document.body, RH.buildSwapRules("unmask"));
+  check(liveNode().textContent === before,
+    "unmask over the page cannot turn the composer's fakes back into real data");
+  RH.applyRules(w.document.body, RH.buildSwapRules("remask"));
+  check(liveNode().textContent === before, "…and remask cannot rewrite it either");
+
+  const pv = w.document.createElement("div");
+  pv.className = "guardai-fileprev";
+  pv.innerHTML = '<div class="guardai-fileprev__text"></div>';
+  pv.querySelector(".guardai-fileprev__text").textContent = shown;
+  w.document.body.appendChild(pv);
+  RH.applyRules(w.document.body, RH.buildSwapRules("unmask"));
+  check(pv.textContent === shown, "the preview element is protected from the swap machinery");
+  pv.remove();
+  w.document.execCommand = realExec;
+}
+
+console.log("\n--- 10d. a fill that cannot land does not send ---");
+{
+  // The standard flow's failure semantics: doMaskAndSend refuses to send on a
+  // short landing (its fullyLanded gate), shows its recovery UI, and no send
+  // fires. Fixture: an editor that truncates everything to 40 chars.
+  const w = loadPage(CHATGPT);
+  await settle();
+  const H = w.GuardAI._fileHooks;
+  const LONG = ("The committee reviewed the register and noted no material change in the period. ").repeat(30) +
+    "TFN 412 336 907.";
+  H.setParser(async (file, onProgress, mode) => {
+    if (mode === "extract") return { ok: true, text: LONG };
+    return { kind: "docx", label: "Word document", action: "block", pages: 0,
+      summary: { counts: { TFN: 1 }, blocking: ["TFN"], other: [], blockingCount: 1, total: 1, pageHits: {} },
+      suit: { offer: true, why: "" } };
+  });
+  const ed = w.document.getElementById("prompt-textarea");
+  ed.addEventListener("paste", () => { ed.textContent = "short"; });
+  const realExec = w.document.execCommand;
+  w.document.execCommand = function (cmd, ui, value) {
+    if (String(cmd).toLowerCase() === "inserttext") { ed.textContent = (ed.textContent + String(value)).slice(0, 40); return true; }
+    return realExec.call(this, cmd, ui, value);
+  };
+
+  const input = w.document.getElementById("upload-files");
+  const file = makeFile(w, "long.docx", 9000, "");
+  input.files = Object.assign([file], { item: () => file });
+  input.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await settle(20);
+  H.cardEl().querySelector(".guardai-filecard__btn--safetext").click();
+  await settle(20);
+  H.previewEl().querySelector(".guardai-fileprev__btn--masksend").click();
+  await new Promise((r) => setTimeout(r, 1500));
+
+  check(w.__submits.length === 0, "nothing was sent on a fill that came up short",
+    w.__submits.join(","));
+  check((ed.textContent || "").length < 100, "…and no full document is sitting in the box",
+    String((ed.textContent || "").length));
+  w.document.execCommand = realExec;
+}
+
+console.log("\n--- 10e. both cards teach ONE button language ---");
+{
+  /**
+   * Reported 2026-08-28: the text card and the file preview offered the same
+   * four choices styled three different ways — a bright green primary against
+   * a muted one, Mask & Edit dominant-white on one card and dark-filled on
+   * the other, and "Send anyway" wearing its warning orange on the text card
+   * but plain grey on the file card. The last one is the dangerous half: the
+   * single option that sends REAL data had lost its warning colour on exactly
+   * the card where the user is looking at a document they did not type.
+   *
+   * The fix is one shared component (.guardai-act + role), so this asserts
+   * the invariant rather than the pixels: both cards give each action the
+   * SAME role, and the roles are defined in exactly one place.
+   */
+  const src = read("content.js");
+  const ROLES = [
+    ["Mask & Send",  "guardai-act--primary",   "prompt__btn--send",   "fileprev__btn--masksend"],
+    ["Mask & Edit",  "guardai-act--secondary", "prompt__btn--edit",   "fileprev__btn--maskedit"],
+    ["Manual mask",  "guardai-act--secondary", "prompt__btn--manual", "fileprev__btn--manual"],
+    ["Send anyway",  "guardai-act--danger",    "prompt__btn--anyway", "fileprev__btn--anyway"],
+  ];
+  const buttonMarkup = (bem) => {
+    const m = src.match(new RegExp("<button class=\"[^\"]*" + bem.replace(/[-]/g, "\\-") + "\"[^>]*>", "g"));
+    return m ? m[0] : null;
+  };
+  for (const [label, role, textBem, fileBem] of ROLES) {
+    const t = buttonMarkup(textBem);
+    const f = buttonMarkup(fileBem);
+    check(!!t && t.includes(role), `text card: ${label} is ${role}`, t || "not found");
+    check(!!f && f.includes(role), `file preview: ${label} is ${role}`, f || "not found");
+  }
+
+  // The one that matters most, stated on its own: the risky action keeps its
+  // warning treatment on BOTH cards.
+  const dangerCount = (src.match(/guardai-act--danger/g) || []).length;
+  check(dangerCount === 2, "exactly two buttons carry the danger role — one per card",
+    String(dangerCount));
+
+  // Rendered, not just declared: the live preview's buttons carry the roles.
+  const w = loadPage(CHATGPT);
+  await settle();
+  const H = w.GuardAI._fileHooks;
+  H.setParser(async (file, onProgress, mode) => {
+    if (mode === "extract") return { ok: true, text: "Clause 4. The tax file number 412 336 907 is on file for payroll purposes." };
+    return { kind: "docx", label: "Word document", action: "block", pages: 0,
+      summary: { counts: { TFN: 1 }, blocking: ["TFN"], other: [], blockingCount: 1, total: 1, pageHits: {} },
+      suit: { offer: true, why: "" } };
+  });
+  const input = w.document.getElementById("upload-files");
+  const file = makeFile(w, "c.docx", 9000, "");
+  input.files = Object.assign([file], { item: () => file });
+  input.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await settle(20);
+  H.cardEl().querySelector(".guardai-filecard__btn--safetext").click();
+  await settle(20);
+  const prev = H.previewEl();
+  check(prev.querySelectorAll(".guardai-act").length === 4,
+    "the live preview renders four shared-component buttons",
+    String(prev.querySelectorAll(".guardai-act").length));
+  check(!!prev.querySelector(".guardai-fileprev__btn--anyway.guardai-act--danger"),
+    "…and its Send anyway is the danger role");
+  check(prev.querySelectorAll(".guardai-act--secondary").length === 2,
+    "…with Mask & Edit and Manual mask at equal weight",
+    String(prev.querySelectorAll(".guardai-act--secondary").length));
+
+  // Single source of truth: no card may re-colour these buttons itself.
+  const css = fs.readFileSync(path.join(ROOT, "styles.css"), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "");   // comments first — they name the very properties
+  for (const stray of [
+    ".guardai-prompt__btn--send {", ".guardai-prompt__btn--edit", ".guardai-prompt__btn--ghost",
+    ".guardai-prompt__btn--anyway", ".guardai-fileprev__btn--ghost", ".guardai-fileprev__btn--masksend",
+  ]) {
+    check(!css.includes(stray), `no per-card override left for ${stray.trim()}`);
+  }
+  for (const role of ["--primary", "--secondary", "--danger"]) {
+    // Anchored to line start so the html.guardai-light override — which also
+    // contains ".guardai-act--primary {" — is not counted as a second base
+    // definition. The light block is a deliberate second definition; a
+    // per-card one would not be.
+    const defs = (css.match(new RegExp("^\\.guardai-act" + role + "\\s*\\{", "gm")) || []).length;
+    check(defs === 1, `.guardai-act${role} has exactly one base definition`, String(defs));
+    const lightDefs = (css.match(new RegExp("^html\\.guardai-light \\.guardai-act" + role + "\\s*\\{", "gm")) || []).length;
+    check(lightDefs === 1, `…and exactly one light-theme override`, String(lightDefs));
+  }
+  // Control: the three roles must actually LOOK different, or "consistent"
+  // would be satisfied by making every button identical.
+  const roleBody = (r) => {
+    const i = css.indexOf(".guardai-act" + r + " {");
+    return i < 0 ? "" : css.slice(i, css.indexOf("}", i));
+  };
+  const bodies = ["--primary", "--secondary", "--danger"].map(roleBody);
+  check(new Set(bodies).size === 3, "control: the three roles are visually distinct from each other");
+  check(/2e5c43/.test(bodies[0]), "primary is the muted file-card green", bodies[0].trim().slice(0, 60));
+  check(/f0883e/.test(bodies[2]), "danger is the text-card warning orange", bodies[2].trim().slice(0, 60));
 }
 
 console.log("\n--- 11. withheld, and it says why ---");

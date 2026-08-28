@@ -694,33 +694,10 @@
 .guardai-prompt__shield { font-size: 18px; display: inline-flex; color: #f4f4f5; }
 .guardai-prompt__text { font-size: 14px; font-weight: 600; color: #f4f4f5; flex: 1; }
 .guardai-prompt__btns { display: flex; gap: 10px; }
-.guardai-prompt__btn {
-  flex: 1;
-  border-radius: 12px;
-  padding: 14px 12px;
-  font-size: 14px;
-  font-weight: 700;
-  cursor: pointer;
-  font-family: inherit;
-  border: 1px solid transparent;
-  transition: filter 0.15s, background 0.15s, border-color 0.15s;
-}
-/* Primary safe action gets the one intentional accent colour: green, so it
- * reads as "go / safe" at a glance against the black-and-white buttons
- * around it. Everything else in this card stays monochrome. */
-.guardai-prompt__btn--send {
-  background: #2ea043;
-  color: #fff;
-}
-.guardai-prompt__btn--send:hover { filter: brightness(1.08); }
-.guardai-prompt__btn--edit {
-  background: #242424;
-  color: #f4f4f5;
-  border-color: #3a3a3a;
-}
-.guardai-prompt__btn--edit:hover { background: #2e2e2e; border-color: #4a4a4a; }
-/* Clear keyboard focus ring on every control in the card. */
-.guardai-prompt__btn:focus-visible,
+/* The four card actions are styled ONCE, as .guardai-act, at the foot of this
+ * file — the text card and the file preview offer the same four choices and
+ * must not teach two different button languages. Only the close button's own
+ * focus ring is card-specific. */
 .guardai-prompt__close:focus-visible { outline: 2px solid #f4f4f5; outline-offset: 2px; }
 /* Mask & Send is auto-focused the instant the card opens (so a keyboard user
  * can accept with one Enter) — ANY ring on top of the green button, even a
@@ -797,22 +774,6 @@
   color: #b8b8bd;
 }
 .guardai-prompt__btns--secondary { margin-top: 10px; }
-.guardai-prompt__btn--ghost {
-  background: transparent;
-  color: #9a9a9f;
-  border-color: #3a3a3a;
-  font-weight: 600;
-}
-.guardai-prompt__btn--ghost:hover { background: #242424; color: #d8d8d8; border-color: #4a4a4a; }
-/* "Send anyway" skips masking and sends real data — it gets an explicit
- * warning colour (orange) so it visibly reads as risky, distinct from both
- * the green safe action and the monochrome buttons around it. */
-.guardai-prompt__btn--anyway { color: #f0883e; border-color: rgba(240, 136, 62, 0.4); }
-.guardai-prompt__btn--anyway:hover {
-  background: rgba(240, 136, 62, 0.12);
-  border-color: rgba(240, 136, 62, 0.7);
-  color: #f0883e;
-}
 
 /* ---- Collapsed reopen badge ---- */
 .guardai-reopen {
@@ -1161,23 +1122,7 @@ html.guardai-light .guardai-prompt__count {
   color: #64748b;
 }
 html.guardai-light .guardai-prompt__why { color: #475569; }
-html.guardai-light .guardai-prompt__btn--edit {
-  background: #f1f5f9;
-  color: #0f172a;
-  border-color: #e2e8f0;
-}
-html.guardai-light .guardai-prompt__btn--edit:hover { background: #e2e8f0; border-color: #cbd5e1; }
-html.guardai-light .guardai-prompt__btn--ghost {
-  color: #64748b;
-  border-color: #e2e8f0;
-}
-html.guardai-light .guardai-prompt__btn--ghost:hover { background: #f1f5f9; color: #0f172a; border-color: #cbd5e1; }
-/* Send anyway: same warning orange as dark mode, tuned for a white card. */
-html.guardai-light .guardai-prompt__btn--anyway { color: #c2410c; border-color: rgba(194, 65, 12, 0.35); }
-html.guardai-light .guardai-prompt__btn--anyway:hover { background: rgba(194, 65, 12, 0.08); border-color: rgba(194, 65, 12, 0.6); color: #c2410c; }
-/* Mask & Send: same green in both themes; a plain darken reads better than
- * the generic brighten used for the monochrome buttons. */
-html.guardai-light .guardai-prompt__btn--send:hover { filter: brightness(0.92); }
+
 
 /* ---- Reopen badge ---- */
 html.guardai-light .guardai-reopen {
@@ -1531,17 +1476,6 @@ html.guardai-light .guardai-filecard__btn--ghost:hover { background: #f1f5f9; co
   color: #d9d9de;
 }
 .guardai-fileprev__btns { display: flex; gap: 8px; margin-top: 14px; flex: 0 0 auto; }
-.guardai-fileprev__btn {
-  all: unset; flex: 1 1 0; text-align: center; cursor: pointer;
-  padding: 9px 12px; border-radius: 10px; font-size: 13px; font-weight: 600;
-  background: #f4f4f5; color: #0a0a0a;
-}
-.guardai-fileprev__btn:hover { filter: brightness(0.92); }
-.guardai-fileprev__btn:disabled { opacity: 0.6; cursor: default; }
-.guardai-fileprev__btn--ghost {
-  background: transparent; color: #a1a1aa; border: 1px solid #2c2c2c; font-weight: 500;
-}
-.guardai-fileprev__btn--ghost:hover { background: #2c2c2c; color: #f4f4f5; filter: none; }
 
 html.guardai-light .guardai-filecard__btn--safetext { background: #14532d; color: #ffffff; }
 html.guardai-light .guardai-filecard__textwhy { color: #64748b; }
@@ -1558,8 +1492,77 @@ html.guardai-light .guardai-fileprev__meta { color: #64748b; }
 html.guardai-light .guardai-fileprev__text {
   background: #f8fafc; border-color: #e2e8f0; color: #1e293b;
 }
-html.guardai-light .guardai-fileprev__btn { background: #0a0a0a; color: #ffffff; }
-html.guardai-light .guardai-fileprev__btn--ghost {
-  background: transparent; color: #475569; border-color: #e2e8f0;
+
+.guardai-fileprev__btns--secondary { margin-top: 8px; }
+
+
+/* ==========================================================================
+   Card actions — ONE component, both cards
+   --------------------------------------------------------------------------
+   The text card (typed message) and the file preview (attached document)
+   offer the SAME four choices, and used to style three of the four
+   differently: a bright green primary against a muted one, Mask & Edit
+   dominant-white on one card and dark-filled on the other, and "Send anyway"
+   wearing its warning orange on the text card but plain grey on the file
+   card. A user should not have to relearn the buttons depending on how the
+   text got there, and the one option that sends REAL data should never be
+   the one that loses its warning colour.
+
+   So the palette lives here, once. Cards keep their own BEM classes for
+   layout and for the handlers/tests to query; only the appearance is shared.
+   ========================================================================== */
+.guardai-act {
+  all: unset;
+  box-sizing: border-box;
+  flex: 1 1 0;
+  text-align: center;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.25;
+  padding: 12px 12px;
+  border-radius: 11px;
+  border: 1px solid transparent;
+  transition: filter 0.15s, background 0.15s, border-color 0.15s, color 0.15s;
 }
-html.guardai-light .guardai-fileprev__btn--ghost:hover { background: #f1f5f9; color: #0f172a; }
+.guardai-act:disabled { opacity: 0.6; cursor: default; }
+.guardai-act:focus-visible { outline: 2px solid #f4f4f5; outline-offset: 2px; }
+
+/* Primary — the safe action, and the only filled button in the set. Muted
+ * rather than a bright signal green: it is the default, not an alarm. */
+.guardai-act--primary { background: #2e5c43; color: #e9f6ee; }
+.guardai-act--primary:hover { filter: brightness(1.12); }
+
+/* Secondary — Mask & Edit and Manual mask carry equal weight: both are
+ * "mask, but let me look first", and neither outranks the other. */
+.guardai-act--secondary { background: transparent; color: #a1a1aa; border-color: #2c2c2c; }
+.guardai-act--secondary:hover { background: #2c2c2c; color: #f4f4f5; }
+
+/* Danger — "Send anyway" is the single option that sends REAL data. It keeps
+ * the warning orange on every card that offers it; it must never read as one
+ * of the safe choices. */
+.guardai-act--danger { background: transparent; color: #f0883e; border-color: rgba(240, 136, 62, 0.4); }
+.guardai-act--danger:hover {
+  background: rgba(240, 136, 62, 0.12);
+  border-color: rgba(240, 136, 62, 0.7);
+  color: #f0883e;
+}
+
+html.guardai-light .guardai-act:focus-visible { outline-color: #0f172a; }
+html.guardai-light .guardai-act--primary { background: #14532d; color: #ffffff; }
+html.guardai-light .guardai-act--primary:hover { filter: brightness(1.25); }
+html.guardai-light .guardai-act--secondary { color: #475569; border-color: #e2e8f0; }
+html.guardai-light .guardai-act--secondary:hover { background: #f1f5f9; color: #0f172a; border-color: #cbd5e1; }
+html.guardai-light .guardai-act--danger { color: #c2410c; border-color: rgba(194, 65, 12, 0.35); }
+html.guardai-light .guardai-act--danger:hover {
+  background: rgba(194, 65, 12, 0.08);
+  border-color: rgba(194, 65, 12, 0.6);
+  color: #c2410c;
+}
+
+/* Mask & Send is auto-focused the instant the TEXT card opens, so a keyboard
+ * user can accept with one Enter. A ring that appears immediately reads as an
+ * unwanted outline rather than a focus cue, so that one button suppresses it.
+ * The file preview does not auto-focus, so its primary keeps the ring. */
+.guardai-prompt__btn--send:focus-visible { outline: none; }

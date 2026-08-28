@@ -437,8 +437,8 @@
    * Everything not in this set is still DETECTED and still listed on the
    * warning card; it just isn't swapped automatically.
    *
-   * ONE EXCEPTION: "Send as safe text" (content.js maskDocumentText) masks
-   * DOB despite this set. Every leg of the reasoning above assumes the chat
+   * ONE EXCEPTION: "Send as safe text" (content.js buildReviewModel with
+   * docPolicy) masks DOB despite this set. Every leg of the reasoning above assumes the chat
    * flow — an interrupting card that lists the DOB, and a manual-mask step
    * one click away. The document flow has neither for non-blocking types, so
    * a real date of birth sailed through it verbatim (found 2026-08-28 on a
