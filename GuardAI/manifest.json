@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "GuardAI — Local AI Privacy Guard",
   "version": "1.0.0",
-  "description": "Warns about and masks sensitive data before you send it to AI chatbots. Your message text never leaves your browser.",
+  "description": "Masks sensitive data in messages, documents and images before it reaches AI chatbots. Detection runs entirely on your device.",
   "author": "GuardAI",
   "permissions": [
     "storage"

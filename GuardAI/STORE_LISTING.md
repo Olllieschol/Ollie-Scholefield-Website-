@@ -235,7 +235,92 @@ silently truncates at 32,000; the caps ship with margin below both).
 
 ## Listing copy
 
-The current description promises masking without qualification. Since the
-extension now requires a licence, the listing must say so above the fold, or
-it collects one-star "doesn't work" reviews from people who installed it
-expecting it to run.
+Two rules this copy is written to, both learned from rejections and reviews
+rather than invented:
+
+1. **The licence goes above the fold.** The extension does nothing until a code
+   is entered. A description that promises masking without saying so collects
+   one-star "doesn't work" reviews from people who installed it expecting it to
+   run.
+2. **Never let an unread file sound safe.** The product's own rule is that a
+   file it cannot read must never be presented the way a checked one is. A
+   listing that says "scans your attachments" without naming what it does not
+   read breaks that rule before the extension is even installed.
+
+### Short description (`manifest.json`, 132-char limit)
+
+> Masks sensitive data in messages, documents and images before it reaches AI
+> chatbots. Detection runs entirely on your device.
+
+125 characters. The previous version said "your message text never leaves your
+browser", which was true and is now incomplete: file bytes and extracted text
+do not leave either. "Detection runs entirely on your device" covers all three
+and is the claim the code actually supports.
+
+### Detailed description (Developer Dashboard)
+
+Paste from the line below to the end of this section.
+
+---
+
+Guard4AI checks what you are about to send to an AI chatbot, and catches
+sensitive details before they leave your browser.
+
+It works on what you type, and on what you attach.
+
+**Messages.** Type or paste into ChatGPT, Claude, Gemini, Copilot, Perplexity
+and 23 other AI sites. Guard4AI reads the message before it sends, and offers
+to swap real details for realistic stand-ins — Sarah Chen becomes Emma Walsh,
+and stays Emma Walsh for the rest of the conversation, so the reply still makes
+sense. When the reply comes back, the real values are put back in front of you.
+
+**Documents.** PDFs, Word documents, and text, CSV, TSV, Markdown and log files
+are read before they upload, up to 30 MB. Guard4AI stops the file for a narrow
+set of things that are never deliberately in a document you meant to share:
+passwords and API keys, card numbers, BSBs and account numbers, tax file
+numbers, Medicare numbers, passports and licence numbers. Names, addresses and
+phone numbers are counted and shown to you rather than blocked — a contract has
+hundreds of them, and a warning that fires on every attachment gets clicked
+without being read.
+
+**Screenshots and images.** PNG, JPEG and WebP are read with text recognition,
+up to 24 megapixels. Text recognition reads what it can see, which is less than
+you can, so an image never gets a clean bill of health: if Guard4AI finds
+something it stops, if it reads an image and finds nothing it attaches it with a
+notice saying exactly that, and if it cannot read the image properly it stops
+and says so.
+
+**Send the text instead.** For a document that reads as prose, Guard4AI can
+offer to send the text as a masked message rather than attaching the file, with
+the reply unmasked as usual. It only offers this when the extraction genuinely
+reads — forms, table grids and shuffled columns are refused rather than pasted
+as fragments.
+
+WHAT IT DOES NOT READ
+
+Excel, PowerPoint, legacy .doc, Pages, Numbers, Keynote, archives, HEIC photos
+from an iPhone, and scanned PDFs with no text layer. A file Guard4AI cannot read
+is unchecked, not safe, and it says so by name rather than letting the file look
+like one that came back clean. Attach several files at once and they are decided
+together: if one is stopped, none are attached.
+
+Guard4AI is a browser extension, so the ChatGPT and Claude desktop apps sit
+outside it, and so does Gemini's "Add from Drive", where the file goes to Google
+without passing through your browser.
+
+WHERE YOUR DATA GOES
+
+Detection runs on your device. Your message text is never sent anywhere for
+analysis. Files are read inside an isolated frame in your own browser using
+libraries that ship with the extension — nothing is uploaded and nothing is
+fetched — and the bytes and extracted text never leave that frame.
+
+The extension makes one kind of network request: a licence check. On a workplace
+plan it also sends an anonymous tally so an admin can see the tool is working —
+the category and the count, never the value, the filename, the message, or the
+page you were on. Full detail: https://guard4ai.com/privacy
+
+A LICENCE IS REQUIRED
+
+Guard4AI does nothing until a licence key or a workplace invite code is entered.
+Fourteen days free on any plan. Details at https://guard4ai.com/pricing
