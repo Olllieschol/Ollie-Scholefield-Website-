@@ -32,8 +32,10 @@ FILES=(
   popup.js
   settings.html
   settings.js
+  parser.html
   styles.css
   src
+  vendor
   icons
 )
 

@@ -31,6 +31,10 @@ const DEFAULT_STATS = () => ({
   detected: 0,
   masked: 0,
   sentUnmasked: 0,
+  // Attachments. Counted separately from `detected` because a file catch and a
+  // message catch are not the same event and averaging them hides both.
+  filesChecked: 0,
+  filesBlocked: 0,
   platforms: {},
   sessionStart: Date.now(),
 });
@@ -80,6 +84,10 @@ async function recordStats(msg) {
   if (typeof msg.detected === "number") stats.detected += msg.detected;
   if (typeof msg.masked === "number") stats.masked += msg.masked;
   if (typeof msg.sentUnmasked === "number") stats.sentUnmasked += msg.sentUnmasked;
+  // A record written before this feature shipped has neither key, so start
+  // from zero rather than NaN.
+  if (typeof msg.filesChecked === "number") stats.filesChecked = (stats.filesChecked || 0) + msg.filesChecked;
+  if (typeof msg.filesBlocked === "number") stats.filesBlocked = (stats.filesBlocked || 0) + msg.filesBlocked;
 
   if (msg.platform) {
     stats.platforms[msg.platform] = (stats.platforms[msg.platform] || 0) + 1;

@@ -57,7 +57,7 @@ function loadWindow() {
     runtime: { getURL: (p) => "file://" + p, sendMessage() {}, lastError: null },
   };
   if (!w.InputEvent) w.InputEvent = w.Event;
-  for (const f of ["names-gazetteer.js", "detector.js", "masker.js", "nlp-detector.js"]) w.eval(read(f));
+  for (const f of ["names-gazetteer.js", "detector.js", "masker.js", "nlp-detector.js", "filescan.js"]) w.eval(read(f));
   w.__storage = storage;
   return w;
 }

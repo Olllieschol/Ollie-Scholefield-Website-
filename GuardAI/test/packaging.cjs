@@ -67,6 +67,32 @@ const covered = (p) => allow.some((a) => p === a || p.startsWith(a + "/"));
     check(covered(p), `SHIPS: ${p}`, "not covered by tools/package.sh FILES");
   }
 
+  console.log("\n--- what the parser frame pulls in ---");
+  {
+    // parser.html is an extension page, so nothing it loads needs declaring in
+    // the manifest — which means nothing but this would notice vendor/ being
+    // dropped from the packaging allowlist. The extension would install fine
+    // and then fail to read a single PDF.
+    const html = fs.readFileSync(path.join(ROOT, "parser.html"), "utf8");
+    const srcs = [...html.matchAll(/<script[^>]+src="([^"]+)"/g)].map((m) => m[1]);
+    check(srcs.length >= 4, "parser.html loads its scripts", srcs.join(", "));
+    for (const p of srcs) {
+      check(fs.existsSync(path.join(ROOT, p)), `exists on disk: ${p}`);
+      check(covered(p), `SHIPS: ${p} (loaded by parser.html)`, "not covered by tools/package.sh FILES");
+    }
+    // ES imports and worker URLs, which are not <script src>.
+    const js = fs.readFileSync(path.join(ROOT, "src", "parser.js"), "utf8");
+    const refs = new Set([
+      ...[...js.matchAll(/from\s+"\.\.\/([^"]+)"/g)].map((m) => m[1]),
+      ...[...js.matchAll(/getURL\(\s*"([^"]+)"\s*\)/g)].map((m) => m[1]),
+    ]);
+    check(refs.size >= 2, "parser.js references its libraries", [...refs].join(", "));
+    for (const p of refs) {
+      check(fs.existsSync(path.join(ROOT, p)), `exists on disk: ${p}`);
+      check(covered(p), `SHIPS: ${p} (imported by parser.js)`, "not covered by tools/package.sh FILES");
+    }
+  }
+
   console.log("\n--- the ones nothing declares ---");
   {
     // Extension pages opened with chrome.tabs.create() are referenced only in

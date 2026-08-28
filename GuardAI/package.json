@@ -9,5 +9,10 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "module"
+  "type": "module",
+  "devDependencies": {
+    "jsdom": "^30.0.1",
+    "mammoth": "^1.12.1",
+    "pdfjs-dist": "^6.2.108"
+  }
 }

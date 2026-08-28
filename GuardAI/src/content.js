@@ -4213,6 +4213,682 @@
     setInterval(handleSoftNav, 1000);
   })();
 
+
+  /* ------------------------------------------------------------------ *
+   * File attachments.
+   *
+   * Every supported site uploads an attachment the moment it is CHOSEN, not
+   * when the message is sent — measured on ChatGPT (POST /backend-api/files),
+   * Claude (POST .../upload) and Gemini (push.clients6.google.com/upload/),
+   * each firing before the composer even re-rendered. So there is no moment
+   * at send time to check a file in; the only interception point is the
+   * change / drop / paste event itself.
+   *
+   * Those events are synchronous and reading a PDF is not, which rules out
+   * scan-then-decide. So the model is QUARANTINE, then decide, then release:
+   *
+   *   1. a capture-phase listener on window sees the event first — before the
+   *      site's own React handler, which is delegated to a root container far
+   *      below us — and stops it dead. Nothing uploads.
+   *   2. the bytes go to the parser frame, which reads and scans them.
+   *   3. on approval the file is put back through the site's own file input
+   *      and a change event is dispatched, which every site accepts.
+   *
+   * Release always goes through the file input, never by replaying the
+   * original event. Synthetic drop and paste events do NOT work: on claude.ai
+   * a synthetic dragenter raises the "Drop files here" overlay but a synthetic
+   * drop carrying the same file produces no upload at all, because dropzone
+   * code reads dataTransfer.items[].webkitGetAsEntry(), which is null for a
+   * DataTransfer we built. A synthetic change on the input is accepted
+   * everywhere, so all three entry points funnel onto that one release path.
+   * ------------------------------------------------------------------ */
+
+  /**
+   * Files the user has already looked at and let through, keyed by identity
+   * rather than content: hashing needs to read the file, and the listener has
+   * to decide synchronously or the event is gone.
+   *
+   * This is a convenience, not a security boundary — the user has already
+   * approved this exact file in this tab. It is what makes a drop or a paste
+   * recoverable on a site where we cannot find an input to release into: the
+   * approval is remembered, so attaching the same file again sails through.
+   */
+  const approvedFiles = new Set();
+  const fileKey = (f) => `${f.name}|${f.size}|${f.lastModified}`;
+
+  /** Set while we re-dispatch an approved file, so we don't re-quarantine it. */
+  let releasingFiles = false;
+
+  /* ---- the parser frame ---- */
+  /**
+   * Replaces the frame round-trip with a plain function. Null in production and
+   * settable only through the test hook at the bottom of this file — the frame
+   * needs a real browser (an extension-origin iframe, a MessageChannel and a
+   * PDF worker), none of which exist under jsdom, and the decision logic around
+   * it is worth testing on its own. The mechanism itself was verified on the
+   * live sites instead; see test/file-attach.cjs.
+   */
+  let parserTransport = null;
+  let parserFrame = null;
+  let parserPort = null;
+  let parserBooting = null;
+  let fileSeq = 0;
+  const filePending = new Map();
+
+  /**
+   * Bring up the hidden extension-origin iframe that does the reading, and
+   * hand it one end of a private MessageChannel.
+   *
+   * The channel matters. Without it the frame and this script would talk by
+   * window.postMessage, which the host page can both read and forge — a page
+   * could answer "nothing found" on the parser's behalf. Over a port, the page
+   * has no handle to send on at all.
+   */
+  function ensureParser() {
+    if (parserPort && parserFrame && document.contains(parserFrame)) {
+      return Promise.resolve(parserPort);
+    }
+    if (parserBooting) return parserBooting;
+
+    parserPort = null;
+    if (parserFrame && parserFrame.parentNode) parserFrame.remove();
+
+    parserBooting = new Promise((resolve, reject) => {
+      let settled = false;
+      const url = chrome.runtime.getURL("parser.html");
+      const frame = document.createElement("iframe");
+      frame.src = url;
+      frame.setAttribute("aria-hidden", "true");
+      frame.setAttribute("tabindex", "-1");
+      frame.style.cssText =
+        "position:absolute!important;width:0!important;height:0!important;" +
+        "border:0!important;opacity:0!important;pointer-events:none!important;" +
+        "left:-9999px!important;top:-9999px!important;";
+
+      // An origin, not the page URL. postMessage would extract the origin from
+      // a full URL anyway, but being explicit means the check reads as what it
+      // is: only this extension may receive the port.
+      const origin = new URL(url).origin;
+      const startedAt = Date.now();
+
+      const onMessage = (e) => {
+        // Only this frame, and only the one message we are waiting for.
+        if (e.source !== frame.contentWindow) return;
+        if (!e.data || e.data.guardai !== "parser-ready") return;
+        window.removeEventListener("message", onMessage, true);
+
+        const channel = new MessageChannel();
+        channel.port1.onmessage = (ev) => onParserMessage(ev.data);
+        channel.port1.start();
+        frame.contentWindow.postMessage({ guardai: "parser-port" }, origin, [channel.port2]);
+        parserPort = channel.port1;
+        settled = true;
+        console.info(`[GuardAI] file reader ready in ${Date.now() - startedAt}ms`);
+        resolve(channel.port1);
+      };
+
+      window.addEventListener("message", onMessage, true);
+      frame.onerror = () => {
+        if (!settled) fail("the frame failed to load");
+      };
+      (document.body || document.documentElement).appendChild(frame);
+      parserFrame = frame;
+
+      setTimeout(() => { if (!settled) fail("no handshake within 15s"); }, 15000);
+
+      /**
+       * One place to give up, and it says where to look. This is the failure a
+       * first install is most likely to hit — a missing web_accessible_resources
+       * entry, or a host that refuses the frame — and without the URL in the
+       * message there is nothing on screen or in the console to act on. The
+       * caller turns this into "could not check this file", so a broken reader
+       * asks the user rather than quietly letting the file through.
+       */
+      function fail(why) {
+        window.removeEventListener("message", onMessage, true);
+        console.error(
+          `[GuardAI] file reader did not start (${why}). Frame URL: ${url} — check that ` +
+          `manifest.json lists parser.html under web_accessible_resources, and look for ` +
+          `errors against parser.html on chrome://extensions.`
+        );
+        reject(new Error("The file reader could not start."));
+      }
+    });
+
+    parserBooting.catch(() => {}).then(() => { parserBooting = null; });
+    return parserBooting;
+  }
+
+  /** Route a reply (or a progress tick) back to whoever asked for it. */
+  function onParserMessage(msg) {
+    if (!msg || typeof msg.id === "undefined") return;
+    const entry = filePending.get(String(msg.id));
+    if (!entry) return;
+    if (msg.progress) {
+      if (entry.onProgress) entry.onProgress(msg.progress);
+      return;
+    }
+    filePending.delete(String(msg.id));
+    clearTimeout(entry.timer);
+    entry.resolve(msg);
+  }
+
+  /**
+   * Read and scan one file. Resolves with the parser's verdict; rejects only
+   * if the frame itself could not be reached, which the caller renders as
+   * "could not check" — never as "clean".
+   */
+  async function scanFile(file, onProgress) {
+    if (parserTransport) return parserTransport(file, onProgress);
+    const port = await ensureParser();
+    const bytes = await file.arrayBuffer();
+    const id = String(++fileSeq);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        filePending.delete(id);
+        reject(new Error("Reading this file took too long."));
+      }, 120000);
+      filePending.set(id, { resolve, reject, timer, onProgress });
+      try {
+        // The buffer is transferred, not copied — a 20MB PDF costs nothing here
+        // and this script loses its reference to the bytes at the same moment.
+        port.postMessage({ id, name: file.name, type: file.type, bytes }, [bytes]);
+      } catch (err) {
+        // A dead port (the frame was torn out by a soft navigation) would
+        // otherwise leave this pending until the two-minute timeout, with the
+        // card sitting on "Checking…" the whole time. Fail now instead.
+        clearTimeout(timer);
+        filePending.delete(id);
+        parserPort = null;
+        reject(new Error("The file reader stopped responding."));
+      }
+    });
+  }
+
+  /* ---- interception ---- */
+
+  /** Files from any of the three entry points, or null. */
+  function filesFrom(e) {
+    if (e.type === "change") {
+      const t = e.target;
+      if (!t || t.tagName !== "INPUT" || t.type !== "file") return null;
+      return t.files && t.files.length ? [...t.files] : null;
+    }
+    const dt = e.type === "drop" ? e.dataTransfer : e.clipboardData;
+    if (!dt || !dt.files || !dt.files.length) return null;
+    return [...dt.files];
+  }
+
+  /**
+   * The listener the whole feature rests on. Capture phase, on window, so it
+   * runs before any handler the site registered — React delegates from its
+   * root container, which is below us in the tree, and the content script is
+   * injected at document_start so even a site listening on window registers
+   * after we do.
+   */
+  function onAttach(e) {
+    if (releasingFiles) return;          // our own re-dispatch
+    if (!isActive()) return;             // master off, or unlicensed
+    // Never intercept anything happening inside GuardAI's own UI.
+    if (e.target && typeof e.target.closest === "function" &&
+        e.target.closest(".guardai-panel, .guardai-prompt, .guardai-filecard")) return;
+
+    const files = filesFrom(e);
+    if (!files) return;
+
+    // Already looked at and let through by the user, in this tab.
+    if (files.every((f) => approvedFiles.has(fileKey(f)))) return;
+
+    const input = e.type === "change" ? e.target : null;
+
+    // Take custody. A change event cannot be cancelled — the file is already
+    // in input.files — so stopping propagation is only half of it; the input
+    // has to be emptied too, or anything that reads it later still finds the
+    // file sitting there.
+    e.stopImmediatePropagation();
+    if (e.cancelable) e.preventDefault();
+    if (input) { try { input.files = new DataTransfer().files; } catch (_) { /* older engines */ } }
+    if (e.type === "drop") endDrag(e.target);
+
+    reviewFiles(files, input).catch((err) => {
+      console.warn("[GuardAI] file review failed:", err);
+      showErrorToast("Could not check that file, so it was not attached. Try again, or turn GuardAI off for this one.");
+    });
+  }
+
+  window.addEventListener("change", onAttach, true);
+  window.addEventListener("drop", onAttach, true);
+  window.addEventListener("paste", onAttach, true);
+
+  /**
+   * Put the site's drag overlay away after we have swallowed a drop.
+   *
+   * Every one of these sites raises a full-screen "Drop files here" panel on
+   * dragenter and takes it down in its own drop handler. Stopping the drop is
+   * the whole point of this feature, so that handler never runs and the panel
+   * stays up — over the top of the card asking the user what to do about the
+   * file, which is how it was reported.
+   *
+   * The site is the only thing that knows how to undo its own state, so this
+   * does not hide anything itself. It sends the two events a dropzone resets
+   * on, and lets the site tear its own overlay down:
+   *
+   *   dragleave    what a counter-style dropzone decrements on. Measured on
+   *                chatgpt.com and claude.ai: one dragleave takes the panel
+   *                down, and on ChatGPT it does so even after three
+   *                unmatched dragenters.
+   *   drop, empty  for a dropzone that only resets in its drop handler. It
+   *                carries no files, so the site finds nothing to upload —
+   *                and our own listener above ignores a file-less drop, so
+   *                this cannot come back round.
+   *
+   * Both are sent because the two reset styles are not distinguishable from
+   * out here, and neither is harmful to a site using the other.
+   */
+  function endDrag(target) {
+    const node = target && target.nodeType === 1 ? target : document.body;
+    if (!node) return;
+    try {
+      node.dispatchEvent(new DragEvent("dragleave", {
+        bubbles: true, cancelable: true, dataTransfer: new DataTransfer(),
+      }));
+      node.dispatchEvent(new DragEvent("drop", {
+        bubbles: true, cancelable: true, dataTransfer: new DataTransfer(),
+      }));
+    } catch (_) {
+      /* DragEvent/DataTransfer unavailable — the overlay stays up, which is
+         ugly but harmless; the file is still held either way. */
+    }
+  }
+
+  /* ---- release ---- */
+
+  /**
+   * Which input do we put an approved file back through?
+   *
+   * The one that produced the event, whenever there was one — it is by
+   * definition the input the site is listening to, and no selector can be
+   * wrong about it. ChatGPT has three file inputs, two of them image-only
+   * decoys, and Gemini creates and discards them as you go (twelve in one
+   * session, two live at once), so "the first input on the page" is the same
+   * mistake in a new place.
+   *
+   * Only a drop or a paste leaves us without one, and then the accept list is
+   * the only evidence available: prefer an input that will take this file,
+   * then one that takes anything, and never one that has excluded it.
+   */
+  function pickReleaseInput(files, origin) {
+    if (origin && document.contains(origin)) return origin;
+
+    const inputs = [...document.querySelectorAll('input[type="file"]')]
+      .filter((i) => !i.disabled && !i.closest(".guardai-panel, .guardai-filecard"));
+    if (!inputs.length) return null;
+
+    const score = (input) => {
+      const accept = (input.accept || "").trim();
+      if (!accept) return 1;                        // takes anything
+      const ok = files.every((f) => acceptsFile(accept, f));
+      return ok ? 2 : -1;                           // matches, or excludes
+    };
+    let best = null, bestScore = 0;
+    for (const i of inputs) {
+      const s = score(i);
+      if (s > bestScore) { best = i; bestScore = s; }
+    }
+    return best;
+  }
+
+  /** Does an accept attribute admit this file? */
+  function acceptsFile(accept, file) {
+    const name = (file.name || "").toLowerCase();
+    const mime = (file.type || "").toLowerCase();
+    return accept.split(",").some((rawTerm) => {
+      const term = rawTerm.trim().toLowerCase();
+      if (!term) return false;
+      if (term.startsWith(".")) return name.endsWith(term);
+      if (term.endsWith("/*")) return mime.startsWith(term.slice(0, -1));
+      return mime === term;
+    });
+  }
+
+  /**
+   * Put approved files back. Returns true if the site took them; false if
+   * there was nowhere to put them, in which case the caller tells the user to
+   * attach again — the approval is remembered, so the second attempt passes
+   * straight through.
+   */
+  function releaseFiles(files, origin) {
+    const input = pickReleaseInput(files, origin);
+    for (const f of files) approvedFiles.add(fileKey(f));
+    if (!input) return false;
+
+    try {
+      const dt = new DataTransfer();
+      for (const f of files) dt.items.add(f);
+      releasingFiles = true;
+      input.files = dt.files;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    } catch (err) {
+      console.warn("[GuardAI] could not hand the file back:", err);
+      return false;
+    } finally {
+      // Cleared on a later task so the site's own handler — which may read
+      // the input asynchronously — is still inside the release window.
+      setTimeout(() => { releasingFiles = false; }, 0);
+    }
+  }
+
+  /* ---- the review flow ---- */
+
+  /** Categories MARK_STYLE has no entry for (it covers the maskable ones). */
+  const FILE_CAT_LABELS = {
+    CONFIDENTIAL: "Marked confidential",
+    BUSINESS_CONFIDENTIAL: "Commercially sensitive",
+    HEALTH: "Health / medical",
+    LEGAL: "Legal matter",
+    IMMIGRATION: "Immigration / visa",
+  };
+
+  function catLabel(type) {
+    if (MARK_STYLE[type]) return MARK_STYLE[type].label;
+    if (FILE_CAT_LABELS[type]) return FILE_CAT_LABELS[type];
+    return String(type).toLowerCase().replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+  }
+
+  /**
+   * Hold the files, check them, and decide what the user sees.
+   *
+   * The three outcomes are deliberately not two. "We read it and nothing in it
+   * blocks", "we could not read it", and "we do not read this kind of file"
+   * are different facts, and a file that was never scanned must never be
+   * presented the way a scanned, clean one is.
+   */
+  async function reviewFiles(files, origin) {
+    const card = showFileCard(files);
+    const results = [];
+
+    for (const file of files) {
+      try {
+        const res = await scanFile(file, (p) => card.progress(file, p));
+        results.push({ file, res });
+      } catch (err) {
+        results.push({
+          file,
+          res: {
+            kind: "unknown",
+            label: "File",
+            action: "unreadable",
+            reason: (err && err.message) || "Could not read this file.",
+          },
+        });
+      }
+    }
+
+    const blocked = results.filter((r) => r.res.action === "block");
+    const unchecked = results.filter((r) =>
+      ["unreadable", "unsupported", "too-large"].includes(r.res.action));
+
+    reportFileStats(results);
+
+    if (!blocked.length && !unchecked.length) {
+      // Everything read, nothing worth stopping for. Hand it straight back and
+      // say so briefly — the user still deserves to know a check happened.
+      const ok = releaseFiles(files, origin);
+      card.cleared(results, ok);
+      return;
+    }
+
+    card.decide(results, {
+      onAllow: () => {
+        const ok = releaseFiles(files, origin);
+        card.close();
+        if (!ok) {
+          showErrorToast(
+            files.length === 1
+              ? `Attach ${files[0].name} again and it will go straight through.`
+              : "Attach those files again and they will go straight through."
+          );
+        }
+      },
+      onCancel: () => {
+        card.close();
+      },
+    });
+  }
+
+  /**
+   * Count what was found, never what it was.
+   *
+   * Same two channels as a text catch: local session stats, and — for a
+   * connected company — one event per category through src/company.js, which
+   * rebuilds every body from three checked primitives and drops anything it
+   * cannot verify. A file cannot widen that: only category names reach it.
+   */
+  function reportFileStats(results) {
+    let detected = 0;
+    const categories = new Set();
+    for (const { res } of results) {
+      const s = res.summary;
+      if (!s) continue;
+      detected += s.blockingCount || 0;
+      for (const type of s.blocking || []) categories.add(type);
+    }
+    reportStats({
+      filesChecked: results.length,
+      filesBlocked: results.filter((r) => r.res.action === "block").length,
+      detected,
+    });
+    // reportCompanyCategories reads one field off each entry and builds a
+    // fresh array of strings, so it is handed shapes, not findings.
+    if (categories.size) reportCompanyCategories([...categories].map((type) => ({ type })));
+  }
+
+  /* ---- the card ---- */
+
+  let fileCardEl = null;
+
+  function dismissFileCard() {
+    if (fileCardEl) { fileCardEl.remove(); fileCardEl = null; }
+  }
+
+  function fileSizeText(bytes) {
+    if (!bytes) return "";
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + " KB";
+    return (bytes / 1024 / 1024).toFixed(1) + " MB";
+  }
+
+  /**
+   * One card, three states: checking, cleared, decide. It is created the
+   * instant a file is taken and never left in the first state without a
+   * timeout behind it, because a card stuck on "Checking…" is indistinguishable
+   * from an extension that has silently eaten someone's attachment.
+   */
+  function showFileCard(files) {
+    dismissFileCard();
+    const wrap = document.createElement("div");
+    wrap.className = "guardai-filecard";
+    wrap.setAttribute("role", "alertdialog");
+    wrap.setAttribute("aria-live", "polite");
+    document.body.appendChild(wrap);
+    fileCardEl = wrap;
+
+    const names = files.map((f) => f.name);
+    const head = (title) =>
+      `<div class="guardai-filecard__head">` +
+      `<span class="guardai-filecard__shield">${SHIELD_SVG}</span>` +
+      `<span class="guardai-filecard__title">${escapeHtml(title)}</span>` +
+      `<button class="guardai-filecard__close" aria-label="Dismiss">&times;</button>` +
+      `</div>`;
+
+    const render = (html) => {
+      wrap.innerHTML = html;
+      const close = wrap.querySelector(".guardai-filecard__close");
+      if (close) close.onclick = () => dismissFileCard();
+    };
+
+    render(
+      head(files.length === 1 ? "Checking this file…" : `Checking ${files.length} files…`) +
+        `<ul class="guardai-filecard__files">` +
+        files
+          .map(
+            (f) =>
+              `<li class="guardai-filecard__file" data-name="${escapeHtml(f.name)}">` +
+              `<span class="guardai-filecard__fname">${escapeHtml(f.name)}</span>` +
+              `<span class="guardai-filecard__fmeta">${escapeHtml(fileSizeText(f.size))}</span>` +
+              `</li>`
+          )
+          .join("") +
+        `</ul>` +
+        `<p class="guardai-filecard__note">Reading it on this device. Nothing has been uploaded.</p>`
+    );
+
+    return {
+      /** Per-page progress from the parser, for long PDFs. */
+      progress(file, p) {
+        if (fileCardEl !== wrap) return;
+        const row = wrap.querySelector(
+          `.guardai-filecard__file[data-name="${CSS.escape(file.name)}"] .guardai-filecard__fmeta`
+        );
+        if (row && p && p.total) row.textContent = `page ${p.page} of ${p.total}`;
+      },
+
+      /** Read, nothing blocking. Brief, then gone. */
+      cleared(results, released) {
+        if (fileCardEl !== wrap) return;
+        const counted = results.reduce((n, r) => n + ((r.res.summary && r.res.summary.total) || 0), 0);
+        render(
+          head("Checked — nothing blocked") +
+            `<p class="guardai-filecard__note">` +
+            escapeHtml(
+              counted
+                ? `GuardAI read ${names.length === 1 ? "this file" : "these files"} and found ` +
+                  `${counted} item${counted === 1 ? "" : "s"} of ordinary personal information — ` +
+                  `names, addresses and the like — but nothing it would stop you sending.`
+                : `GuardAI read ${names.length === 1 ? "this file" : "these files"} and found nothing sensitive.`
+            ) +
+            `</p>` +
+            (released ? "" :
+              `<p class="guardai-filecard__note guardai-filecard__note--warn">Attach it again to send it.</p>`)
+        );
+        setTimeout(() => { if (fileCardEl === wrap) dismissFileCard(); }, released ? 4000 : 9000);
+      },
+
+      /** Something blocks, or something could not be read. The user decides. */
+      decide(results, handlers) {
+        if (fileCardEl !== wrap) return;
+        const anyBlocked = results.some((r) => r.res.action === "block");
+
+        const body = results
+          .map(({ file, res }) => {
+            const title =
+              `<div class="guardai-filecard__fhead">` +
+              `<span class="guardai-filecard__fname">${escapeHtml(file.name)}</span>` +
+              `<span class="guardai-filecard__fmeta">${escapeHtml(res.label || "")}` +
+              (res.pages ? `, ${res.pages} page${res.pages === 1 ? "" : "s"}` : "") +
+              `</span></div>`;
+
+            if (res.action === "unsupported") {
+              return (
+                `<li class="guardai-filecard__file guardai-filecard__file--unchecked">${title}` +
+                `<p class="guardai-filecard__why">GuardAI cannot read ${escapeHtml(
+                  (res.label || "this kind of file").toLowerCase()
+                )}s yet, so this one has <strong>not been checked</strong>.</p></li>`
+              );
+            }
+            if (res.action === "too-large") {
+              return (
+                `<li class="guardai-filecard__file guardai-filecard__file--unchecked">${title}` +
+                `<p class="guardai-filecard__why">Too large to check (over ${escapeHtml(
+                  String(res.limitMB || 30)
+                )} MB), so it has <strong>not been checked</strong>.</p></li>`
+              );
+            }
+            if (res.action === "unreadable") {
+              return (
+                `<li class="guardai-filecard__file guardai-filecard__file--unchecked">${title}` +
+                `<p class="guardai-filecard__why">${escapeHtml(
+                  res.reason || "GuardAI could not read this file."
+                )} It has <strong>not been checked</strong>.</p></li>`
+              );
+            }
+
+            const s = res.summary || { blocking: [], other: [], counts: {}, pageHits: {} };
+            const rows = (s.blocking || [])
+              .map((type) => {
+                const pages = (s.pageHits && s.pageHits[type]) || [];
+                const where = pages.length
+                  ? ` <span class="guardai-filecard__where">page${pages.length === 1 ? "" : "s"} ${pages
+                      .slice(0, 6)
+                      .join(", ")}${pages.length > 6 ? "…" : ""}</span>`
+                  : "";
+                return (
+                  `<li class="guardai-filecard__cat">` +
+                  `<span class="guardai-filecard__catname">${escapeHtml(catLabel(type))}</span>` +
+                  `<span class="guardai-filecard__catcount">${s.counts[type]}</span>` +
+                  where +
+                  `</li>`
+                );
+              })
+              .join("");
+
+            const otherTotal = (s.other || []).reduce((n, t) => n + s.counts[t], 0);
+            const other = otherTotal
+              ? `<p class="guardai-filecard__why">Also present, but not blocked: ${escapeHtml(
+                  (s.other || [])
+                    .slice(0, 5)
+                    .map((t) => `${s.counts[t]} ${catLabel(t).toLowerCase()}`)
+                    .join(", ")
+                )}${(s.other || []).length > 5 ? ", and more" : ""}.</p>`
+              : "";
+
+            return (
+              `<li class="guardai-filecard__file guardai-filecard__file--blocked">${title}` +
+              `<ul class="guardai-filecard__cats">${rows}</ul>${other}</li>`
+            );
+          })
+          .join("");
+
+        render(
+          head(anyBlocked ? "Not attached — check this first" : "Not attached — GuardAI could not check it") +
+            `<p class="guardai-filecard__platform">${escapeHtml(
+              `Going to ${CONFIG.name}. ${CONFIG.note || ""}`
+            )}</p>` +
+            `<ul class="guardai-filecard__files">${body}</ul>` +
+            `<div class="guardai-filecard__btns">` +
+            `<button class="guardai-filecard__btn guardai-filecard__btn--cancel">Don't attach</button>` +
+            `<button class="guardai-filecard__btn guardai-filecard__btn--ghost guardai-filecard__btn--allow">Attach anyway</button>` +
+            `</div>`
+        );
+
+        wrap.querySelector(".guardai-filecard__btn--cancel").onclick = handlers.onCancel;
+        wrap.querySelector(".guardai-filecard__btn--allow").onclick = handlers.onAllow;
+      },
+
+      close() { if (fileCardEl === wrap) dismissFileCard(); },
+    };
+  }
+
+  // Test hook: drives the real attachment interception — which input an
+  // approved file is handed back through, what an accept list admits, and the
+  // approval memory — with the parser frame swapped for a plain function.
+  window.GuardAI._fileHooks = {
+    filesFrom,
+    endDrag,
+    acceptsFile,
+    pickReleaseInput,
+    releaseFiles,
+    reviewFiles,
+    fileKey,
+    approvedFiles,
+    catLabel,
+    setParser: (fn) => { parserTransport = fn; },
+    isReleasing: () => releasingFiles,
+    cardEl: () => fileCardEl,
+  };
+
   async function boot() {
     // Load persisted state immediately so enabled/masking/auto-restore are
     // correct as early as possible. These need no DOM, so don't wait for it.

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>GuardAI file reader</title>
+<!--
+  GuardAI's file reader.
+
+  This page is never seen. It is injected as a hidden iframe into an AI chat
+  page and exists to be the one place a user's file is ever opened.
+
+  Why a frame rather than the content script:
+
+    - it is chrome-extension: origin, so it is process-isolated from the host
+      page. A 400-page PDF parses on its own thread and cannot freeze the tab
+      the user is typing in.
+    - it is an extension page, so it gets the extension's CSP and can load
+      modules and workers directly. The host page's CSP does not apply.
+    - the file bytes and the extracted text exist only here. The only thing
+      that crosses back out is a count per category. Nothing else is built.
+
+  The chat page cannot reach it: after the first handshake all traffic runs
+  over a private MessagePort, and this page ignores anything that arrives any
+  other way.
+-->
+</head>
+<body>
+<script src="src/compat.js"></script>
+<script src="src/names-gazetteer.js"></script>
+<script src="src/detector.js"></script>
+<script src="src/filescan.js"></script>
+<script src="vendor/mammoth.browser.min.js"></script>
+<script type="module" src="src/parser.js"></script>
+</body>
+</html>

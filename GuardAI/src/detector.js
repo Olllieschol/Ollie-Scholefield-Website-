@@ -2154,4 +2154,9 @@
   window.GuardAI = window.GuardAI || {};
   window.GuardAI.Detector = Detector;
   window.GuardAI.REASONS = REASONS;
+  // Published so src/filescan.js can size its scanning windows against the
+  // REAL ceiling instead of a copy of it. scan() truncates silently past this,
+  // so a window wider than this value reintroduces the exact tail-loss bug
+  // that chunking exists to fix — and it would do it quietly.
+  window.GuardAI.MAX_SCAN_LENGTH = MAX_SCAN_LENGTH;
 })();

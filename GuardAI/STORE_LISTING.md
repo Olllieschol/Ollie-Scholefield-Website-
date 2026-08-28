@@ -97,23 +97,66 @@ questions about code that has no business being in a privacy extension.
 
 ## web_accessible_resources
 
-**Removed 2026-08-23.** The manifest declared `lib/*` and `models/*` for the
-optional Transformers.js NER layer. Neither directory ships, and in a Web Store
-build a user cannot add them, so the entry pointed at nothing — a loose end for
-a reviewer to ask about, and a way for any page to probe for the extension.
+**Removed 2026-08-23, restored 2026-08-28 for a different resource.**
 
-`src/nlp-detector.js` still references those paths, but it is gated behind
-`ENABLE_NLP = false` and returns before it ever calls `getURL`, so nothing
-breaks and there is no console noise.
+The original entry declared `lib/*` and `models/*` for the optional
+Transformers.js NER layer. Neither directory shipped, so it pointed at nothing
+and was dropped.
 
-**If the model is ever bundled, this must go back**, because a content script
-loading an extension resource needs it:
+It is back because file scanning needs it, and needs exactly one entry:
 
 ```json
 "web_accessible_resources": [
-  { "resources": ["lib/*", "models/*"], "matches": [ ...the AI chat hosts... ] }
+  { "resources": ["parser.html"], "matches": [ ...the 51 AI chat hosts... ] }
 ]
 ```
+
+`parser.html` is the hidden extension-origin iframe the content script injects
+to read an attachment. A frame loaded by a web page has to be declared, so this
+is unavoidable — but only the frame does. Everything the frame then loads
+(`src/*`, `vendor/*`) is a same-origin extension load and is deliberately NOT
+listed, so a page cannot fetch pdf.js or the detector out of the extension.
+
+`matches` is the same 51 AI chat hosts as the content script, not `<all_urls>`,
+so only those pages can detect the extension by requesting the URL. If that
+residual fingerprinting matters later, `"use_dynamic_url": true` rotates the
+resource URL per session; it is not enabled now because it changes how the
+frame URL resolves and that has not been tested against every host.
+
+## Permissions — unchanged
+
+File scanning added **no new `permissions` entry** and no new host permission.
+Reading an attachment is ordinary DOM work on a `File` the user handed to the
+page, and the parsing libraries are bundled rather than fetched. `storage` is
+still the only permission, so the install-time warning string does not change.
+
+## Package size
+
+Went from 185 KB to roughly 900 KB zipped, entirely from three vendored files:
+
+| File | Purpose | Raw |
+|---|---|---|
+| `vendor/pdf.min.mjs` | pdf.js API | 455 KB |
+| `vendor/pdf.worker.min.mjs` | pdf.js parsing worker | 1.26 MB |
+| `vendor/mammoth.browser.min.js` | DOCX raw-text extraction | 636 KB |
+
+Both are Mozilla/Apache-2.0 and BSD-2-Clause respectively, vendored unmodified
+from npm (`pdfjs-dist@6.2.108`, `mammoth@1.12.1`). A reviewer asking about
+minified third-party code should be pointed at those exact versions.
+
+pdf.js 6.2 calls `Uint8Array.prototype.toHex()`, which Chrome shipped in 140.
+`src/compat.js` polyfills it rather than setting `minimum_chrome_version`, so
+the extension still installs and works on older Chrome.
+
+## What the parser frame is for, if a reviewer asks
+
+The file bytes and the extracted text exist only inside `parser.html`, which is
+process-isolated from the chat page. The only thing that crosses back out is a
+count per category — the reply is assembled field by field in `src/parser.js`
+so that handing it an extraction result cannot leak the text through it, the
+same construction as `src/company.js`. There is no `fetch` or `XHR` anywhere in
+the parser, and pdf.js is configured with `useWorkerFetch: false` and
+`isEvalSupported: false` so it cannot reach the network or evaluate code.
 
 ## Listing copy
 

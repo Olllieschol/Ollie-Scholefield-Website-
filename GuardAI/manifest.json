@@ -139,6 +139,7 @@
         "src/detector.js",
         "src/nlp-detector.js",
         "src/masker.js",
+        "src/filescan.js",
         "src/content.js"
       ],
       "css": [
@@ -146,6 +147,66 @@
       ],
       "run_at": "document_start",
       "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "parser.html"
+      ],
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://*.chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://claude.ai/*",
+        "https://*.claude.ai/*",
+        "https://gemini.google.com/*",
+        "https://bard.google.com/*",
+        "https://copilot.microsoft.com/*",
+        "https://bing.com/*",
+        "https://*.bing.com/*",
+        "https://perplexity.ai/*",
+        "https://*.perplexity.ai/*",
+        "https://poe.com/*",
+        "https://*.poe.com/*",
+        "https://character.ai/*",
+        "https://*.character.ai/*",
+        "https://mistral.ai/*",
+        "https://*.mistral.ai/*",
+        "https://chat.mistral.ai/*",
+        "https://groq.com/*",
+        "https://*.groq.com/*",
+        "https://huggingface.co/*",
+        "https://*.huggingface.co/*",
+        "https://you.com/*",
+        "https://*.you.com/*",
+        "https://writesonic.com/*",
+        "https://*.writesonic.com/*",
+        "https://jasper.ai/*",
+        "https://*.jasper.ai/*",
+        "https://copy.ai/*",
+        "https://*.copy.ai/*",
+        "https://rytr.me/*",
+        "https://*.rytr.me/*",
+        "https://pi.ai/*",
+        "https://*.pi.ai/*",
+        "https://inflection.ai/*",
+        "https://*.inflection.ai/*",
+        "https://cohere.com/*",
+        "https://*.cohere.com/*",
+        "https://phind.com/*",
+        "https://*.phind.com/*",
+        "https://deepseek.com/*",
+        "https://*.deepseek.com/*",
+        "https://qwen.ai/*",
+        "https://*.qwen.ai/*",
+        "https://grok.com/*",
+        "https://*.grok.com/*",
+        "https://meta.ai/*",
+        "https://*.meta.ai/*",
+        "https://use.ai/*",
+        "https://*.use.ai/*"
+      ]
     }
   ],
   "content_security_policy": {

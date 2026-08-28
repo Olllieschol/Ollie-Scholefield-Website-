@@ -1260,3 +1260,179 @@ html.guardai-light .guardai-locked__ok { background: #0a0a0a; color: #ffffff; }
 html.guardai-light .guardai-locked__ok:hover { filter: brightness(1.6); }
 html.guardai-light .guardai-locked__close { color: #94a3b8; }
 html.guardai-light .guardai-locked__close:hover { color: #0f172a; }
+
+/* ==========================================================================
+   File attachment card
+   --------------------------------------------------------------------------
+   Shown when GuardAI takes custody of an attachment. Deliberately its own
+   block rather than a modifier on .guardai-prompt: that card is about a
+   message being held mid-send and is draggable so it can be moved off the
+   composer; this one is about a file and appears bottom-right, out of the way
+   of the attachment chip the site is about to render.
+   ========================================================================== */
+.guardai-filecard {
+  /* Centred, not tucked into a corner. This card is a question the user has to
+     answer before their file goes anywhere, so it sits where a question goes.
+     Centring in CSS rather than in JS is deliberate: the card re-renders from
+     "Checking…" to a full category list to "Checked", and each state is a
+     different height. Pixel coordinates would need recomputing after every
+     render and after every window resize; a translate stays centred on its own.
+     The cost is that the pop animation needs its own keyframes, because it
+     animates transform and would otherwise cancel the centring. */
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2147483647;
+  width: 400px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  background: #1a1a1a;
+  color: #f4f4f5;
+  border: 1px solid #2c2c2c;
+  border-radius: 16px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 16px;
+  animation: guardai-filecard-pop 0.16s ease-out;
+}
+/* Same motion as guardai-pop, but carrying the centring translate through every
+   frame. Using guardai-pop here would snap the card to the bottom-right corner
+   for the length of the animation and then jump it back. */
+@keyframes guardai-filecard-pop {
+  from { opacity: 0; transform: translate(-50%, -50%) translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: translate(-50%, -50%) translateY(0) scale(1); }
+}
+.guardai-filecard__head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 12px;
+}
+.guardai-filecard__shield { display: flex; width: 18px; height: 18px; flex: 0 0 auto; }
+.guardai-filecard__shield svg { width: 100%; height: 100%; }
+.guardai-filecard__title { font-weight: 600; font-size: 14px; flex: 1 1 auto; }
+.guardai-filecard__close {
+  all: unset;
+  cursor: pointer;
+  color: #8a8a8a;
+  font-size: 20px;
+  line-height: 1;
+  padding: 0 4px;
+  border-radius: 6px;
+}
+.guardai-filecard__close:hover { color: #f4f4f5; background: #2c2c2c; }
+
+.guardai-filecard__platform {
+  margin: 0 0 12px;
+  color: #a1a1aa;
+  font-size: 12px;
+}
+.guardai-filecard__note {
+  margin: 10px 0 0;
+  color: #a1a1aa;
+  font-size: 12px;
+}
+.guardai-filecard__note--warn { color: #FFD166; }
+
+.guardai-filecard__files { list-style: none; margin: 0; padding: 0; }
+.guardai-filecard__file {
+  padding: 10px 12px;
+  border: 1px solid #2c2c2c;
+  border-radius: 10px;
+  background: #141414;
+}
+.guardai-filecard__file + .guardai-filecard__file { margin-top: 8px; }
+.guardai-filecard__file--blocked { border-color: #5c2b2b; }
+.guardai-filecard__file--unchecked { border-color: #5c4a1f; }
+
+.guardai-filecard__fhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.guardai-filecard__fname {
+  font-weight: 600;
+  word-break: break-all;
+  color: #f4f4f5;
+}
+.guardai-filecard__fmeta { color: #8a8a8a; font-size: 12px; flex: 0 0 auto; }
+.guardai-filecard__why { margin: 6px 0 0; color: #c4c4c8; font-size: 12px; }
+
+.guardai-filecard__cats { list-style: none; margin: 0; padding: 0; }
+.guardai-filecard__cat {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+}
+.guardai-filecard__catname { flex: 0 0 auto; font-weight: 500; }
+.guardai-filecard__catcount {
+  flex: 0 0 auto;
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #3a2020;
+  color: #ff9b9b;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+.guardai-filecard__where { color: #8a8a8a; font-size: 11px; }
+
+.guardai-filecard__btns {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+.guardai-filecard__btn {
+  all: unset;
+  flex: 1 1 0;
+  text-align: center;
+  cursor: pointer;
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  background: #f4f4f5;
+  color: #0a0a0a;
+}
+.guardai-filecard__btn:hover { filter: brightness(0.92); }
+.guardai-filecard__btn--ghost {
+  background: transparent;
+  color: #a1a1aa;
+  border: 1px solid #2c2c2c;
+  font-weight: 500;
+}
+.guardai-filecard__btn--ghost:hover { background: #2c2c2c; color: #f4f4f5; filter: none; }
+
+html.guardai-light .guardai-filecard {
+  background: #ffffff;
+  color: #0f172a;
+  border-color: #e2e8f0;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.18);
+}
+html.guardai-light .guardai-filecard__title { color: #0f172a; }
+html.guardai-light .guardai-filecard__close { color: #64748b; }
+html.guardai-light .guardai-filecard__close:hover { color: #0f172a; background: #f1f5f9; }
+html.guardai-light .guardai-filecard__platform,
+html.guardai-light .guardai-filecard__note,
+html.guardai-light .guardai-filecard__fmeta { color: #64748b; }
+html.guardai-light .guardai-filecard__note--warn { color: #b45309; }
+html.guardai-light .guardai-filecard__file { background: #f8fafc; border-color: #e2e8f0; }
+html.guardai-light .guardai-filecard__file--blocked { border-color: #fca5a5; }
+html.guardai-light .guardai-filecard__file--unchecked { border-color: #fcd34d; }
+html.guardai-light .guardai-filecard__fname { color: #0f172a; }
+html.guardai-light .guardai-filecard__why { color: #475569; }
+html.guardai-light .guardai-filecard__catcount { background: #fee2e2; color: #b91c1c; }
+html.guardai-light .guardai-filecard__where { color: #64748b; }
+html.guardai-light .guardai-filecard__btn { background: #0a0a0a; color: #ffffff; }
+html.guardai-light .guardai-filecard__btn--ghost {
+  background: transparent; color: #475569; border-color: #e2e8f0;
+}
+html.guardai-light .guardai-filecard__btn--ghost:hover { background: #f1f5f9; color: #0f172a; }

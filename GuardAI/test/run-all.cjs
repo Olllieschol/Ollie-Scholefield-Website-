@@ -43,6 +43,10 @@ const SUITES = [
   { name: "activation-ui.cjs (popup licence card + settings activation, all four states)", file: "test/activation-ui.cjs" },
   { name: "backend-contract.cjs (SQL error codes + safety clauses match the extension)", file: "test/backend-contract.cjs" },
   { name: "packaging.cjs (the store zip contains everything, and nothing else)", file: "test/packaging.cjs" },
+
+  { name: "file-chunking.cjs (document-length scanning + the block/pass policy)", file: "test/file-chunking.cjs" },
+  { name: "file-extract.cjs (a real PDF and DOCX, through pdf.js/mammoth into the detector)", file: "test/file-extract.cjs" },
+  { name: "file-attach.cjs (quarantine an attachment, release it through the right input)", file: "test/file-attach.cjs" },
   // Section 1 core bug regressions.
   { name: "section1-bugs.cjs (licence/address/auto-replace)", file: "test/section1-bugs.cjs" },
   { name: "restore-name-integrity.cjs (name cross-contamination)", file: "test/restore-name-integrity.cjs" },
