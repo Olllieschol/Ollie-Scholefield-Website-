@@ -60,7 +60,7 @@
    * genuinely on. The banner names the company where we know it, because
    * someone subject to a rule is entitled to know whose rule it is.
    */
-  function paintPolicyLock(lockedOn, policy) {
+  function paintPolicyLock(lockedOn, lockedMasking, policy) {
     const sw = els.enabled;
     if (sw) {
       sw.disabled = lockedOn;
@@ -71,11 +71,22 @@
           : "Enable or disable GuardAI";
       }
     }
+    if (els.masking) {
+      els.masking.disabled = lockedMasking;
+      const row = els.masking.closest(".gd-row") || els.masking.closest("label");
+      if (row) row.title = lockedMasking ? "Turned on by your organisation" : "";
+    }
     const banner = $("policy-banner");
     if (!banner) return;
-    banner.classList.toggle("is-on", lockedOn);
+    // The banner appears for any lock, not only the master switch: a person
+    // whose categories are pinned deserves the same explanation as one whose
+    // on/off switch is.
+    const any = lockedOn || lockedMasking ||
+      Boolean(policy && policy.mode === "enforced" && policy.locks &&
+              Object.keys(policy.locks).length);
+    banner.classList.toggle("is-on", any);
     const who = $("policy-who");
-    if (who && lockedOn) {
+    if (who && any) {
       who.textContent = (policy && policy.companyName) || "Your organisation";
     }
   }
@@ -106,10 +117,11 @@
     // sitting next to it.
     const policy = data.guardai_policy || null;
     const lockedOn = lockedBy(policy, "enabled");
+    const lockedMasking = lockedBy(policy, "masking");
     const enabled = lockedOn ? true : data.guardai_enabled !== false;
-    const masking = data.guardai_masking_enabled === true;
+    const masking = lockedMasking ? true : data.guardai_masking_enabled === true;
     const autopanel = data.guardai_autopanel_enabled === true; // default OFF
-    paintPolicyLock(lockedOn, policy);
+    paintPolicyLock(lockedOn, lockedMasking, policy);
     const stats = data.guardai_stats || {
       detected: 0,
       masked: 0,
@@ -274,6 +286,10 @@
   });
 
   els.masking.addEventListener("change", async () => {
+    // Same guard as the master switch: the one line that could write false to
+    // a pinned setting refuses, rather than relying on a DOM attribute set
+    // somewhere else.
+    if (els.masking.disabled) { els.masking.checked = true; return; }
     await chrome.storage.local.set({ guardai_masking_enabled: els.masking.checked });
   });
 

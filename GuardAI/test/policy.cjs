@@ -198,8 +198,76 @@ const FLEXIBLE = { mode: "flexible", version: 8, locks: {}, company_name: "Acme 
     P.effective(false, enforced, "enabled");
     check(JSON.stringify(enforced) === before, "effective() does not mutate the policy record");
   }
-  check(P.LOCKABLE.every((n) => P.effective(false, enforced, n) === true),
-    "every lockable switch can only ever be forced ON — there is no remote off switch");
+  check(P.BASE_LOCKS.every((n) => P.effective(false,
+      { mode: "enforced", locks: Object.fromEntries(P.BASE_LOCKS.map((x) => [x, true])), version: 1 },
+      n) === true),
+    "every base switch can only ever be forced ON — there is no remote off switch");
+
+  console.log("\n--- 4b. any setting, not just the fixed three ---");
+  check(P.BASE_LOCKS.join(",") === "enabled,files,images,masking",
+    "the base switches are exactly these four", P.BASE_LOCKS.join(","));
+  for (const noisy of ["aggressive", "aggressive_names", "imageHardStop", "image_hard_stop", "hardstop"]) {
+    check(P.isLockName(noisy) === false,
+      `"${noisy}" is not a lock name — noise settings are not an admin's to pin`);
+  }
+  for (const good of ["cat:NAME_PII", "cat:TFN", "cat:BUSINESS_CONFIDENTIAL", "cat:USERNAME", "cat:ABN"]) {
+    check(P.isLockName(good) === true, `${good} is a valid lock name`);
+  }
+  for (const bad of ["cat:", "cat:lower", "cat:1ABC", "CAT:TFN", "cat: TFN", "", null, 7, {}]) {
+    check(P.isLockName(bad) === false, `${JSON.stringify(bad)} is not a valid lock name`);
+  }
+  check(P.catLock("PHONE") === "cat:PHONE", "catLock() builds the name the server sends");
+
+  {
+    const pol = P.decide(null, { result: "policy", policy: {
+      mode: "enforced", version: 3,
+      locks: { "cat:PASSWORD": true, "cat:TFN": true, masking: true },
+      company_name: "Acme Pty Ltd",
+    } }, T0);
+    check(P.isLocked(pol, "cat:PASSWORD") && P.isLocked(pol, "cat:TFN"),
+      "a category lock survives the reducer");
+    check(P.isLocked(pol, "masking"), "so does the masking lock");
+    check(P.isLocked(pol, "enabled") === false,
+      "and locking categories does NOT imply locking the master switch — each is its own");
+    check(P.anyLocked(pol), "anyLocked sees category-only enforcement");
+  }
+  {
+    const parsed = P.parsePolicy({ mode: "enforced", version: 1, locks: {
+      "cat:TFN": true, "cat:lowercase": true, "aggressive": true,
+      "nonsense": true, "cat:OK": 1, enabled: true,
+    } });
+    check(JSON.stringify(Object.keys(parsed.locks).sort()) === JSON.stringify(["cat:TFN", "enabled"]),
+      "malformed and non-lockable names are dropped on the way in",
+      JSON.stringify(parsed.locks));
+  }
+
+  console.log("\n--- 4c. a category lock REMOVES from the off-list, never adds ---");
+  {
+    const pol = { mode: "enforced", version: 1, locks: { "cat:TFN": true, "cat:PASSWORD": true } };
+    const user = ["TFN", "ORG", "PASSWORD", "MONEY"];
+    const eff = P.effectiveDisabled(user, pol);
+    check(JSON.stringify(eff) === JSON.stringify(["ORG", "MONEY"]),
+      "pinned categories come OUT of the user's off-list", JSON.stringify(eff));
+    check(JSON.stringify(user) === JSON.stringify(["TFN", "ORG", "PASSWORD", "MONEY"]),
+      "and the user's own array is not mutated — their choice survives the lock");
+    check(eff.every((t) => user.includes(t)),
+      "nothing is ever ADDED to the off-list: a lock cannot switch a category off");
+  }
+  check(JSON.stringify(P.effectiveDisabled(["TFN"], null)) === JSON.stringify(["TFN"]),
+    "with no policy the off-list is the user's own, untouched");
+  check(JSON.stringify(P.effectiveDisabled(["TFN"], { mode: "flexible", locks: { "cat:TFN": true } })) === JSON.stringify(["TFN"]),
+    "under Flexible a stored lock does nothing");
+  check(JSON.stringify(P.effectiveDisabled(null, { mode: "enforced", locks: { "cat:TFN": true } })) === "[]",
+    "a missing off-list is an empty one, not a crash");
+  {
+    // The whole point of keeping the two apart: lift the lock, get the choice back.
+    const pol = { mode: "enforced", version: 1, locks: { "cat:TFN": true } };
+    const user = ["TFN", "ORG"];
+    P.effectiveDisabled(user, pol);
+    const after = P.effectiveDisabled(user, { mode: "flexible", locks: {}, version: 2 });
+    check(JSON.stringify(after) === JSON.stringify(["TFN", "ORG"]),
+      "when the policy relaxes, the user's original off-list is exactly as they left it");
+  }
 
   /* ══ PART 2 — the four copies of the rule must agree ═════════════════ */
   console.log("\n--- 5. the lock rule is copied into three classic scripts; all four agree ---");
@@ -233,11 +301,16 @@ const FLEXIBLE = { mode: "flexible", version: 8, locks: {}, company_name: "Acme 
     { mode: "enforced", locks: { enabled: 1 } },
     { mode: "flexible", locks: { enabled: true } },
     { mode: "", locks: { enabled: true } },
+    { mode: "enforced", locks: { masking: true } },
+    { mode: "enforced", locks: { "cat:TFN": true } },
+    { mode: "enforced", locks: { "cat:TFN": true, "cat:PASSWORD": true, masking: true } },
+    { mode: "flexible", locks: { "cat:TFN": true } },
     P.provisional(T0),
   ];
   let mismatch = 0;
   for (const pol of matrix) {
-    for (const name of ["enabled", "files", "images", "nonsense"]) {
+    for (const name of ["enabled", "files", "images", "masking",
+                        "cat:TFN", "cat:PASSWORD", "cat:NAME_PII", "nonsense"]) {
       const want = P.isLocked(pol, name);
       for (const [file, fn] of Object.entries(copies)) {
         if (!fn) continue;
@@ -502,6 +575,72 @@ const FLEXIBLE = { mode: "flexible", version: 8, locks: {}, company_name: "Acme 
       "no lock is ever emitted as false — locks only ever turn protection on");
   }
 
+  console.log("\n--- 12b. the per-setting lock SQL ---");
+  const LOCKS_SQL = path.join(ROOT, "..", "..", "..", "Documents", "guardaigo-landing 44", "supabase", "policy-locks-delta.sql");
+  if (!fs.existsSync(LOCKS_SQL)) {
+    console.log("skip  policy-locks-delta.sql not found beside this checkout");
+  } else {
+    const sql2 = fs.readFileSync(LOCKS_SQL, "utf8");
+    const body2 = (name) => {
+      const i = sql2.indexOf("create or replace function " + name);
+      if (i === -1) return "";
+      const a = sql2.indexOf("as $$", i), b = sql2.indexOf("$$;", a);
+      return a === -1 || b === -1 ? "" : sql2.slice(a, b);
+    };
+
+    // The single most important thing about this file: it must not redefine
+    // refresh_company, because that function's write-free-ness is the reason a
+    // policy poll leaves no trace. Changing guardai_policy_json is enough.
+    check(!/create or replace function refresh_company/.test(sql2),
+      "refresh_company is NOT redefined here — its write-free body is untouched");
+
+    const lockable = body2("guardai_lockable");
+    check(lockable.length > 0, "found guardai_lockable()");
+    for (const base of ["'enabled'", "'files'", "'images'", "'masking'"]) {
+      check(lockable.includes(base), `lockable includes ${base}`);
+    }
+    for (const noisy of ["aggressive", "hard_stop", "hardstop", "image_hard"]) {
+      check(!lockable.includes(noisy),
+        `lockable EXCLUDES ${noisy} — noise settings are not an admin's to pin`);
+    }
+    // Every category the settings page can toggle must be lockable, or an
+    // admin is offered a control the extension cannot honour (or vice versa).
+    const settingsSrc = fs.readFileSync(path.join(ROOT, "settings.js"), "utf8");
+    const gStart = settingsSrc.indexOf("const GROUPS = [");
+    const gBlock = settingsSrc.slice(gStart, settingsSrc.indexOf("\n  ];", gStart));
+    const toggleable = [...gBlock.matchAll(/\{ type: "([A-Z_]+)"/g)].map((m) => m[1]);
+    const missing = toggleable.filter((t) => !lockable.includes("'cat:" + t + "'"));
+    const extra = [...lockable.matchAll(/'cat:([A-Z_]+)'/g)]
+      .map((m) => m[1]).filter((t) => !toggleable.includes(t));
+    check(missing.length === 0,
+      `every toggleable category is lockable (${toggleable.length} of them)`, missing.join(", "));
+    check(extra.length === 0, "and nothing lockable is missing from the settings page", extra.join(", "));
+
+    const setLocks = body2("set_scan_locks");
+    check(/UNKNOWN_LOCK/.test(setLocks) && /guardai_lockable\(\)/.test(setLocks),
+      "set_scan_locks refuses a name outside the allowlist rather than dropping it silently");
+    check(/POLICY_NOT_AVAILABLE/.test(setLocks) && /plan\s*=\s*'individual'/.test(setLocks),
+      "and refuses an individual plan, in SQL");
+    check(/owner_id\s*=\s*auth\.uid\(\)/.test(setLocks),
+      "and resolves the company from the caller");
+    check(/security definer/.test(sql2.slice(sql2.indexOf("function set_scan_locks"), sql2.indexOf("function set_scan_locks") + 400)),
+      "it is security definer");
+    check(/grant execute on function set_scan_locks\(jsonb\) to authenticated/.test(sql2) &&
+          !/grant execute on function set_scan_locks\(jsonb\)[^;]*anon/.test(sql2),
+      "granted to authenticated and never to anon");
+
+    const pj2 = body2("guardai_policy_json");
+    check(/guardai_lockable\(\)/.test(pj2),
+      "reads are filtered through the allowlist too, so retiring a name needs no data migration");
+    check(/c\.plan\s*=\s*'individual'/.test(pj2),
+      "the individual clamp survives the rewrite");
+    check(/jsonb_object_agg\(name, true\)/.test(pj2),
+      "and every lock is emitted as true — there is still no way to express a lock that turns something off");
+
+    check(/default '\["enabled","files","images"\]'::jsonb/.test(sql2),
+      "scan_locks defaults to the trio the previous delta hardcoded, so nobody's enforcement changes by running this");
+  }
+
   /* ══ PART 5 — what the person actually sees ══════════════════════════ */
   console.log("\n--- 13. the two locked surfaces ---");
   {
@@ -606,6 +745,169 @@ const FLEXIBLE = { mode: "flexible", version: 8, locks: {}, company_name: "Acme 
       check(boxes[0].checked === false, "settings: and the user's earlier OFF is shown again, exactly as they left it");
       check(w.document.querySelectorAll(".cat-row__badge--set").length === 0, "settings: no 'set by' badge");
       w.close();
+    }
+
+    // Per-category locks on the settings page.
+    {
+      const catPolicy = {
+        mode: "enforced", locks: { "cat:TFN": true, "cat:PASSWORD": true },
+        version: 9, companyName: "Acme Pty Ltd", fetchedAt: T0, lastError: null,
+      };
+      // The user had switched BOTH pinned categories off before the lock landed.
+      const store = {
+        guardai_disabled_categories: ["TFN", "PASSWORD", "ORG"],
+        guardai_policy: catPolicy,
+      };
+      const w = openPage("settings.html", store);
+      await settle();
+      const box = (t) => w.document.querySelector(`input[data-type="${t}"]`);
+      check(box("TFN") && box("TFN").disabled && box("TFN").checked,
+        "settings: a pinned category is disabled and shows ON");
+      check(box("PASSWORD") && box("PASSWORD").disabled && box("PASSWORD").checked,
+        "settings: so is the second one");
+      check(box("ORG") && !box("ORG").disabled && !box("ORG").checked,
+        "settings: an unpinned category the user switched off is still off, and still theirs to change");
+      check(box("NAME_PII") && !box("NAME_PII").disabled && box("NAME_PII").checked,
+        "settings: an untouched category is unaffected");
+      const badges = [...w.document.querySelectorAll(".cat-row__badge--set")];
+      check(badges.length === 2 && badges.every((b) => /Acme Pty Ltd/.test(b.textContent)),
+        "settings: each pinned category says who set it", String(badges.length));
+      check(JSON.stringify(store.guardai_disabled_categories) === JSON.stringify(["TFN", "PASSWORD", "ORG"]),
+        "settings: rendering a lock does not rewrite the user's off-list");
+
+      // "Disable all" must not try to switch off something pinned.
+      w.document.getElementById("disable-all").click();
+      await settle();
+      const written = store.guardai_disabled_categories;
+      check(!written.includes("TFN") && !written.includes("PASSWORD"),
+        "settings: Disable all leaves pinned categories ON and out of the off-list",
+        JSON.stringify(written));
+      check(written.includes("ORG") && written.includes("NAME_PII"),
+        "settings: and switches off everything it is actually allowed to");
+      check(box("TFN").checked && box("TFN").disabled,
+        "settings: the pinned switch is still on screen as on");
+      w.close();
+    }
+
+    // Masking, which lives in the popup rather than the settings page.
+    {
+      const store = {
+        guardai_enabled: true, guardai_masking_enabled: false,
+        guardai_policy: { mode: "enforced", locks: { masking: true }, version: 4, companyName: "Acme Pty Ltd" },
+      };
+      const w = openPage("popup.html", store);
+      await settle();
+      const m = w.document.getElementById("toggle-masking");
+      check(m.disabled === true, "popup: a pinned masking mode is disabled");
+      check(m.checked === true, "popup: and shows ON despite the user having stored false");
+      check(store.guardai_masking_enabled === false,
+        "popup: their stored choice is untouched");
+      check(w.document.getElementById("toggle-enabled").disabled === false,
+        "popup: pinning masking does NOT pin the master switch — each lock is its own");
+      check(w.document.getElementById("policy-banner").classList.contains("is-on"),
+        "popup: the banner still explains the managed state");
+      w.close();
+    }
+    {
+      // Category-only enforcement: nothing in the popup is disabled, but the
+      // person should still be told they are on a managed install.
+      const w = openPage("popup.html", {
+        guardai_enabled: true,
+        guardai_policy: { mode: "enforced", locks: { "cat:TFN": true }, version: 5, companyName: "Acme Pty Ltd" },
+      });
+      await settle();
+      check(w.document.getElementById("toggle-enabled").disabled === false &&
+            w.document.getElementById("toggle-masking").disabled === false,
+        "popup: category-only enforcement leaves both popup switches usable");
+      check(w.document.getElementById("policy-banner").classList.contains("is-on"),
+        "popup: but the banner appears, because a policy does apply to them");
+      w.close();
+    }
+  }
+
+  /* ══ PART 6 — through the real content.js, end to end ════════════════ */
+  console.log("\n--- 14. a pinned category is actually detected again ---");
+  {
+    const { makeEnv, wait } = require("../harness.cjs");
+
+    // Every category the user can switch off, so the fixture can turn the whole
+    // detector off and let ONE lock turn a single category back on. Isolating
+    // it this way means the assertion cannot be satisfied by some other
+    // detector happening to fire on the same sentence.
+    const settingsSrc = fs.readFileSync(path.join(ROOT, "settings.js"), "utf8");
+    const gStart = settingsSrc.indexOf("const GROUPS = [");
+    const ALL = [...settingsSrc.slice(gStart, settingsSrc.indexOf("\n  ];", gStart))
+      .matchAll(/\{ type: "([A-Z_]+)"/g)].map((m) => m[1]);
+
+    const SENT = "Contact Sarah Chen on 0412 345 678";
+    async function send(env) {
+      env.EDITOR.textContent = SENT;
+      env.EDITOR.dispatchEvent(new env.window.KeyboardEvent(
+        "keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      await wait(140);
+    }
+    const policyRec = (locks) => ({
+      mode: "enforced", locks, version: 11,
+      companyName: "Acme Pty Ltd", fetchedAt: T0, lastError: null,
+    });
+
+    {
+      // Control: everything switched off, no policy. Nothing should be caught.
+      const env = makeEnv({ seed: { guardai_disabled_categories: ALL } });
+      await wait(90);
+      await send(env);
+      check(env.sentMessages.length === 1 && env.sentMessages[0].text === SENT,
+        "control: with every category off, the message goes out exactly as typed");
+    }
+    {
+      // The same off-list, plus a lock on ONE category.
+      const env = makeEnv({ seed: {
+        guardai_disabled_categories: ALL,
+        guardai_policy: policyRec({ "cat:PHONE": true }),
+      } });
+      await wait(90);
+      await send(env);
+      check(env.sentMessages.length === 0,
+        "a pinned category is detected again and the send is held, though the user had switched it off",
+        "sent: " + env.sentMessages.length);
+      check(env.document.querySelectorAll(".guardai-prompt, .guardai-panel").length > 0,
+        "and the user is shown why");
+      check(JSON.stringify(env.storage.guardai_disabled_categories) === JSON.stringify(ALL),
+        "while their off-list on disk is untouched — every other category stays off");
+    }
+    {
+      // A lock on a category the user had NOT switched off changes nothing,
+      // and a lock on one they had does not drag the others back with it.
+      const env = makeEnv({ seed: {
+        guardai_disabled_categories: ALL,
+        guardai_policy: policyRec({ "cat:MEDICARE": true }),
+      } });
+      await wait(90);
+      await send(env);
+      check(env.sentMessages.length === 1,
+        "locking an unrelated category does not resurrect the rest of the off-list");
+    }
+    {
+      // Flexible mode with locks stored: they must do nothing at all.
+      const env = makeEnv({ seed: {
+        guardai_disabled_categories: ALL,
+        guardai_policy: { mode: "flexible", locks: { "cat:PHONE": true }, version: 12 },
+      } });
+      await wait(90);
+      await send(env);
+      check(env.sentMessages.length === 1,
+        "under Flexible a stored category lock is inert, end to end");
+    }
+    {
+      // A policy arriving mid-session, into a tab that is already open.
+      const env = makeEnv({ seed: { guardai_disabled_categories: ALL } });
+      await wait(90);
+      env.window.chrome.storage.local.set({ guardai_policy: policyRec({ "cat:PHONE": true }) });
+      await wait(140);
+      await send(env);
+      check(env.sentMessages.length === 0,
+        "a lock that lands while the tab is open takes effect without a reload",
+        "sent: " + env.sentMessages.length);
     }
   }
 

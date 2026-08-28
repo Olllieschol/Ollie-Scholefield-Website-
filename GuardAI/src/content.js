@@ -184,7 +184,7 @@
   const masker = new Masker();
   // How much text this site's composer takes AS TEXT — measured per site (see
   // src/filescan.js PASTE_LIMITS). Sent with every parser request so the
-  // "Send as safe text" verdict is made against this site's real ceiling.
+  // "Send as masked text" verdict is made against this site's real ceiling.
   const PASTE_LIMIT =
     (window.GuardAI.FileScan && window.GuardAI.FileScan.pasteLimitFor(HOST)) || 9000;
 
@@ -209,8 +209,11 @@
     // entitlement design exists to prevent, arriving through a side door.
     // loadSettings() overwrites this with the real verdict a few ms later.
     aggressiveNames: false, // "Aggressive name detection" — opt-in, default OFF
-    disabledCategories: [], // finding TYPEs the user switched off in "What
-    // GuardAI masks" (settings.html). Empty by default — everything on.
+    disabledCategories: [], // finding TYPEs actually switched off, AFTER the
+    // company policy has been applied. This is what the detector reads.
+    userDisabledCategories: [], // what the user themselves chose, kept apart
+    // so that lifting a lock restores their choice instead of a guess at it.
+    // Empty by default — everything on.
     imageHardStop: false, // "Always stop on images" — opt-in, default OFF.
     // OFF means an image OCR read and found nothing in is attached with a
     // notice rather than a decision. It never affects the other two image
@@ -291,6 +294,20 @@
     return lockedBy(pol, name) ? true : userValue;
   }
 
+  /**
+   * The category off-list with any pinned category removed.
+   *
+   * Mirrors effectiveDisabled() in src/policy.js. Note the direction: the
+   * stored list is an OFF-list, so a lock REMOVES an entry rather than adding
+   * one, which is how a category lock stays inside the rule that nothing can
+   * force a setting off. Returns a filtered copy; the user's array is not
+   * touched, so lifting the lock restores exactly what they chose.
+   */
+  function effectiveDisabledFrom(userList, pol) {
+    var list = Array.isArray(userList) ? userList : [];
+    return list.filter(function (type) { return !lockedBy(pol, "cat:" + type); });
+  }
+
   /** May GuardAI detect, warn and mask? */
   function isActive() {
     return state.enabled && state.entitled;
@@ -335,12 +352,14 @@
       state.fileScanning = effectiveFrom(data.guardai_file_scanning !== false, state.policy, "files");
       state.imageScanning = effectiveFrom(data.guardai_image_scanning !== false, state.policy, "images");
       state.entitled = entitledFrom(data.guardai_entitlement);
-      state.maskingEnabled = data.guardai_masking_enabled === true; // default OFF
+      state.maskingEnabled = effectiveFrom(
+        data.guardai_masking_enabled === true, state.policy, "masking"); // default OFF
       state.autoRestore = data.guardai_auto_restore !== false; // default ON
       state.autoOpenPanel = data.guardai_autopanel_enabled === true; // default OFF
-      state.disabledCategories = Array.isArray(data.guardai_disabled_categories)
+      state.userDisabledCategories = Array.isArray(data.guardai_disabled_categories)
         ? data.guardai_disabled_categories
         : [];
+      state.disabledCategories = effectiveDisabledFrom(state.userDisabledCategories, state.policy);
       detector.setDisabledTypes(state.disabledCategories);
       // Default OFF: only an explicit `true` enables it, so a missing or
       // malformed value can never silently turn on the noisier mode.
@@ -370,10 +389,30 @@
     try {
       const d = await chrome.storage.local.get([
         "guardai_enabled", "guardai_file_scanning", "guardai_image_scanning",
+        "guardai_masking_enabled", "guardai_disabled_categories",
       ]);
       state.enabled = effectiveFrom(d.guardai_enabled !== false, state.policy, "enabled");
       state.fileScanning = effectiveFrom(d.guardai_file_scanning !== false, state.policy, "files");
       state.imageScanning = effectiveFrom(d.guardai_image_scanning !== false, state.policy, "images");
+
+      const wasMasking = state.maskingEnabled;
+      state.maskingEnabled = effectiveFrom(
+        d.guardai_masking_enabled === true, state.policy, "masking");
+      // Same follow-up the masking toggle does on its own: the per-message
+      // buttons belong to one mode and not the other, so a policy that moves
+      // masking has to take them away or put them back rather than leaving
+      // stale ones on screen.
+      if (state.maskingEnabled !== wasMasking) {
+        if (state.maskingEnabled) removeMessageToggles();
+        else scheduleDecorate();
+      }
+
+      state.userDisabledCategories = Array.isArray(d.guardai_disabled_categories)
+        ? d.guardai_disabled_categories
+        : [];
+      state.disabledCategories = effectiveDisabledFrom(state.userDisabledCategories, state.policy);
+      detector.setDisabledTypes(state.disabledCategories);
+
       applyEnabledState();
     } catch (_) {
       // Storage unreadable. Leave every value exactly as it is rather than
@@ -413,7 +452,10 @@
       applyEnabledState();
     }
     if (changes.guardai_masking_enabled) {
-      state.maskingEnabled = changes.guardai_masking_enabled.newValue === true;
+      // Through the policy, not raw: a pinned masking mode stays on even if
+      // something writes false to the key it shadows.
+      state.maskingEnabled = effectiveFrom(
+        changes.guardai_masking_enabled.newValue === true, state.policy, "masking");
       // Take the per-message toggle buttons away / put them back immediately,
       // rather than leaving stale ones on screen until the next render.
       if (state.maskingEnabled) removeMessageToggles();
@@ -437,9 +479,12 @@
       state.imageHardStop = changes.guardai_image_hard_stop.newValue === true;
     }
     if (changes.guardai_disabled_categories) {
-      state.disabledCategories = Array.isArray(changes.guardai_disabled_categories.newValue)
+      state.userDisabledCategories = Array.isArray(changes.guardai_disabled_categories.newValue)
         ? changes.guardai_disabled_categories.newValue
         : [];
+      // Filtered through the policy, so a category an admin pinned cannot be
+      // switched off by anything that writes this key.
+      state.disabledCategories = effectiveDisabledFrom(state.userDisabledCategories, state.policy);
       detector.setDisabledTypes(state.disabledCategories);
     }
     if (changes.guardai_mapping) {
@@ -4599,7 +4644,7 @@
   }
 
   /**
-   * Pull a document's text out for "Send as safe text". Runs only on the
+   * Pull a document's text out for "Send as masked text". Runs only on the
    * user's click, re-extracts from the bytes (the frame keeps nothing), and
    * the frame re-checks suitability before releasing anything — so this
    * resolves to { ok:true, text } or { ok:false, why }, never text from a
@@ -4970,7 +5015,7 @@
     if (categories.size) reportCompanyCategories([...categories].map((type) => ({ type })));
   }
 
-  /* ---- "Send as safe text" ---- */
+  /* ---- "Send as masked text" ---- */
 
   /**
    * Mask a document's text with the SAME pipeline as a typed message:
@@ -5377,7 +5422,7 @@
         // what it could read" is the whole truth available.
         const onlyImgNothing = results.every((r) => r.res.action === "img-nothing");
 
-        /* "Send as safe text": extract the text, mask it with the same rules,
+        /* "Send as masked text": extract the text, mask it with the same rules,
            send it as a message instead of attaching the file. Offered ONLY
            when the parser's suitability check says the extraction genuinely
            reads — a jumbled paste is worse than a block, because the user
@@ -5392,10 +5437,10 @@
         const safeTextRow =
           single && suit && suit.offer
             ? `<div class="guardai-filecard__btns guardai-filecard__btns--safetext">` +
-              `<button class="guardai-act guardai-act--primary guardai-filecard__btn--safetext">Send as safe text instead</button>` +
+              `<button class="guardai-act guardai-act--primary guardai-filecard__btn--safetext">Send as masked text</button>` +
               `</div><p class="guardai-filecard__textwhy"></p>`
             : single && suit && !suit.offer
-              ? `<p class="guardai-filecard__textwhy">${escapeHtml('"Send as safe text" is not available: ' + suit.why)}</p>`
+              ? `<p class="guardai-filecard__textwhy">${escapeHtml('"Send as masked text" is not available: ' + suit.why)}</p>`
               : "";
 
         const body = results
@@ -5535,7 +5580,7 @@
             await startSafeText(results[0].file, statusEl);
             if (fileCardEl === wrap) {
               safeBtn.disabled = false;
-              safeBtn.textContent = "Send as safe text instead";
+              safeBtn.textContent = "Send as masked text";
             }
           };
         }

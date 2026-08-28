@@ -71,6 +71,21 @@
     const who = pol && pol.companyName ? pol.companyName : "your organisation";
     return "Set by " + who + ".";
   }
+
+  /* The policy last read from storage. Cached rather than re-read inside
+     render(), which is synchronous and called from three places. Refreshed by
+     loadPolicy() before every render and by the storage listener. */
+  let policy = null;
+  async function loadPolicy() {
+    try {
+      const d = await chrome.storage.local.get([POLICY_KEY]);
+      policy = d[POLICY_KEY] || null;
+    } catch (_) { /* leave the last known value */ }
+    return policy;
+  }
+
+  /** The category lock name, matching catLock() in src/policy.js. */
+  const catLock = (type) => "cat:" + type;
   // MODE toggles are not categories. They have their own storage keys because
   // the category list is an OFF-list (absence = enabled), which structurally
   // cannot express a DEFAULT-OFF setting. Rendered in their own section, and
@@ -302,6 +317,11 @@
       list.className = "group__list";
 
       for (const cat of group.categories) {
+        const locked = lockedBy(policy, catLock(cat.type));
+        // A locked category reads ON whatever the stored off-list says. The
+        // off-list itself is never rewritten — see effectiveDisabled() in
+        // src/policy.js for why a lock removes an entry rather than adding one.
+        const on = locked ? true : !disabledSet.has(cat.type);
         const row = document.createElement("div");
         row.className = "cat-row";
         row.innerHTML =
@@ -309,9 +329,12 @@
           `<span class="cat-row__title">${escapeHtml(cat.title)}</span>` +
           `<span class="cat-row__desc">${escapeHtml(cat.desc)}</span>` +
           `<span class="cat-row__badge">${cat.masked ? "Auto-masked" : "Flagged only"}</span>` +
+          (locked
+            ? `<span class="cat-row__badge cat-row__badge--set">${escapeHtml(setByLine(policy))}</span>`
+            : "") +
           `</div>` +
-          `<label class="gd-switch" title="${cat.masked ? "Detect and auto-mask" : "Detect and flag"} ${escapeHtml(cat.title.toLowerCase())}">` +
-          `<input type="checkbox" data-type="${cat.type}" ${disabledSet.has(cat.type) ? "" : "checked"} />` +
+          `<label class="gd-switch" title="${locked ? "Turned on by your organisation" : (cat.masked ? "Detect and auto-mask" : "Detect and flag") + " " + escapeHtml(cat.title.toLowerCase())}">` +
+          `<input type="checkbox" data-type="${cat.type}" ${on ? "checked" : ""}${locked ? " disabled" : ""} />` +
           `<span class="gd-slider"></span>` +
           `</label>`;
         list.appendChild(row);
@@ -326,11 +349,17 @@
     });
   }
 
-  /** Read every checkbox's current state and write the OFF list to storage. */
+  /** Read every checkbox's current state and write the OFF list to storage.
+   *  A pinned category is skipped outright: it is rendered disabled and
+   *  checked, so it could not reach this list anyway, but saying so here means
+   *  the one function that writes the off-list cannot put a locked category
+   *  into it however it is called. */
   async function persistFromCheckboxes() {
     const disabled = [];
     groupsEl.querySelectorAll('input[type="checkbox"]').forEach((box) => {
-      if (!box.checked) disabled.push(box.getAttribute("data-type"));
+      const type = box.getAttribute("data-type");
+      if (lockedBy(policy, catLock(type))) return;
+      if (!box.checked) disabled.push(type);
     });
     await chrome.storage.local.set({ [STORAGE_KEY]: disabled });
   }
@@ -344,9 +373,12 @@
     render(new Set());
   });
   document.getElementById("disable-all").addEventListener("click", async () => {
-    const all = allTypes();
-    await chrome.storage.local.set({ [STORAGE_KEY]: all });
-    render(new Set(all));
+    // Everything the user is actually allowed to switch off. A pinned category
+    // is left out, so "Disable all" turns off what it can and leaves the rest
+    // visibly on rather than appearing to fail.
+    const off = allTypes().filter((t) => !lockedBy(policy, catLock(t)));
+    await chrome.storage.local.set({ [STORAGE_KEY]: off });
+    render(new Set(off));
   });
 
   document.getElementById("back-link").addEventListener("click", (e) => {
@@ -590,6 +622,7 @@
     } catch (_) {
       /* storage unavailable — render with everything on, the safe default */
     }
+    await loadPolicy();
     render(new Set(disabled));
     await renderSwitches();
     await renderModes();
@@ -602,7 +635,15 @@
     // An admin switching the company between Flexible and Enforced, arriving
     // while this page is open. Re-rendering is the whole update: the switch
     // greys out or comes back, with no reload and nothing for the user to do.
-    if (changes[POLICY_KEY]) renderSwitches();
+    if (changes[POLICY_KEY]) {
+      policy = changes[POLICY_KEY].newValue || null;
+      renderSwitches();
+      // One policy change can move many category switches at once, so the
+      // whole list is repainted from what is currently stored.
+      chrome.storage.local.get([STORAGE_KEY]).then((d) => {
+        render(new Set(Array.isArray(d[STORAGE_KEY]) ? d[STORAGE_KEY] : []));
+      }).catch(() => {});
+    }
     if (!changes[STORAGE_KEY]) return;
     const newVal = changes[STORAGE_KEY].newValue;
     render(new Set(Array.isArray(newVal) ? newVal : []));

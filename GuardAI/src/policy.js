@@ -58,10 +58,40 @@
  * ---------------------------------------------------------------------------
  */
 
-/** Every switch an admin may pin. A lock naming anything else is ignored,
- *  which is what lets the server add a fourth lock before the extension that
- *  understands it has shipped. */
-export const LOCKABLE = Object.freeze(["enabled", "files", "images"]);
+/**
+ * The switches that are not categories. Each pins one named setting.
+ *
+ * Deliberately absent, and they should stay absent: "aggressive name
+ * detection" and "always stop on images". Both change how NOISY Guard4AI is,
+ * not how protective — aggressive names trades false positives for reach, and
+ * the image hard stop only decides whether a screenshot that read CLEAN waits
+ * for you. An admin pinning either is tuning someone else's interruptions,
+ * which is not what enforcement is for.
+ */
+export const BASE_LOCKS = Object.freeze(["enabled", "files", "images", "masking"]);
+
+/**
+ * A detection category is locked by name, `cat:NAME_PII` and so on.
+ *
+ * There is deliberately NO list of valid category names here. The server is
+ * the only place that has to refuse a bad one, because the server is the only
+ * place a lock is written; a lock naming a category this build has never heard
+ * of simply never matches anything it renders, which is the same
+ * forward-compatible behaviour an unknown base lock already has. Keeping the
+ * list in one place instead of three is worth more than a client-side check
+ * that can only ever agree with the server or be wrong.
+ */
+const CAT_LOCK = /^cat:[A-Z][A-Z0-9_]*$/;
+
+/** The lock name that pins one detection category on. */
+export function catLock(type) {
+  return "cat:" + String(type || "");
+}
+
+/** Is this a name a lock is allowed to carry at all? */
+export function isLockName(name) {
+  return typeof name === "string" && (BASE_LOCKS.includes(name) || CAT_LOCK.test(name));
+}
 
 const MODES = Object.freeze(["flexible", "enforced"]);
 
@@ -97,11 +127,16 @@ export function parsePolicy(raw) {
   if (!MODES.includes(raw.mode)) return null;
   if (!Number.isFinite(raw.version)) return null;
 
-  // Only known locks are carried through, and only an explicit `true` counts.
-  // A truthy-but-not-true value is a malformed payload, not a lock.
+  // Only well-formed lock names are carried through, and only an explicit
+  // `true` counts. A truthy-but-not-true value is a malformed payload, not a
+  // lock, and a name that is neither a base switch nor a `cat:TYPE` is
+  // dropped rather than stored — so nothing downstream has to wonder whether
+  // an arbitrary string in this object means something.
   const locks = {};
   const src = raw.locks && typeof raw.locks === "object" ? raw.locks : {};
-  for (const name of LOCKABLE) if (src[name] === true) locks[name] = true;
+  for (const name of Object.keys(src)) {
+    if (src[name] === true && isLockName(name)) locks[name] = true;
+  }
 
   return {
     mode: raw.mode,
@@ -179,7 +214,7 @@ export function isLocked(pol, name) {
  * The value a switch actually has, given what the user chose and what their
  * admin pinned. This is the only function that should ever decide it.
  *
- * A locked switch always reads true: every lock in LOCKABLE turns protection
+ * A locked switch always reads true: every lock turns protection
  * ON, and there is deliberately no way for an admin to force one OFF. An
  * "enforced" mode that could disable someone's scanning would be a remote
  * kill switch for a privacy tool, which is not a product we are willing to
@@ -189,9 +224,27 @@ export function effective(userValue, pol, name) {
   return isLocked(pol, name) ? true : userValue;
 }
 
+/**
+ * The user's category off-list, with any category their admin pinned removed.
+ *
+ * This is how a category lock stays inside the "never force a setting OFF"
+ * rule. The stored list is an OFF-list, so a lock does not add to it — it
+ * takes an entry OUT, which is the direction that turns detection back on.
+ * There is no shape of policy that can put a category into someone's off-list.
+ *
+ * The user's own array is never rewritten; this returns a filtered copy, so
+ * the moment a lock is lifted their original choice is still there.
+ */
+export function effectiveDisabled(userList, pol) {
+  const list = Array.isArray(userList) ? userList : [];
+  if (!anyLocked(pol)) return list.slice();
+  return list.filter((type) => !isLocked(pol, catLock(type)));
+}
+
 /** True if anything at all is pinned, for "is this a managed install" UI. */
 export function anyLocked(pol) {
-  return LOCKABLE.some((n) => isLocked(pol, n));
+  if (!pol || pol.mode !== "enforced" || !pol.locks) return false;
+  return Object.keys(pol.locks).some((n) => isLocked(pol, n));
 }
 
 /**
