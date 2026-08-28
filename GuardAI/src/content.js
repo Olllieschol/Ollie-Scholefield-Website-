@@ -182,6 +182,11 @@
   const detector = new Detector();
   const nlp = new NlpDetector();
   const masker = new Masker();
+  // How much text this site's composer takes AS TEXT — measured per site (see
+  // src/filescan.js PASTE_LIMITS). Sent with every parser request so the
+  // "Send as safe text" verdict is made against this site's real ceiling.
+  const PASTE_LIMIT =
+    (window.GuardAI.FileScan && window.GuardAI.FileScan.pasteLimitFor(HOST)) || 9000;
 
   const state = {
     enabled: true, // master on/off (synced from storage)
@@ -4388,7 +4393,7 @@
    * "could not check" — never as "clean".
    */
   async function scanFile(file, onProgress) {
-    if (parserTransport) return parserTransport(file, onProgress);
+    if (parserTransport) return parserTransport(file, onProgress, "scan");
     const port = await ensureParser();
     const bytes = await file.arrayBuffer();
     const id = String(++fileSeq);
@@ -4401,11 +4406,43 @@
       try {
         // The buffer is transferred, not copied — a 20MB PDF costs nothing here
         // and this script loses its reference to the bytes at the same moment.
-        port.postMessage({ id, name: file.name, type: file.type, bytes }, [bytes]);
+        port.postMessage({ id, name: file.name, type: file.type, bytes, limit: PASTE_LIMIT }, [bytes]);
       } catch (err) {
         // A dead port (the frame was torn out by a soft navigation) would
         // otherwise leave this pending until the two-minute timeout, with the
         // card sitting on "Checking…" the whole time. Fail now instead.
+        clearTimeout(timer);
+        filePending.delete(id);
+        parserPort = null;
+        reject(new Error("The file reader stopped responding."));
+      }
+    });
+  }
+
+  /**
+   * Pull a document's text out for "Send as safe text". Runs only on the
+   * user's click, re-extracts from the bytes (the frame keeps nothing), and
+   * the frame re-checks suitability before releasing anything — so this
+   * resolves to { ok:true, text } or { ok:false, why }, never text from a
+   * document the check refused.
+   */
+  async function extractFileText(file) {
+    if (parserTransport) return parserTransport(file, null, "extract");
+    const port = await ensureParser();
+    const bytes = await file.arrayBuffer();
+    const id = String(++fileSeq);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        filePending.delete(id);
+        reject(new Error("Reading this file took too long."));
+      }, 120000);
+      filePending.set(id, { resolve, reject, timer });
+      try {
+        port.postMessage(
+          { id, name: file.name, type: file.type, bytes, mode: "extract", limit: PASTE_LIMIT },
+          [bytes]
+        );
+      } catch (err) {
         clearTimeout(timer);
         filePending.delete(id);
         parserPort = null;
@@ -4694,6 +4731,185 @@
     if (categories.size) reportCompanyCategories([...categories].map((type) => ({ type })));
   }
 
+  /* ---- "Send as safe text" ---- */
+
+  /**
+   * Mask a document's text with the SAME pipeline as a typed message:
+   * scanText (detector + NLP + the user's category toggles), the masker's own
+   * previewFake for stand-ins, one fake per distinct real value.
+   *
+   * Deliberately does NOT register the mappings — previewFake exists exactly
+   * so a preview can be shown without committing anything. Registration
+   * happens in insertDocText, only after the masked text has fully landed in
+   * the composer: a preview the user cancels leaves no trace in the mapping
+   * store, and a fill that comes up short registers nothing it cannot honour.
+   */
+  async function maskDocumentText(text) {
+    const findings = await scanText(text);
+    const usable = findings.filter((f) => masker.isMaskable(f.type));
+    const fakeByReal = new Map();
+    const usedFakes = new Set();
+    const spans = [];
+    for (const f of usable) {
+      let entry = fakeByReal.get(f.value);
+      if (!entry) {
+        entry = { fake: masker.previewFake(f.type, f.value, usedFakes), type: f.type };
+        fakeByReal.set(f.value, entry);
+        usedFakes.add(entry.fake);
+      }
+      spans.push({ start: f.index, end: f.index + f.value.length, value: f.value, fake: entry.fake });
+    }
+    spans.sort((a, b) => a.start - b.start);
+    let masked = text;
+    for (let i = spans.length - 1; i >= 0; i--) {
+      const it = spans[i];
+      if (masked.slice(it.start, it.end) === it.value) {
+        masked = masked.slice(0, it.start) + it.fake + masked.slice(it.end);
+      } else {
+        // Index drifted (overlapping earlier replacement) — swap by value.
+        masked = masked.split(it.value).join(it.fake);
+      }
+    }
+    const items = [...fakeByReal.entries()].map(([real, e]) => ({ type: e.type, real, fake: e.fake }));
+    return { masked, items, findingsCount: usable.length };
+  }
+
+  /**
+   * Put the masked text into the composer. Returns true only when the WHOLE
+   * text verifiably landed — Gemini's composer hard-caps at 32,000 characters
+   * and truncates SILENTLY past it (measured), and a partial paste the user
+   * cannot see is this feature's worst failure. So: fill through the same
+   * typeText the mask flow uses, verify with fullyLanded, and only then
+   * register the mappings that make the reply unmaskable.
+   */
+  async function insertDocText(masked, items) {
+    const editor = findEditor();
+    if (!editor) {
+      showErrorToast("Could not find the chat input — click in the chat box and try again.");
+      return false;
+    }
+    suppressSends = true;
+    let ok;
+    try {
+      ok = await typeText(editor, masked);
+    } finally {
+      suppressSends = false;
+    }
+    const live = liveEditor() || editor;
+    if (!ok || !fullyLanded(live, masked)) {
+      showErrorToast(
+        "The text didn't fully load into the chat box, so nothing was sent. Check the box before sending anything."
+      );
+      return false;
+    }
+    for (const it of items) masker.registerManual(it.real, it.fake, it.type);
+    await masker.save();
+    logActivity("mask", items);
+    reportStats({ masked: items.length });
+    reportCompanyCategories(items);
+    // The user's own Enter on this exact text passes without a re-scan, the
+    // same as after Mask & Edit.
+    state.lastMaskedText = masked;
+    return true;
+  }
+
+  /* ---- the preview ---- */
+
+  let filePreviewEl = null;
+
+  function dismissFilePreview() {
+    if (filePreviewEl) { filePreviewEl.remove(); filePreviewEl = null; }
+  }
+
+  /**
+   * The mandatory look-before-it-goes step. The masked text is shown in full
+   * and nothing touches the composer until the user says so — they judge the
+   * output, not our confidence in it. The body is set with textContent,
+   * never markup, so document text cannot smuggle HTML into our own UI.
+   */
+  function showSafeTextPreview(file, masked, items, handlers) {
+    dismissFilePreview();
+    const wrap = document.createElement("div");
+    wrap.className = "guardai-fileprev";
+    wrap.setAttribute("role", "dialog");
+    wrap.setAttribute("aria-label", "Check the text before it is sent");
+
+    const counts = {};
+    for (const it of items) counts[it.type] = (counts[it.type] || 0) + 1;
+    const breakdown = Object.keys(counts)
+      .sort((a, b) => counts[b] - counts[a])
+      .map((t) => `${counts[t]} ${catLabel(t).toLowerCase()}`)
+      .join(", ");
+
+    wrap.innerHTML =
+      `<div class="guardai-fileprev__grip" title="Drag to move" aria-label="Drag to move"></div>` +
+      `<div class="guardai-fileprev__head">` +
+      `<span class="guardai-fileprev__shield">${SHIELD_SVG}</span>` +
+      `<span class="guardai-fileprev__title">Check what will be sent</span>` +
+      `<button class="guardai-fileprev__close" aria-label="Cancel">&times;</button>` +
+      `</div>` +
+      `<p class="guardai-fileprev__meta">${escapeHtml(file.name)} — ` +
+      escapeHtml(items.length
+        ? `masked ${items.length} item${items.length === 1 ? "" : "s"}: ${breakdown}.`
+        : "nothing needed masking.") +
+      ` This text replaces the file; the reply unmasks as usual.</p>` +
+      `<div class="guardai-fileprev__text" tabindex="0"></div>` +
+      `<div class="guardai-fileprev__btns">` +
+      `<button class="guardai-fileprev__btn guardai-fileprev__btn--insert">Insert into chat</button>` +
+      `<button class="guardai-fileprev__btn guardai-fileprev__btn--ghost guardai-fileprev__btn--cancel">Cancel</button>` +
+      `</div>`;
+    wrap.querySelector(".guardai-fileprev__text").textContent = masked;
+
+    document.body.appendChild(wrap);
+    filePreviewEl = wrap;
+    makePromptDraggable(wrap, {
+      grip: ".guardai-fileprev__grip",
+      head: ".guardai-fileprev__head",
+      draggingClass: "guardai-fileprev--dragging",
+    });
+    placeFileCard(wrap);
+
+    const done = () => dismissFilePreview();
+    wrap.querySelector(".guardai-fileprev__close").onclick = () => { done(); handlers.onCancel(); };
+    wrap.querySelector(".guardai-fileprev__btn--cancel").onclick = () => { done(); handlers.onCancel(); };
+    wrap.querySelector(".guardai-fileprev__btn--insert").onclick = async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      btn.textContent = "Inserting…";
+      const ok = await handlers.onInsert();
+      if (ok) done();
+      else { btn.disabled = false; btn.textContent = "Insert into chat"; }
+    };
+  }
+
+  /**
+   * The whole click flow: extract (the frame re-checks suitability before
+   * releasing anything), mask, preview, and only on the user's confirm,
+   * insert. The card stays up behind the preview so Cancel falls back to the
+   * ordinary attach decision.
+   */
+  async function startSafeText(file, statusEl) {
+    try {
+      const ex = await extractFileText(file);
+      if (!ex || ex.ok !== true || typeof ex.text !== "string") {
+        if (statusEl) statusEl.textContent = (ex && ex.why) || "Could not read the text out of this file.";
+        return;
+      }
+      const { masked, items } = await maskDocumentText(ex.text);
+      showSafeTextPreview(file, masked, items, {
+        onInsert: async () => {
+          const ok = await insertDocText(masked, items);
+          if (ok) dismissFileCard();
+          return ok;
+        },
+        onCancel: () => {},
+      });
+    } catch (err) {
+      console.warn("[GuardAI] send-as-text failed:", err);
+      if (statusEl) statusEl.textContent = "Could not read the text out of this file.";
+    }
+  }
+
   /* ---- the card ---- */
 
   let fileCardEl = null;
@@ -4857,6 +5073,27 @@
         if (fileCardEl !== wrap) return;
         const anyBlocked = results.some((r) => r.res.action === "block");
 
+        /* "Send as safe text": extract the text, mask it with the same rules,
+           send it as a message instead of attaching the file. Offered ONLY
+           when the parser's suitability check says the extraction genuinely
+           reads — a jumbled paste is worse than a block, because the user
+           sends it without noticing and gets a confidently wrong answer.
+           One file at a time: concatenating several documents into one
+           message has no honest preview. When the option is withheld on a
+           readable-looking file, the reason appears in one plain line —
+           silence is worse than a reason. The same line doubles as the
+           status row if extraction later fails. */
+        const single = results.length === 1;
+        const suit = single ? results[0].res.suit : null;
+        const safeTextRow =
+          single && suit && suit.offer
+            ? `<div class="guardai-filecard__btns guardai-filecard__btns--safetext">` +
+              `<button class="guardai-filecard__btn guardai-filecard__btn--safetext">Send as safe text instead</button>` +
+              `</div><p class="guardai-filecard__textwhy"></p>`
+            : single && suit && !suit.offer
+              ? `<p class="guardai-filecard__textwhy">${escapeHtml('"Send as safe text" is not available: ' + suit.why)}</p>`
+              : "";
+
         const body = results
           .map(({ file, res }) => {
             const title =
@@ -4933,6 +5170,7 @@
               `Going to ${CONFIG.name}. ${CONFIG.note || ""}`
             )}</p>` +
             `<ul class="guardai-filecard__files">${body}</ul>` +
+            safeTextRow +
             `<div class="guardai-filecard__btns">` +
             `<button class="guardai-filecard__btn guardai-filecard__btn--cancel">Don't attach</button>` +
             `<button class="guardai-filecard__btn guardai-filecard__btn--ghost guardai-filecard__btn--allow">Attach anyway</button>` +
@@ -4941,6 +5179,19 @@
 
         wrap.querySelector(".guardai-filecard__btn--cancel").onclick = handlers.onCancel;
         wrap.querySelector(".guardai-filecard__btn--allow").onclick = handlers.onAllow;
+        const safeBtn = wrap.querySelector(".guardai-filecard__btn--safetext");
+        if (safeBtn) {
+          safeBtn.onclick = async () => {
+            safeBtn.disabled = true;
+            safeBtn.textContent = "Reading the document…";
+            const statusEl = wrap.querySelector(".guardai-filecard__textwhy");
+            await startSafeText(results[0].file, statusEl);
+            if (fileCardEl === wrap) {
+              safeBtn.disabled = false;
+              safeBtn.textContent = "Send as safe text instead";
+            }
+          };
+        }
       },
 
       close() { if (fileCardEl === wrap) dismissFileCard(); },
@@ -4962,6 +5213,11 @@
     approvedFiles,
     catLabel,
     setParser: (fn) => { parserTransport = fn; },
+    maskDocumentText,
+    insertDocText,
+    startSafeText,
+    previewEl: () => filePreviewEl,
+    getLastMaskedText: () => state.lastMaskedText,
     isReleasing: () => releasingFiles,
     cardEl: () => fileCardEl,
   };

@@ -105,6 +105,36 @@ function loadPage(bodyHTML, url = "https://chatgpt.com/c/x", seed = {}) {
   };
   if (!w.InputEvent) w.InputEvent = w.Event;
   installFileEnv(w);
+  // jsdom's innerText reads empty (it is layout-dependent and jsdom has no
+  // layout), which makes getEditorText() see nothing in a visibly full
+  // editor — typeText then reports failure after actually succeeding. The
+  // silent-mode/panel suites map innerText to textContent on their editor for
+  // the same reason; here it is prototype-level because content.js re-finds
+  // editor nodes.
+  Object.defineProperty(w.HTMLElement.prototype, "innerText", {
+    configurable: true,
+    get() { return this.textContent; },
+    set(v) { this.textContent = v; },
+  });
+  // execCommand model (jsdom has none) — the harness.cjs pattern. Lets the
+  // REAL typeText fill the contenteditable, and records anything that would
+  // submit, so "inserted but never sent" is assertable.
+  w.__submits = [];
+  w.document.execCommand = function (cmd, ui, value) {
+    const ed = w.document.querySelector('[contenteditable="true"]');
+    if (!ed) return false;
+    cmd = String(cmd).toLowerCase();
+    if (cmd === "delete" || cmd === "selectall") { if (cmd === "delete") ed.textContent = ""; return true; }
+    if (cmd === "inserttext") {
+      if (value == null) return false;
+      if (String(value).includes("\n")) w.__submits.push("insertText-newline");
+      ed.textContent += value;
+      return true;
+    }
+    if (cmd === "insertlinebreak") { ed.textContent += "\n"; return true; }
+    if (cmd === "inserthtml") { ed.textContent += "\n"; return true; }
+    return false;
+  };
   w.Element.prototype.getBoundingClientRect = function () {
     const width = Number(this.getAttribute("data-w") || 100);
     const height = Number(this.getAttribute("data-h") || 20);
@@ -557,6 +587,162 @@ console.log("\n--- 8d. no composer, no problem ---");
   check(Math.abs(left + 400 / 2 - w.innerWidth / 2) <= 1,
     "and falls back to the window centre", `left=${left}`);
   check(left >= 8, "not pinned to the edge");
+}
+
+console.log("\n--- 10. Send as safe text: offered, previewed, inserted ---");
+{
+  const w = loadPage(CHATGPT);
+  await settle();
+  const H = w.GuardAI._fileHooks;
+
+  const REAL_TFN = "412 336 907";
+  const DOC_TEXT =
+    "Clause 4. The employee named below is engaged on the terms of this agreement. " +
+    "The tax file number " + REAL_TFN + " is provided for payroll purposes only. " +
+    "Nothing in this clause limits a remedy otherwise available at law.";
+
+  const calls = [];
+  H.setParser(async (file, onProgress, mode) => {
+    calls.push(mode);
+    if (mode === "extract") return { ok: true, text: DOC_TEXT };
+    return {
+      kind: "docx", label: "Word document", action: "block", pages: 0,
+      summary: { counts: { TFN: 1 }, blocking: ["TFN"], other: [], blockingCount: 1, total: 1, pageHits: {} },
+      suit: { offer: true, why: "" },
+    };
+  });
+
+  const input = w.document.getElementById("upload-files");
+  const file = makeFile(w, "contract.docx", 9000,
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+  input.files = Object.assign([file], { item: () => file });
+  input.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await settle(20);
+
+  const card = H.cardEl();
+  const btn = card && card.querySelector(".guardai-filecard__btn--safetext");
+  check(!!btn, "the third option is on the card");
+  check(btn && /send as safe text/i.test(btn.textContent), "…and says what it does", btn && btn.textContent);
+  const whyEl = card.querySelector(".guardai-filecard__textwhy");
+  check(whyEl && !whyEl.textContent.trim(), "no reason line when the option is offered");
+
+  const sizeBefore = w.GuardAI._restoreHooks.masker.size;
+
+  btn.click();
+  await settle(20);
+  check(calls.includes("extract"), "clicking asks the frame for the text", calls.join(","));
+
+  const prev = H.previewEl();
+  check(!!prev, "the preview appears before anything touches the composer");
+  const shown = prev ? prev.querySelector(".guardai-fileprev__text").textContent : "";
+  check(shown.length > 100, "it shows the text in full", String(shown.length));
+  check(!shown.includes(REAL_TFN), "the REAL TFN is not in the preview");
+  check(shown !== DOC_TEXT, "…because the text really was masked");
+  check(/Clause 4\./.test(shown), "…while the surrounding sentence survived");
+  check(w.GuardAI._restoreHooks.masker.size === sizeBefore,
+    "previewing registers NOTHING in the mapping store", `${w.GuardAI._restoreHooks.masker.size}`);
+
+  // Cancel: no trace anywhere.
+  prev.querySelector(".guardai-fileprev__btn--cancel").click();
+  await settle();
+  check(!H.previewEl(), "cancel closes the preview");
+  check(!!H.cardEl(), "…and the card is still there to decide about the file");
+  check(w.GuardAI._restoreHooks.masker.size === sizeBefore, "…and the store is still untouched");
+  const editor = w.document.getElementById("prompt-textarea");
+  check(!(editor.textContent || "").trim(), "…and the composer is still empty");
+
+  // Round two: confirm.
+  card.querySelector(".guardai-filecard__btn--safetext").click();
+  await settle(20);
+  H.previewEl().querySelector(".guardai-fileprev__btn--insert").click();
+  // typeText's per-line fill awaits REAL timers between operations (that is
+  // the volume fix), so tick-counting under-waits and asserts mid-fill.
+  // Wait for the observable end state: the preview closing on success.
+  for (let i = 0; i < 40 && H.previewEl(); i++) await new Promise((r) => setTimeout(r, 50));
+
+  const landed = editor.textContent || "";
+  check(landed.length > 100, "confirming fills the composer", String(landed.length));
+  check(!landed.includes(REAL_TFN), "the REAL TFN never reaches the composer");
+  check(/Clause 4\./.test(landed), "…and the prose around it landed intact");
+  check(w.__submits.length === 0, "nothing was submitted — inserting is not sending",
+    w.__submits.join(","));
+  check(w.GuardAI._restoreHooks.masker.size === sizeBefore + 1,
+    "the mapping registers ON INSERT, so the reply can unmask",
+    `${w.GuardAI._restoreHooks.masker.size} vs ${sizeBefore}+1`);
+  check(H.getLastMaskedText() === landed || !!H.getLastMaskedText(),
+    "the user's own send of this exact text will pass without a re-scan");
+  check(!H.previewEl() && !H.cardEl(), "preview and card are both done");
+}
+
+console.log("\n--- 11. withheld, and it says why ---");
+{
+  const w = loadPage(CHATGPT);
+  await settle();
+  const H = w.GuardAI._fileHooks;
+  const WHY = "This document is mostly tables, so the text would not come out readable.";
+  H.setParser(async () => ({
+    kind: "docx", label: "Word document", action: "block", pages: 0,
+    summary: { counts: { TFN: 4 }, blocking: ["TFN"], other: [], blockingCount: 4, total: 4, pageHits: {} },
+    suit: { offer: false, why: WHY },
+  }));
+  const input = w.document.getElementById("upload-files");
+  const file = makeFile(w, "payroll.docx", 5000, "");
+  input.files = Object.assign([file], { item: () => file });
+  input.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await settle(20);
+
+  const card = H.cardEl();
+  check(!card.querySelector(".guardai-filecard__btn--safetext"), "no button on an unsuitable document");
+  const whyEl = card.querySelector(".guardai-filecard__textwhy");
+  check(!!whyEl && whyEl.textContent.includes(WHY), "…but the reason is said in one plain line",
+    whyEl && whyEl.textContent.slice(0, 90));
+}
+
+console.log("\n--- 12. one file at a time, and a refusal on click is shown ---");
+{
+  // Multi-file: no button, no reason line — the option does not apply.
+  const w = loadPage(CHATGPT);
+  await settle();
+  const H = w.GuardAI._fileHooks;
+  H.setParser(async () => ({
+    kind: "pdf", label: "PDF document", action: "block", pages: 1,
+    summary: { counts: { TFN: 1 }, blocking: ["TFN"], other: [], blockingCount: 1, total: 1, pageHits: {} },
+    suit: { offer: true, why: "" },
+  }));
+  const input = w.document.getElementById("upload-files");
+  const files = [makeFile(w, "a.pdf", 100, ""), makeFile(w, "b.pdf", 100, "")];
+  input.files = Object.assign(files, { item: (i) => files[i] });
+  input.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await settle(20);
+  const card = H.cardEl();
+  check(!card.querySelector(".guardai-filecard__btn--safetext"), "two files: no safe-text button");
+  check(!card.querySelector(".guardai-filecard__textwhy"), "…and no stray reason line");
+
+  // Single file whose extract-mode round trip REFUSES (frame re-check): the
+  // reason lands in the status line and no preview opens.
+  const w2 = loadPage(CHATGPT);
+  await settle();
+  const H2 = w2.GuardAI._fileHooks;
+  H2.setParser(async (file, onProgress, mode) => {
+    if (mode === "extract") return { ok: false, why: "The columns come out shuffled, so the text would not read in order." };
+    return {
+      kind: "pdf", label: "PDF document", action: "block", pages: 2,
+      summary: { counts: { TFN: 1 }, blocking: ["TFN"], other: [], blockingCount: 1, total: 1, pageHits: {} },
+      suit: { offer: true, why: "" },
+    };
+  });
+  const in2 = w2.document.getElementById("upload-files");
+  const f2 = makeFile(w2, "odd.pdf", 900, "application/pdf");
+  in2.files = Object.assign([f2], { item: () => f2 });
+  in2.dispatchEvent(new w2.Event("change", { bubbles: true }));
+  await settle(20);
+  const card2 = H2.cardEl();
+  card2.querySelector(".guardai-filecard__btn--safetext").click();
+  await settle(20);
+  check(!H2.previewEl(), "a frame-side refusal opens no preview");
+  check(/shuffled/.test(card2.querySelector(".guardai-filecard__textwhy").textContent),
+    "…and its reason is shown on the card",
+    card2.querySelector(".guardai-filecard__textwhy").textContent.slice(0, 80));
 }
 
 console.log("\n--- 9. the master switch means hands off ---");

@@ -151,12 +151,31 @@ the extension still installs and works on older Chrome.
 ## What the parser frame is for, if a reviewer asks
 
 The file bytes and the extracted text exist only inside `parser.html`, which is
-process-isolated from the chat page. The only thing that crosses back out is a
-count per category — the reply is assembled field by field in `src/parser.js`
-so that handing it an extraction result cannot leak the text through it, the
-same construction as `src/company.js`. There is no `fetch` or `XHR` anywhere in
-the parser, and pdf.js is configured with `useWorkerFetch: false` and
-`isEvalSupported: false` so it cannot reach the network or evaluate code.
+process-isolated from the chat page. On a scan, the only thing that crosses
+back out is a count per category — the reply is assembled field by field in
+`src/parser.js` so that handing it an extraction result cannot leak the text
+through it, the same construction as `src/company.js`. There is no `fetch` or
+`XHR` anywhere in the parser, and pdf.js is configured with
+`useWorkerFetch: false` and `isEvalSupported: false` so it cannot reach the
+network or evaluate code.
+
+**One deliberate exception**: "Send as safe text" (added 2026-08-28) lets the
+user send a document's text as a masked message instead of attaching the file.
+When — and only when — the user clicks that button, the frame re-extracts the
+text and passes it over the private MessagePort to the content script, which
+masks it with the same rules as a typed message and shows the user the masked
+result before anything is inserted into the page. The text still never touches
+the page's own scripts or the network from the frame; the frame re-runs its
+own suitability check before releasing anything, so a forged request cannot
+pull text out of a document the check refused; and what ultimately reaches the
+page is the masked text the user approved on screen — which is the feature.
+
+The option is gated by a measured readability check (`suitability()` in
+`src/filescan.js`) so it is never offered on a document whose extraction would
+paste as garbled fragments — forms, table grids, shuffled columns, shattered
+equations — and per-site paste ceilings measured on the live composers
+(ChatGPT converts pastes ≥10,000 chars into attachments; Gemini's composer
+silently truncates at 32,000; the caps ship with margin below both).
 
 ## Listing copy
 

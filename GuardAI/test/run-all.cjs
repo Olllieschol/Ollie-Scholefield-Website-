@@ -47,6 +47,7 @@ const SUITES = [
   { name: "file-chunking.cjs (document-length scanning + the block/pass policy)", file: "test/file-chunking.cjs" },
   { name: "file-extract.cjs (a real PDF and DOCX, through pdf.js/mammoth into the detector)", file: "test/file-extract.cjs" },
   { name: "file-attach.cjs (quarantine an attachment, release it through the right input)", file: "test/file-attach.cjs" },
+  { name: "file-suitability.cjs (send-as-text: the measured rule + per-site paste limits)", file: "test/file-suitability.cjs" },
   // Section 1 core bug regressions.
   { name: "section1-bugs.cjs (licence/address/auto-replace)", file: "test/section1-bugs.cjs" },
   { name: "restore-name-integrity.cjs (name cross-contamination)", file: "test/restore-name-integrity.cjs" },

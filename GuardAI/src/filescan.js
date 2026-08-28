@@ -447,12 +447,235 @@
     };
   }
 
+
+  /* ------------------------------------------------------------------ *
+   * "Send as safe text" suitability.
+   *
+   * The option to extract a document's text, mask it, and send it as a
+   * message exists ONLY when the extraction will genuinely read correctly.
+   * A jumbled paste is worse than a block: the user will not notice it is
+   * mangled, will send it, and will get a confidently wrong answer with
+   * nothing on screen to explain why.
+   *
+   * Every threshold below was measured, not guessed, against a corpus of
+   * real documents (2026-08-28: five public PDFs — two academic papers, a
+   * High Court judgment summary, two IRS forms — a real 469k-char DOCX
+   * handbook, and constructed geometry controls). Blind-scored result:
+   * 0 false positives, 2 false negatives in 12, and both false negatives
+   * are deliberate (a record card whose masked text would be all fakes,
+   * and a document too long to paste). The margins that make the numbers
+   * meaningful:
+   *
+   *   fragShare      offered docs measured <= 0.34, forms >= 0.61
+   *   medLine        offered >= 47, forms <= 17
+   *   braidRate      row-wise-painted columns 0.51, every real doc <= 0.13
+   *   debrisShare    equation-shattered paper 0.41, offered docs <= 0.15
+   *   tableShare     table-only DOCX 0.99, prose DOCX 0.00 (exact, from
+   *                  the document's own structure)
+   *
+   * Sentence density is deliberately a WEAK backstop only: measured, an
+   * IRS 1040 form scores 7.1 sentences/1k against real prose at 5.4-9.0,
+   * so it cannot distinguish a form from prose. Line shape can.
+   * ------------------------------------------------------------------ */
+
+  /** Text-shape signals. Pure string work; format-agnostic. */
+  function textShape(text) {
+    const t = typeof text === "string" ? text : "";
+    const lines = t.split("\n").map((l) => l.trim()).filter(Boolean);
+    const lineChars = lines.reduce((n, l) => n + l.length, 0);
+    const frag = lines.filter((l) => l.length < 40).length;
+    // Debris: lines that are not words — shattered equations, dot leaders,
+    // isolated symbols. Either almost nothing, or under half letters.
+    const debris = lines.filter((l) => {
+      if (l.length <= 4) return true;
+      const letters = (l.match(/\p{L}/gu) || []).length;
+      return letters / l.length < 0.5;
+    }).length;
+    // A sentence ender must follow a LETTER: dot leaders in forms
+    // (". . . . 13b") otherwise count as prose — measured, they inflated a
+    // tax form to 93 "sentences"/1k.
+    const sentences = (t.match(/\p{L}[.!?](?=[\s"')\]]|$)/gu) || []).length;
+    const nonWs = (t.match(/\S/g) || []).length;
+    const med = lines.length
+      ? lines.map((l) => l.length).sort((a, b) => a - b)[Math.floor(lines.length / 2)]
+      : 0;
+    return {
+      chars: t.length,
+      lineCount: lines.length,
+      medLine: med,
+      fragShare: lines.length ? frag / lines.length : 1,
+      debrisShare: lines.length ? debris / lines.length : 1,
+      sentPer1k: nonWs ? (sentences / nonWs) * 1000 : 0,
+      longCharShare: lineChars
+        ? lines.filter((l) => l.length >= 80).reduce((n, l) => n + l.length, 0) / lineChars
+        : 0,
+    };
+  }
+
+  /**
+   * PDF layout signals, from per-page positioned items:
+   * [{ items: [{x, y, len, stream}], width }].
+   *
+   * The one that matters most is braidRate: consecutive items in STREAM
+   * order that stay on the same row but jump a column's width sideways.
+   * That is the signature of a painter drawing row-wise across columns —
+   * the one document shape whose extraction is maximally garbled while
+   * every TEXT signal looks like perfect prose (measured: the braided
+   * control scores medLine 138, longCharShare 1.00). Geometry is the only
+   * thing that sees it. Measured on merged visual lines it is invisible
+   * (same-row fragments merge before the detector looks), so it is
+   * computed on raw items.
+   */
+  function layoutShape(pages) {
+    const rates = { braid: [], rewind: [], switch: [] };
+    for (const pg of pages || []) {
+      const items = (pg.items || []).filter((it) => it && typeof it.x === "number");
+      if (items.length < 12) continue;
+      const inStream = [...items].sort((a, b) => a.stream - b.stream);
+      let braid = 0;
+      for (let i = 1; i < inStream.length; i++) {
+        const dy = Math.abs(inStream[i].y - inStream[i - 1].y);
+        const dx = Math.abs(inStream[i].x - inStream[i - 1].x);
+        if (dy < 3 && dx > (pg.width || 612) * 0.12) braid++;
+      }
+      rates.braid.push(braid / (inStream.length - 1));
+
+      // visual lines, for rewind + column-switch measures
+      const sorted = [...items].sort((a, b) => b.y - a.y || a.x - b.x);
+      const linesArr = [];
+      for (const it of sorted) {
+        const line = linesArr.find((L) => Math.abs(L.y - it.y) < 2.5);
+        if (line) {
+          line.startX = Math.min(line.startX, it.x);
+          line.stream = Math.min(line.stream, it.stream);
+          line.len += it.len;
+        } else linesArr.push({ y: it.y, startX: it.x, stream: it.stream, len: it.len });
+      }
+      const body = linesArr.filter((L) => L.len >= 15);
+      if (body.length < 6) continue;
+      const bodyStream = [...body].sort((a, b) => a.stream - b.stream);
+      let rewinds = 0;
+      for (let i = 1; i < bodyStream.length; i++) {
+        if (bodyStream[i].y - bodyStream[i - 1].y > 20) rewinds++;
+      }
+      rates.rewind.push(rewinds / bodyStream.length);
+
+      const xs = body.map((L) => L.startX).sort((a, b) => a - b);
+      let gap = 0, gapAt = -1;
+      for (let i = 1; i < xs.length; i++) {
+        if (xs[i] - xs[i - 1] > gap) { gap = xs[i] - xs[i - 1]; gapAt = xs[i - 1] + gap / 2; }
+      }
+      const left = xs.filter((x) => x < gapAt).length;
+      if (gap > (pg.width || 612) * 0.15 && left >= xs.length * 0.25 && xs.length - left >= xs.length * 0.25) {
+        let switches = 0;
+        for (let i = 1; i < bodyStream.length; i++) {
+          if ((bodyStream[i].startX < gapAt) !== (bodyStream[i - 1].startX < gapAt)) switches++;
+        }
+        rates.switch.push(switches / bodyStream.length);
+      }
+    }
+    const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
+    return { braidRate: avg(rates.braid), rewindRate: avg(rates.rewind), switchRate: avg(rates.switch) };
+  }
+
+  /**
+   * How much text each site's composer takes AS TEXT, measured live
+   * 2026-08-28 by pasting/inserting through the same synthetic paths the
+   * extension uses and reading back what landed:
+   *
+   *   chatgpt.com   9,500 stays text; AT 10,000 the site converts the paste
+   *                 into an attachment chip ("Large pastes are now
+   *                 attachments"). Cap 9,000 for margin.
+   *   gemini        the composer hard-caps at 32,000 characters and
+   *                 TRUNCATES SILENTLY past it — 60,000 in, 32,000 landed,
+   *                 no error. Cap 30,000; the insert path must still verify
+   *                 the landing, because silent truncation is this
+   *                 feature's worst failure.
+   *   claude.ai     250,000 characters landed as text in ~1s; the composer
+   *                 is not the constraint, so it gets the general 60,000
+   *                 readability ceiling.
+   *
+   * Sites that were not probed get ChatGPT's cap — the most conservative
+   * cliff measured — because "becomes an attachment at 10k" is the kind of
+   * behaviour another site may share.
+   */
+  const PASTE_LIMITS = {
+    "chatgpt.com": 9000,
+    "chat.openai.com": 9000,
+    "claude.ai": 60000,
+    "gemini.google.com": 30000,
+    "bard.google.com": 30000,
+  };
+  const PASTE_LIMIT_DEFAULT = 9000;
+
+  function pasteLimitFor(hostname) {
+    const host = String(hostname || "").replace(/^www\./, "").toLowerCase();
+    if (PASTE_LIMITS[host]) return PASTE_LIMITS[host];
+    for (const known in PASTE_LIMITS) {
+      if (host === known || host.endsWith("." + known)) return PASTE_LIMITS[known];
+    }
+    return PASTE_LIMIT_DEFAULT;
+  }
+
+  /**
+   * The verdict. Returns { offer, why } — `why` is the one plain line the
+   * card shows when the option is absent, because silence is worse than a
+   * reason.
+   *
+   * @param {object} input
+   * @param {string} input.kind        from classify()
+   * @param {object} input.shape       from textShape()
+   * @param {object} [input.layout]    from layoutShape(), PDFs only
+   * @param {number} [input.tableShare] DOCX only: chars in tables / total
+   * @param {number} [input.pasteLimit] per-site cap from pasteLimitFor()
+   */
+  function suitability(input) {
+    const it = input || {};
+    const s = it.shape || textShape("");
+    const L = it.layout || null;
+    const limit = typeof it.pasteLimit === "number" ? it.pasteLimit : PASTE_LIMIT_DEFAULT;
+    const no = (why) => ({ offer: false, why });
+
+    // A non-finite char count means the shape was never really computed. NaN
+    // compares false against BOTH size gates, so without this line a parser
+    // bug that produced NaN would fail OPEN — the one direction this check is
+    // never allowed to fail.
+    const chars = Number.isFinite(s.chars) ? s.chars : 0;
+    if (chars < 200) return no("There isn't enough readable text in this file.");
+
+    if (it.kind === KIND.PDF && L) {
+      if (L.braidRate > 0.2 || L.rewindRate > 0.15 || L.switchRate > 0.25) {
+        return no("The columns come out shuffled, so the text would not read in order.");
+      }
+    }
+    if (it.kind === KIND.DOCX && typeof it.tableShare === "number" && it.tableShare > 0.3) {
+      return no("This document is mostly tables, so the text would not come out readable.");
+    }
+    if (s.fragShare > 0.45 || s.medLine < (it.kind === KIND.DOCX ? 40 : 30)) {
+      return no("This document is mostly a form or tables, so the text comes out as fragments.");
+    }
+    if (s.debrisShare > 0.25) {
+      return no("Too much of this document (equations or symbols) comes out as unreadable debris.");
+    }
+    if (s.sentPer1k < 3) return no("The text does not come out as readable sentences.");
+    if (chars > limit) {
+      return no(
+        "The text is too long to send as a message here (about " +
+        chars.toLocaleString() + " characters; this site takes about " +
+        limit.toLocaleString() + ")."
+      );
+    }
+    return { offer: true, why: "" };
+  }
+
   const api = {
     KIND, ACTION, MAX_BYTES, MIN_TEXT_CHARS, CHUNK, OVERLAP, BLOCKING_TYPES,
     TEXT_EXTS, KNOWN_UNSUPPORTED,
     classify, chunk, scanLong, summarise, verdict, pageLookup, extensionOf,
     joinTextItems,
     windowSize,
+    textShape, layoutShape, suitability, pasteLimitFor,
+    PASTE_LIMITS, PASTE_LIMIT_DEFAULT,
   };
 
   if (typeof window !== "undefined") {

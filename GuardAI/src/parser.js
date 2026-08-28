@@ -51,6 +51,11 @@ async function extractPdf(bytes, onProgress) {
   // would have left the worker holding the whole file after every scan.
 
   const pageStarts = [];
+  // Positioned items, kept as {x, y, len, stream} — geometry only, no text.
+  // layoutShape() reads these to decide whether the page's draw order would
+  // extract in reading order; the strings themselves are not needed for that
+  // and so are deliberately not retained here.
+  const layoutPages = [];
   let text = "";
 
   for (let n = 1; n <= total; n++) {
@@ -59,6 +64,17 @@ async function extractPdf(bytes, onProgress) {
     try {
       page = await doc.getPage(n);
       const content = await page.getTextContent();
+      layoutPages.push({
+        width: page.view ? page.view[2] - page.view[0] : 612,
+        items: content.items
+          .filter((it) => typeof it.str === "string" && it.str.trim())
+          .map((it, i) => ({
+            x: it.transform ? it.transform[4] : 0,
+            y: it.transform ? it.transform[5] : 0,
+            len: it.str.length,
+            stream: i,
+          })),
+      });
       text += FileScan.joinTextItems(content.items);
     } catch (err) {
       // A single unreadable page is not an unreadable document. Note the gap
@@ -74,13 +90,31 @@ async function extractPdf(bytes, onProgress) {
   }
 
   try { await task.destroy(); } catch (_) { /* nothing to recover */ }
-  return { text, pageStarts, pages: total };
+  return { text, pageStarts, pages: total, layoutPages };
 }
 
 /** DOCX via mammoth's raw-text extractor — headers, tables and footnotes included. */
 async function extractDocx(bytes) {
   const res = await window.mammoth.extractRawText({ arrayBuffer: bytes });
-  return { text: (res && res.value) || "", pageStarts: [], pages: 0 };
+  const text = (res && res.value) || "";
+  // How much of the document lives in tables? extractRawText flattens that
+  // structure away, but convertToHtml preserves it, and the answer decides
+  // whether "Send as safe text" can be offered — a table flattened to one
+  // cell per line does not read. Exact enough: mammoth builds the HTML from
+  // the document's own w:tbl elements.
+  let tableShare = null;
+  try {
+    const html = (await window.mammoth.convertToHtml({ arrayBuffer: bytes })).value || "";
+    const strip = (h) => h.replace(/<[^>]+>/g, "");
+    let inTables = 0;
+    for (const m of html.match(/<table>[\s\S]*?<\/table>/g) || []) inTables += strip(m).length;
+    const totalChars = strip(html).length;
+    tableShare = totalChars ? inTables / totalChars : 0;
+  } catch (_) {
+    // Unknown is not "no tables": suitability treats null as not-computable
+    // and the shape gates still apply.
+  }
+  return { text, pageStarts: [], pages: 0, tableShare };
 }
 
 /** Plain text, CSV, Markdown. UTF-8 with a BOM is common out of Excel. */
@@ -97,7 +131,7 @@ function extractText(bytes) {
  * reason: handing this function the extraction result must not be able to
  * leak the text through it. Nothing is spread in; six values are read by name.
  * ------------------------------------------------------------------ */
-function buildReply(id, cls, verdict, pages) {
+function buildReply(id, cls, verdict, pages, suit) {
   const out = {
     id: String(id),
     kind: String(cls.kind),
@@ -106,6 +140,7 @@ function buildReply(id, cls, verdict, pages) {
     pages: typeof pages === "number" && pages > 0 ? pages : 0,
   };
   if (verdict.reason) out.reason = String(verdict.reason);
+  if (suit) out.suit = { offer: suit.offer === true, why: String(suit.why || "") };
   if (typeof verdict.limitMB === "number") out.limitMB = verdict.limitMB;
   if (verdict.summary) {
     const s = verdict.summary;
@@ -160,6 +195,7 @@ async function handle(req, port) {
 
   let verdict;
   let pages = 0;
+  let suit = null;
   if (error || !extracted) {
     verdict = FileScan.verdict({ kind: cls.kind, bytes: size, error: error || "No text extracted" });
   } else {
@@ -171,6 +207,16 @@ async function handle(req, port) {
       const findings = FileScan.scanLong(detector, extracted.text);
       const summary = FileScan.summarise(findings, FileScan.pageLookup(extracted.pageStarts));
       verdict = FileScan.verdict({ kind: cls.kind, bytes: size, text: extracted.text, summary });
+      // Can this document be sent as masked TEXT instead? Decided here, from
+      // the extraction, so the card can offer the option — or say in one
+      // plain line why not. Only the verdict crosses; no text does.
+      suit = FileScan.suitability({
+        kind: cls.kind,
+        shape: FileScan.textShape(extracted.text),
+        layout: extracted.layoutPages ? FileScan.layoutShape(extracted.layoutPages) : null,
+        tableShare: typeof extracted.tableShare === "number" ? extracted.tableShare : undefined,
+        pasteLimit: typeof req.limit === "number" ? req.limit : undefined,
+      });
     }
   }
 
@@ -179,7 +225,53 @@ async function handle(req, port) {
   // that keeps it that way.
   extracted = null;
 
-  port.postMessage(buildReply(req.id, cls, verdict, pages));
+  port.postMessage(buildReply(req.id, cls, verdict, pages, suit));
+}
+
+/**
+ * Extract-for-sending. Runs only when the user has clicked "Send as safe
+ * text" on the card, and it is the one deliberate exception to "no document
+ * text crosses out of this frame": the text goes over the private port to the
+ * content script, which masks it with the same rules as a typed message and
+ * shows the result to the user BEFORE anything reaches the page. It still
+ * never touches the page's own scripts or the network from here.
+ *
+ * The frame keeps nothing between requests, so this re-extracts from the
+ * bytes rather than remembering the earlier scan — and re-runs the
+ * suitability check on what it extracted, so a crafted second request cannot
+ * pull text out of a document the check refused.
+ */
+async function handleExtract(req, port) {
+  const cls = FileScan.classify(req.name, req.type);
+  const bytes = req.bytes;
+  const size = bytes && bytes.byteLength ? bytes.byteLength : 0;
+  const refuse = (why) => port.postMessage({ id: String(req.id), mode: "extract", ok: false, why: String(why) });
+
+  const early = FileScan.verdict({ kind: cls.kind, bytes: size });
+  if (early.action === FileScan.ACTION.TOO_LARGE || early.action === FileScan.ACTION.UNSUPPORTED) {
+    refuse("This file cannot be read.");
+    return;
+  }
+  let extracted = null;
+  try {
+    if (cls.kind === FileScan.KIND.PDF) extracted = await extractPdf(bytes, null);
+    else if (cls.kind === FileScan.KIND.DOCX) extracted = await extractDocx(bytes);
+    else extracted = extractText(bytes);
+  } catch (err) {
+    refuse((err && err.message) || "The file could not be read.");
+    return;
+  }
+  const suit = FileScan.suitability({
+    kind: cls.kind,
+    shape: FileScan.textShape(extracted.text),
+    layout: extracted.layoutPages ? FileScan.layoutShape(extracted.layoutPages) : null,
+    tableShare: typeof extracted.tableShare === "number" ? extracted.tableShare : undefined,
+    pasteLimit: typeof req.limit === "number" ? req.limit : undefined,
+  });
+  if (!suit.offer) { refuse(suit.why); return; }
+  const text = extracted.text;
+  extracted = null;
+  port.postMessage({ id: String(req.id), mode: "extract", ok: true, text });
 }
 
 /* ------------------------------------------------------------------ *
@@ -203,6 +295,15 @@ window.addEventListener("message", (e) => {
   port.onmessage = (ev) => {
     const req = ev.data;
     if (!req || typeof req.id === "undefined" || !(req.bytes instanceof ArrayBuffer)) return;
+    if (req.mode === "extract") {
+      handleExtract(req, port).catch((err) => {
+        port.postMessage({
+          id: String(req.id), mode: "extract", ok: false,
+          why: (err && err.message) || "The file reader failed.",
+        });
+      });
+      return;
+    }
     handle(req, port).catch((err) => {
       // Never leave a request unanswered: a card stuck on "Checking…" is worse
       // than one that says it failed, because the user cannot tell which.

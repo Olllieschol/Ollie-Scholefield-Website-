@@ -315,6 +315,94 @@ console.log("\n--- 5. a long PDF keeps its tail ---");
     `plain scan found ${raw.length}`);
 }
 
+console.log("\n--- 6. suitability inputs, computed from the real extractors ---");
+{
+  // The unit suite (file-suitability.cjs) pins the rule against measured
+  // fixture VECTORS. This section closes the remaining gap: the two inputs
+  // the parser frame computes — tableShare via mammoth's convertToHtml, and
+  // layoutShape from pdf.js's positioned items — computed here from real
+  // artifacts through the shipping libraries, exactly as src/parser.js does.
+  const mammoth = require(path.join(ROOT, "node_modules", "mammoth"));
+
+  const tableShareOf = async (buf) => {
+    const html = (await mammoth.convertToHtml({ buffer: buf })).value || "";
+    const strip = (h) => h.replace(/<[^>]+>/g, "");
+    let inTables = 0;
+    for (const m of html.match(/<table>[\s\S]*?<\/table>/g) || []) inTables += strip(m).length;
+    const total = strip(html).length;
+    return total ? inTables / total : 0;
+  };
+
+  // A table-only DOCX and a prose DOCX, built as real OOXML.
+  const rows = [["Employee", "TFN", "BSB", "Medicare"]];
+  for (let i = 0; i < 30; i++) rows.push([`Person ${i}`, `41${i} 336 90${i % 9}`, `06${i % 9}-014`, `2417 8821${i % 9} 3`]);
+  const JSZip = require(path.join(ROOT, "node_modules", "jszip"));
+  async function docxWith(paragraphs, tableRows) {
+    const zip = new JSZip();
+    const esc = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    zip.file("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>`);
+    zip.folder("_rels").file(".rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`);
+    const p = (t) => `<w:p><w:r><w:t xml:space="preserve">${esc(t)}</w:t></w:r></w:p>`;
+    const tbl = (rs) => `<w:tbl>` + rs.map((r) => `<w:tr>` + r.map((c) => `<w:tc>${p(c)}</w:tc>`).join("") + `</w:tr>`).join("") + `</w:tbl>`;
+    zip.folder("word").file("document.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>` +
+      paragraphs.map(p).join("") + (tableRows ? tbl(tableRows) : "") + `</w:body></w:document>`);
+    return zip.generateAsync({ type: "nodebuffer" });
+  }
+
+  const proseParas = [];
+  for (let i = 0; i < 30; i++) proseParas.push(
+    `Clause ${i + 1}. The parties acknowledge that the obligations described in this clause survive ` +
+    `termination of the agreement, and that any waiver must be given in writing. Nothing here limits a remedy at law.`);
+
+  const tablesBuf = await docxWith(["Appendix A."], rows);
+  const proseBuf = await docxWith(proseParas, null);
+  const tsTables = await tableShareOf(tablesBuf);
+  const tsProse = await tableShareOf(proseBuf);
+  check(tsTables > 0.9, "convertToHtml sees a table-only DOCX as tables", tsTables.toFixed(2));
+  check(tsProse < 0.05, "…and a prose DOCX as not", tsProse.toFixed(2));
+
+  const proseText = (await mammoth.extractRawText({ buffer: proseBuf })).value;
+  const tablesText = (await mammoth.extractRawText({ buffer: tablesBuf })).value;
+  const vProse = F.suitability({ kind: "docx", shape: F.textShape(proseText), tableShare: tsProse, pasteLimit: 60000 });
+  const vTables = F.suitability({ kind: "docx", shape: F.textShape(tablesText), tableShare: tsTables, pasteLimit: 60000 });
+  check(vProse.offer, "end to end: the prose contract is offered", vProse.why);
+  check(!vTables.offer && /tables/.test(vTables.why), "end to end: the payroll table is refused, says tables", vTables.why);
+
+  // layoutShape from REAL pdf.js items, mapped {x,y,len,stream} as parser.js maps them.
+  const pdf = buildPdf([[
+    "The committee reviewed the register and noted no material change in the period.",
+    "It resolved to meet again in March and to record the decision in the minutes.",
+    "A quorum was present throughout and no member declared a conflict of interest.",
+    "The chair thanked members for their attendance and closed the meeting.",
+  ]]);
+  const pdfjs = await import(path.join(ROOT, "vendor", "pdf.min.mjs"));
+  const task = pdfjs.getDocument({ data: pdf, isEvalSupported: false, disableFontFace: true,
+    useSystemFonts: false, useWorkerFetch: false, stopAtErrors: false });
+  const doc = await task.promise;
+  const pg = await doc.getPage(1);
+  const content = await pg.getTextContent();
+  const layoutPage = {
+    width: pg.view[2] - pg.view[0],
+    items: content.items.filter((it) => typeof it.str === "string" && it.str.trim())
+      .map((it, i) => ({ x: it.transform[4], y: it.transform[5], len: it.str.length, stream: i })),
+  };
+  await task.destroy();
+  const L = F.layoutShape([layoutPage]);
+  check(L.braidRate < 0.05 && L.rewindRate < 0.05,
+    "real pdf.js items from an ordinary page read as unshuffled",
+    JSON.stringify(L));
+}
+
 console.log(`\nFILE EXTRACT: ${failures === 0 ? "ALL PASS" : failures + " FAILURES"}`);
 process.exit(failures ? 1 : 0);
 })().catch((e) => { console.error("ERROR:", e && e.stack || e); process.exit(1); });

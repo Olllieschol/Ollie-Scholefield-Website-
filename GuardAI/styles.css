@@ -1454,3 +1454,112 @@ html.guardai-light .guardai-filecard__btn--ghost {
   background: transparent; color: #475569; border-color: #e2e8f0;
 }
 html.guardai-light .guardai-filecard__btn--ghost:hover { background: #f1f5f9; color: #0f172a; }
+
+/* ---- "Send as safe text" ---- */
+.guardai-filecard__btns--safetext { margin-top: 14px; }
+.guardai-filecard__btns--safetext + .guardai-filecard__btns { margin-top: 8px; }
+.guardai-filecard__btn--safetext {
+  background: #2e5c43;
+  color: #e9f6ee;
+}
+.guardai-filecard__btn--safetext:hover { filter: brightness(1.12); }
+.guardai-filecard__btn--safetext:disabled { opacity: 0.6; cursor: default; }
+.guardai-filecard__textwhy {
+  margin: 8px 2px 0;
+  color: #a1a1aa;
+  font-size: 12px;
+}
+.guardai-filecard__textwhy:empty { display: none; }
+
+/* The mandatory preview: the masked text, shown in full, before anything
+   touches the composer. */
+.guardai-fileprev {
+  position: fixed;
+  z-index: 2147483647;
+  width: 560px;
+  max-width: calc(100vw - 32px);
+  max-height: min(72vh, calc(100vh - 40px));
+  display: flex;
+  flex-direction: column;
+  background: #1a1a1a;
+  color: #f4f4f5;
+  border: 1px solid #2c2c2c;
+  border-radius: 16px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  padding: 16px;
+  animation: guardai-pop 0.16s ease-out;
+}
+.guardai-fileprev__grip {
+  display: flex; justify-content: center; align-items: center;
+  height: 16px; margin: -4px 0 6px; cursor: grab; user-select: none; flex: 0 0 auto;
+}
+.guardai-fileprev__grip::before {
+  content: ""; width: 40px; height: 4px; border-radius: 999px;
+  background: #4a4a4a; transition: background 0.15s;
+}
+.guardai-fileprev__grip:hover::before { background: #6a6a6a; }
+.guardai-fileprev--dragging,
+.guardai-fileprev--dragging .guardai-fileprev__grip,
+.guardai-fileprev--dragging .guardai-fileprev__head { cursor: grabbing; }
+.guardai-fileprev__head {
+  display: flex; align-items: center; gap: 9px; margin-bottom: 8px;
+  cursor: grab; flex: 0 0 auto;
+}
+.guardai-fileprev__shield { display: flex; width: 18px; height: 18px; flex: 0 0 auto; }
+.guardai-fileprev__shield svg { width: 100%; height: 100%; }
+.guardai-fileprev__title { font-weight: 600; font-size: 14px; flex: 1 1 auto; }
+.guardai-fileprev__close {
+  all: unset; cursor: pointer; color: #8a8a8a; font-size: 20px;
+  line-height: 1; padding: 0 4px; border-radius: 6px;
+}
+.guardai-fileprev__close:hover { color: #f4f4f5; background: #2c2c2c; }
+.guardai-fileprev__meta { margin: 0 0 10px; color: #a1a1aa; font-size: 12px; flex: 0 0 auto; }
+.guardai-fileprev__text {
+  flex: 1 1 auto;
+  min-height: 120px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #141414;
+  border: 1px solid #2c2c2c;
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 12.5px;
+  color: #d9d9de;
+}
+.guardai-fileprev__btns { display: flex; gap: 8px; margin-top: 14px; flex: 0 0 auto; }
+.guardai-fileprev__btn {
+  all: unset; flex: 1 1 0; text-align: center; cursor: pointer;
+  padding: 9px 12px; border-radius: 10px; font-size: 13px; font-weight: 600;
+  background: #f4f4f5; color: #0a0a0a;
+}
+.guardai-fileprev__btn:hover { filter: brightness(0.92); }
+.guardai-fileprev__btn:disabled { opacity: 0.6; cursor: default; }
+.guardai-fileprev__btn--ghost {
+  background: transparent; color: #a1a1aa; border: 1px solid #2c2c2c; font-weight: 500;
+}
+.guardai-fileprev__btn--ghost:hover { background: #2c2c2c; color: #f4f4f5; filter: none; }
+
+html.guardai-light .guardai-filecard__btn--safetext { background: #14532d; color: #ffffff; }
+html.guardai-light .guardai-filecard__textwhy { color: #64748b; }
+html.guardai-light .guardai-fileprev {
+  background: #ffffff; color: #0f172a; border-color: #e2e8f0;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.18);
+}
+html.guardai-light .guardai-fileprev__grip::before { background: #cbd5e1; }
+html.guardai-light .guardai-fileprev__grip:hover::before { background: #94a3b8; }
+html.guardai-light .guardai-fileprev__title { color: #0f172a; }
+html.guardai-light .guardai-fileprev__close { color: #64748b; }
+html.guardai-light .guardai-fileprev__close:hover { color: #0f172a; background: #f1f5f9; }
+html.guardai-light .guardai-fileprev__meta { color: #64748b; }
+html.guardai-light .guardai-fileprev__text {
+  background: #f8fafc; border-color: #e2e8f0; color: #1e293b;
+}
+html.guardai-light .guardai-fileprev__btn { background: #0a0a0a; color: #ffffff; }
+html.guardai-light .guardai-fileprev__btn--ghost {
+  background: transparent; color: #475569; border-color: #e2e8f0;
+}
+html.guardai-light .guardai-fileprev__btn--ghost:hover { background: #f1f5f9; color: #0f172a; }
