@@ -244,6 +244,21 @@ header.top {
 .gd-switch input:checked + .gd-slider::before { transform: translateX(18px); background: #fff; }
 .gd-switch input:focus-visible + .gd-slider { outline: 2px solid var(--text); outline-offset: 2px; }
 
+/* Pinned by an admin. The switch keeps its real position and its real colour
+   — it IS on, and dimming it to look "off-ish" would misreport the state — but
+   it stops responding and stops offering a pointer that suggests otherwise. */
+.gd-switch input:disabled + .gd-slider { cursor: not-allowed; opacity: 0.62; }
+.cat-row__badge--set {
+  color: var(--good);
+  border-color: var(--good);
+}
+/* Carries the "you cannot change this" explanation to a screen reader, which
+   otherwise gets only the disabled state and no reason for it. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
 footer.note {
   margin-top: 28px;
   font-size: 12px;
@@ -336,6 +351,8 @@ footer.note {
           <button type="button" class="bulk-btn" id="disable-all">Disable all</button>
         </div>
       </section>
+
+      <div id="attachments"></div>
 
       <div id="modes"></div>
 

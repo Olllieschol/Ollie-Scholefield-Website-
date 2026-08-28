@@ -152,6 +152,10 @@ body {
 .gd-company p { font-size: 11.5px; line-height: 1.45; color: var(--text-dim); }
 .gd-company strong { color: var(--text); font-weight: 600; }
 
+/* A pinned master switch keeps its true position and its true colour — it IS
+   on — but stops responding and stops offering a pointer that says otherwise. */
+.gd-switch input:disabled + .gd-slider { cursor: not-allowed; opacity: 0.62; }
+
 /* Licence card. One card, three modes — locked, and the two flavours of
    "running out". A second card with a second code field would mean two places
    to type the same thing. */
@@ -345,6 +349,14 @@ body.gd-disabled .gd-platforms { opacity: 0.45; pointer-events: none; }
     <div class="gd-company" id="company-banner">
       <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="2.6" stroke="currentColor" stroke-width="1.8"/></svg>
       <p>Connected to <strong id="company-name">your company</strong>. Your masking activity is visible to your admin: <strong>how many</strong> items and <strong>what kind</strong>, never the values or your messages.</p>
+    </div>
+
+    <!-- Scanning pinned on by the user's admin. Shown rather than hidden: the
+         switch above stops responding, and a control that stops responding
+         without saying why reads as a broken extension. -->
+    <div class="gd-company gd-policy" id="policy-banner">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 10V7a6 6 0 0 1 12 0v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><rect x="4" y="10" width="16" height="10" rx="2" stroke="currentColor" stroke-width="1.8"/></svg>
+      <p><strong id="policy-who">Your organisation</strong> has turned checking on for everyone. GuardAI can&rsquo;t be switched off here, and files and images are always checked.</p>
     </div>
 
     <!-- Licence: locked, or running out -->

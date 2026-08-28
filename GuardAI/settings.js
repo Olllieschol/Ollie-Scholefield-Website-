@@ -23,6 +23,54 @@
 
   const STORAGE_KEY = "guardai_disabled_categories";
   const THEME_KEY = "guardai_theme";
+  const POLICY_KEY = "guardai_policy";
+
+  /**
+   * Attachment scanning. Two switches rather than one, because OCR on a
+   * screenshot is a different cost to the user than reading a PDF's text
+   * layer, and people reasonably want one without the other.
+   *
+   * Both DEFAULT ON, which is why they are not in MODES below — that list is
+   * an opt-in list and renders an "off by default" badge that would be a lie
+   * here. `lock` names the entry in the company policy that can pin this
+   * switch; see src/policy.js.
+   */
+  const SWITCHES = [
+    {
+      key: "guardai_file_scanning",
+      lock: "files",
+      title: "Check documents I attach",
+      desc: "On by default. GuardAI reads PDFs, Word documents and text files before " +
+            "they're attached, and stops the ones carrying sensitive details. Reading " +
+            "happens on your own device; the file never leaves it.",
+      note: "Turning this off means attachments go straight to the AI tool unchecked. " +
+            "What you type is still checked.",
+    },
+    {
+      key: "guardai_image_scanning",
+      lock: "images",
+      title: "Read text in images I attach",
+      desc: "On by default. GuardAI runs text recognition over screenshots and photos " +
+            "before they're attached. This is slower than reading a document, and it " +
+            "can't read everything in an image.",
+      note: "Turning this off means screenshots are attached without being looked at. " +
+            "A screenshot is the most common way a password reaches a chatbot.",
+    },
+  ];
+
+  /** Mirrors isLocked() in src/policy.js — see the note on the copy in
+   *  src/content.js. Held to it by test/policy.cjs. */
+  function lockedBy(pol, name) {
+    if (!pol || typeof pol !== "object") return false;
+    if (pol.mode !== "enforced") return false;
+    if (!pol.locks || typeof pol.locks !== "object") return false;
+    return pol.locks[name] === true;
+  }
+
+  function setByLine(pol) {
+    const who = pol && pol.companyName ? pol.companyName : "your organisation";
+    return "Set by " + who + ".";
+  }
   // MODE toggles are not categories. They have their own storage keys because
   // the category list is an OFF-list (absence = enabled), which structurally
   // cannot express a DEFAULT-OFF setting. Rendered in their own section, and
@@ -123,6 +171,77 @@
   applyTheme(localStorage.getItem(THEME_KEY) === "light");
 
   const groupsEl = document.getElementById("groups");
+
+  /**
+   * The two attachment switches, and whether the user's employer has pinned
+   * them.
+   *
+   * A pinned switch stays visible and stays in its true position. It is not
+   * hidden, because a control that vanishes reads as a bug and the person is
+   * entitled to know a policy applies to them rather than discovering it by
+   * being confused. It is not shown as off either — it is on, and saying
+   * otherwise would misreport what the extension is actually doing.
+   */
+  async function renderSwitches() {
+    const host = document.getElementById("attachments");
+    if (!host) return;
+    let data = {};
+    try {
+      data = await chrome.storage.local.get(SWITCHES.map((s) => s.key).concat([POLICY_KEY]));
+    } catch (_) {}
+    const policy = data[POLICY_KEY] || null;
+
+    host.innerHTML = "";
+    const section = document.createElement("section");
+    section.className = "group";
+    const heading = document.createElement("div");
+    heading.className = "group__title";
+    heading.textContent = "Files and images";
+    section.appendChild(heading);
+
+    const list = document.createElement("div");
+    list.className = "group__list";
+    for (const sw of SWITCHES) {
+      const locked = lockedBy(policy, sw.lock);
+      // Locked always reads ON. Never write this back to storage: when an
+      // admin returns the company to Flexible, the user's own choice has to
+      // still be there, exactly as they left it.
+      const on = locked ? true : data[sw.key] !== false;
+      const row = document.createElement("div");
+      row.className = "cat-row";
+      row.innerHTML =
+        `<div class="cat-row__text">` +
+        `<span class="cat-row__title">${escapeHtml(sw.title)}</span>` +
+        `<span class="cat-row__desc">${escapeHtml(sw.desc)}</span>` +
+        `<span class="cat-row__desc cat-row__warn">${escapeHtml(sw.note)}</span>` +
+        (locked
+          ? `<span class="cat-row__badge cat-row__badge--set">${escapeHtml(setByLine(policy))}</span>`
+          : "") +
+        `</div>` +
+        `<label class="gd-switch">` +
+        `<input type="checkbox" data-switch="${sw.key}" ${on ? "checked" : ""}` +
+        `${locked ? ` disabled aria-describedby="lockmsg-${sw.key}"` : ""} />` +
+        `<span class="gd-slider"></span>` +
+        `</label>`;
+      if (locked) {
+        const sr = document.createElement("span");
+        sr.id = "lockmsg-" + sw.key;
+        sr.className = "sr-only";
+        sr.textContent = setByLine(policy) + " You cannot change this.";
+        row.appendChild(sr);
+      }
+      list.appendChild(row);
+    }
+    section.appendChild(list);
+    host.appendChild(section);
+
+    host.querySelectorAll("input[data-switch]").forEach((box) => {
+      box.addEventListener("change", async () => {
+        if (box.disabled) return;
+        await chrome.storage.local.set({ [box.getAttribute("data-switch")]: box.checked });
+      });
+    });
+  }
 
   async function renderModes() {
     const host = document.getElementById("modes");
@@ -472,13 +591,19 @@
       /* storage unavailable — render with everything on, the safe default */
     }
     render(new Set(disabled));
+    await renderSwitches();
     await renderModes();
   })();
 
   // Live-refresh if the setting changes from elsewhere (e.g. this page open
   // in two tabs, or the array being reset some other way).
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== "local" || !changes[STORAGE_KEY]) return;
+    if (area !== "local") return;
+    // An admin switching the company between Flexible and Enforced, arriving
+    // while this page is open. Re-rendering is the whole update: the switch
+    // greys out or comes back, with no reload and nothing for the user to do.
+    if (changes[POLICY_KEY]) renderSwitches();
+    if (!changes[STORAGE_KEY]) return;
     const newVal = changes[STORAGE_KEY].newValue;
     render(new Set(Array.isArray(newVal) ? newVal : []));
   });

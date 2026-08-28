@@ -20,12 +20,29 @@ import { buildEventBody, normaliseSite } from "./src/company.js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured } from "./src/company-config.js";
 import {
   decide, needsRefresh, describe, parseCode,
-  grandfathered, companyGrant, COMPANY_INITIAL_MS,
+  grandfathered, companyGrant, COMPANY_INITIAL_MS, REFRESH_AFTER_MS,
 } from "./src/entitlement.js";
+import {
+  decide as decidePolicy, provisional as provisionalPolicy,
+} from "./src/policy.js";
 
 const STATS_KEY = "guardai_stats";
 const COMPANY_KEY = "guardai_company";
 const ENT_KEY = "guardai_entitlement";
+const POLICY_KEY = "guardai_policy";
+
+/** How long a company seat may go without re-reading its employer's policy.
+ *  An admin switching to Enforced must not have to wait a day, and must never
+ *  have to ask anyone to restart a browser. */
+const POLICY_AFTER_MS = 15 * 60 * 1000;
+
+/** Floor on network attempts, in memory only so it dies with the worker.
+ *  A failed check leaves lastVerifiedAt untouched, which is what makes silence
+ *  unable to change anything — but it also means needsRefresh() stays true, so
+ *  without this a flat network would be retried on every single wakeup. */
+const ATTEMPT_FLOOR_MS = 60 * 1000;
+let lastAttemptAt = 0;
+let inFlight = null;
 
 const DEFAULT_STATS = () => ({
   detected: 0,
@@ -42,6 +59,11 @@ const DEFAULT_STATS = () => ({
 const DEFAULT_SETTINGS = {
   guardai_enabled: true,
   guardai_masking_enabled: false,
+  // Attachment scanning, on by default. Both are read as `!== false`
+  // everywhere, so a missing key is already "on" — these are written only so
+  // that a person looking at storage can see what the switches are.
+  guardai_file_scanning: true,
+  guardai_image_scanning: true,
 };
 
 /* ------------------------------------------------------------------ *
@@ -173,6 +195,14 @@ async function connectCompany(code) {
   // one who pays, so redeeming it must unlock the product outright rather than
   // leave them hunting for a second code.
   await writeEntitlement(companyGrant(conn.employeeId));
+  // The policy arrives on the same response, so a freshly connected browser is
+  // never in the "company seat with no policy" state at all. An older backend
+  // that does not send one leaves this null, and the first poll fills it in.
+  await applyPolicyOutcome(
+    payload.policy
+      ? { result: "policy", policy: { ...payload.policy, company_name: conn.companyName } }
+      : { result: "error", reason: "no-policy-in-response" }
+  );
   return conn;
 }
 
@@ -209,6 +239,14 @@ async function releaseSeat() {
 
 async function disconnectCompany() {
   await releaseSeat();
+  // The policy goes with the connection, and it goes FIRST. readPolicy() seeds
+  // a record for any install holding a company key, so clearing them the other
+  // way round would re-seed the thing we just removed.
+  //
+  // This is not a bypass. The seat IS the licence: leaving your employer's
+  // company takes the entitlement with it, so what is on the other side of
+  // this is no product at all rather than an unenforced one.
+  await chrome.storage.local.remove(POLICY_KEY);
   await chrome.storage.local.remove(COMPANY_KEY);
   // Leaving your employer's dashboard also ends the entitlement it granted.
   const rec = await readEntitlement();
@@ -260,6 +298,57 @@ async function writeEntitlement(rec) {
 async function applyOutcome(outcome) {
   const prev = await readEntitlement();
   return writeEntitlement(decide(prev, outcome, Date.now()));
+}
+
+
+/* ------------------------------------------------------------------ *
+ * Company scanning policy.
+ *
+ * The rules live in src/policy.js and are deliberately not repeated here;
+ * this half only does the I/O. If you are looking for the policy — for what
+ * an error is allowed to change, or for why a missing record is never
+ * enforced — it is not in this file.
+ *
+ * Note that this fails the OPPOSITE way from the entitlement code above it.
+ * There, silence must never revoke. Here, silence must never relax. Both are
+ * the safe direction for their own question, and they are kept in separate
+ * records precisely so that one reducer is never asked to hold two
+ * contradictory defaults.
+ * ------------------------------------------------------------------ */
+
+/**
+ * The stored policy, seeding one if this install is a company seat that has
+ * never had it.
+ *
+ * The seed is the whole answer to "how do we not enforce the entire existing
+ * customer base on update". Every seat connected before this feature shipped
+ * holds a company key and no policy, so that state has to mean something
+ * harmless. It means flexible, at version -1, which every real answer from the
+ * server (version 0 or more) outranks.
+ *
+ * Doing it here rather than in an onInstalled migration is deliberate: a
+ * migration has to run before anything reads, and getting that ordering wrong
+ * is exactly the mistake that flips everyone to enforced. Seeding on read has
+ * no ordering to get wrong.
+ */
+async function readPolicy() {
+  const data = await chrome.storage.local.get([POLICY_KEY, COMPANY_KEY]);
+  if (data[POLICY_KEY]) return data[POLICY_KEY];
+  if (!data[COMPANY_KEY]) return null;   // individual or unconnected: no policy exists
+  const seed = provisionalPolicy(Date.now());
+  await chrome.storage.local.set({ [POLICY_KEY]: seed });
+  return seed;
+}
+
+async function writePolicy(rec) {
+  if (!rec) await chrome.storage.local.remove(POLICY_KEY);
+  else await chrome.storage.local.set({ [POLICY_KEY]: rec });
+  return rec;
+}
+
+async function applyPolicyOutcome(outcome) {
+  const prev = await readPolicy();
+  return writePolicy(decidePolicy(prev, outcome, Date.now()));
 }
 
 /**
@@ -376,9 +465,37 @@ async function adoptSeatToken(rec) {
   return writeEntitlement({ ...rec, token: conn.employeeId });
 }
 
+/**
+ * How long this holder may go between checks.
+ *
+ * A company seat carries its employer's scanning policy back on the same
+ * response, and an admin switching to Enforced must not wait a day for it, so
+ * it is polled in minutes. An individual key has no policy to collect, and
+ * refresh_entitlement is not free the way refresh_company is: it stamps
+ * last_seen_at on every call. Speeding that one up would record more and buy
+ * nothing.
+ */
+function refreshAfterFor(rec) {
+  return rec && rec.kind === "company" ? POLICY_AFTER_MS : REFRESH_AFTER_MS;
+}
+
 async function refreshIfStale() {
+  // One check at a time, and never more than once a minute. A failed check
+  // deliberately leaves lastVerifiedAt alone — that is what stops silence
+  // changing anything — which also means needsRefresh() stays true until one
+  // succeeds. Without a floor, a flat network would be retried on every
+  // keystroke batch that woke this worker.
+  if (inFlight) return inFlight;
+  const now = Date.now();
+  if (now - lastAttemptAt < ATTEMPT_FLOOR_MS) return readEntitlement();
+  inFlight = doRefresh(now).finally(() => { inFlight = null; });
+  return inFlight;
+}
+
+async function doRefresh(now) {
   const rec = await adoptSeatToken(await readEntitlement());
-  if (!needsRefresh(rec, Date.now()) || !isConfigured()) return rec;
+  if (!needsRefresh(rec, now, refreshAfterFor(rec)) || !isConfigured()) return rec;
+  lastAttemptAt = now;
 
   // Two kinds of holder, two endpoints, one contract. A seat is re-checked by
   // its own id; an individual key by the activation token it was given.
@@ -388,20 +505,41 @@ async function refreshIfStale() {
     res = await fetch(rpcUrl(seat ? "refresh_company" : "refresh_entitlement"), {
       method: "POST",
       headers: rpcHeaders(),
+      // Unchanged, and it must stay unchanged. This one field — an anonymous
+      // seat id that already went — is the whole of what leaves the browser.
+      // The policy rides back on the response; nothing about it goes out.
       body: JSON.stringify(seat ? { p_employee_id: rec.token } : { p_token: rec.token }),
     });
   } catch (_) {
+    if (seat) await applyPolicyOutcome({ result: "error", reason: "network" });
     return applyOutcome({ result: "error", reason: "network" });
   }
 
   // A 5xx, a 401, a proxy's login page: all of these are the server failing to
-  // answer, not answering "no". Fail open.
-  if (!res.ok) return applyOutcome({ result: "error", reason: "http-" + res.status });
+  // answer, not answering "no". Fail open on the licence, and hold the last
+  // known policy — which is what makes blocking our domain pointless.
+  if (!res.ok) {
+    if (seat) await applyPolicyOutcome({ result: "error", reason: "http-" + res.status });
+    return applyOutcome({ result: "error", reason: "http-" + res.status });
+  }
 
   const payload = await res.json().catch(() => null);
   if (!payload || typeof payload.valid !== "boolean") {
+    if (seat) await applyPolicyOutcome({ result: "error", reason: "malformed" });
     return applyOutcome({ result: "error", reason: "malformed" });
   }
+
+  // The policy is folded in before the licence verdict, and on both verdicts.
+  // A seat whose subscription has lapsed is still subject to its employer's
+  // policy for the fortnight of grace it keeps working through.
+  if (seat) {
+    await applyPolicyOutcome(
+      payload.policy
+        ? { result: "policy", policy: payload.policy }
+        : { result: "error", reason: "no-policy-in-response" }
+    );
+  }
+
   if (!payload.valid) return applyOutcome({ result: "invalid" });
 
   return applyOutcome({
@@ -416,7 +554,16 @@ async function refreshIfStale() {
 
 async function entitlementStatus() {
   const rec = await readEntitlement();
-  return { state: describe(rec, Date.now()), record: rec, available: isConfigured() };
+  return {
+    state: describe(rec, Date.now()),
+    record: rec,
+    available: isConfigured(),
+    // Carried on the same reply the popup and settings page already ask for,
+    // so neither needs a second round trip to know what is pinned. They also
+    // watch guardai_policy through storage.onChanged, which is what updates
+    // them when an admin flips it while the page is open.
+    policy: await readPolicy(),
+  };
 }
 
 /**
@@ -500,9 +647,21 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       // "Deactivate" and an individual licence holder means it too;
       // releaseSeat simply does nothing when there is no seat.
       releaseSeat()
-        .then(() => Promise.all([writeEntitlement(null), chrome.storage.local.remove(COMPANY_KEY)]))
+        .then(() => Promise.all([
+          writeEntitlement(null),
+          chrome.storage.local.remove([COMPANY_KEY, POLICY_KEY]),
+        ]))
         .then(() => sendResponse({ ok: true }));
       return true;
+
+    case "GUARDAI_POLICY_SYNC":
+      // Sent by a content script as it boots on a supported site. This is the
+      // guarantee that matters most: whatever the timer has been doing, you
+      // cannot start composing a message under a policy older than this page
+      // load. Fire and forget — nothing waits on it, and the result reaches
+      // the page through storage.onChanged like every other setting.
+      refreshIfStale().catch(() => {});
+      return;
 
     default:
       return;
@@ -521,4 +680,5 @@ export {
   activateCode, refreshIfStale, migrateEntitlement,
   entitlementStatus, readEntitlement, writeEntitlement,
   disconnectCompany, releaseSeat,
+  readPolicy, writePolicy, POLICY_AFTER_MS,
 };

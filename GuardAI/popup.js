@@ -44,6 +44,42 @@
     privacyLink: $("privacy-link"),
   };
 
+  /** Mirrors isLocked() in src/policy.js — see the note on the copy in
+   *  src/content.js. Held to it by test/policy.cjs. */
+  function lockedBy(pol, name) {
+    if (!pol || typeof pol !== "object") return false;
+    if (pol.mode !== "enforced") return false;
+    if (!pol.locks || typeof pol.locks !== "object") return false;
+    return pol.locks[name] === true;
+  }
+
+  /**
+   * Show or clear the pinned-master-switch state.
+   *
+   * The switch is disabled, not hidden, and it stays checked because it is
+   * genuinely on. The banner names the company where we know it, because
+   * someone subject to a rule is entitled to know whose rule it is.
+   */
+  function paintPolicyLock(lockedOn, policy) {
+    const sw = els.enabled;
+    if (sw) {
+      sw.disabled = lockedOn;
+      const label = sw.closest(".gd-switch");
+      if (label) {
+        label.title = lockedOn
+          ? "Turned on by your organisation"
+          : "Enable or disable GuardAI";
+      }
+    }
+    const banner = $("policy-banner");
+    if (!banner) return;
+    banner.classList.toggle("is-on", lockedOn);
+    const who = $("policy-who");
+    if (who && lockedOn) {
+      who.textContent = (policy && policy.companyName) || "Your organisation";
+    }
+  }
+
   /* ---- Load everything from storage and paint the UI ---- */
   async function render() {
     let data;
@@ -54,6 +90,7 @@
         "guardai_autopanel_enabled",
         "guardai_stats",
         "guardai_mapping",
+        "guardai_policy",
       ]);
     } catch (err) {
       // Storage genuinely unavailable (rare, but the popup must still look
@@ -63,9 +100,16 @@
     }
     clearStorageError();
 
-    const enabled = data.guardai_enabled !== false;
+    // The master switch, through the company policy. This is the one an
+    // enforced user would reach for first: pinning file and image scanning
+    // while leaving this free would be a control with a one-click bypass
+    // sitting next to it.
+    const policy = data.guardai_policy || null;
+    const lockedOn = lockedBy(policy, "enabled");
+    const enabled = lockedOn ? true : data.guardai_enabled !== false;
     const masking = data.guardai_masking_enabled === true;
     const autopanel = data.guardai_autopanel_enabled === true; // default OFF
+    paintPolicyLock(lockedOn, policy);
     const stats = data.guardai_stats || {
       detected: 0,
       masked: 0,
@@ -220,6 +264,11 @@
   });
 
   els.enabled.addEventListener("change", async () => {
+    // Belt to the disabled attribute's braces. A disabled input does not fire
+    // change, so this is unreachable through the UI — it is here so that the
+    // ONE line that could write false to the master switch is guarded, rather
+    // than relying on a DOM attribute somewhere else having been set.
+    if (els.enabled.disabled) { els.enabled.checked = true; return; }
     await chrome.storage.local.set({ guardai_enabled: els.enabled.checked });
     document.body.classList.toggle("gd-disabled", !els.enabled.checked);
   });

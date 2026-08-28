@@ -94,11 +94,19 @@ export function sweep(rec, now = Date.now()) {
  * Should we phone home? Only for records that can actually expire and that
  * have something to ask about. Review builds (hardStopAt null) and
  * grandfathered installs (no token) never contact the server at all.
+ *
+ * afterMs is a parameter rather than a constant because the two kinds of
+ * holder are checked on different clocks, and the reason is not about
+ * licensing at all: a company seat carries its employer's scanning policy back
+ * on the same response, so it is polled in minutes rather than days. The
+ * caller owns that choice — see refreshAfterFor() in background.js — and this
+ * function stays a pure comparison.
  */
-export function needsRefresh(rec, now = Date.now()) {
+export function needsRefresh(rec, now = Date.now(), afterMs = REFRESH_AFTER_MS) {
   if (!rec || !rec.token) return false;
   if (rec.hardStopAt === null || rec.hardStopAt === undefined) return false;
-  return now - (rec.lastVerifiedAt || 0) >= REFRESH_AFTER_MS;
+  const after = Number.isFinite(afterMs) ? afterMs : REFRESH_AFTER_MS;
+  return now - (rec.lastVerifiedAt || 0) >= after;
 }
 
 /**

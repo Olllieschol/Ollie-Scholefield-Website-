@@ -42,6 +42,7 @@ const SUITES = [
   { name: "seat-lifecycle.cjs (a company seat over 400 days of clock)", file: "test/seat-lifecycle.cjs" },
   { name: "activation-ui.cjs (popup licence card + settings activation, all four states)", file: "test/activation-ui.cjs" },
   { name: "backend-contract.cjs (SQL error codes + safety clauses match the extension)", file: "test/backend-contract.cjs" },
+  { name: "policy.cjs (company scanning policy: fail-closed, no mass-enforce on update, write-free poll)", file: "test/policy.cjs" },
   { name: "packaging.cjs (the store zip contains everything, and nothing else)", file: "test/packaging.cjs" },
 
   { name: "file-chunking.cjs (document-length scanning + the block/pass policy)", file: "test/file-chunking.cjs" },

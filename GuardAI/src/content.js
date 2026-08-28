@@ -215,6 +215,16 @@
     // OFF means an image OCR read and found nothing in is attached with a
     // notice rather than a decision. It never affects the other two image
     // outcomes: found-something and could-not-read always stop.
+    fileScanning: true,  // "Check documents I attach" — default ON.
+    imageScanning: true, // "Read text in images I attach" — default ON.
+    // Both default TRUE for the same reason `entitled` does: the only time
+    // these are wrong is when storage could not be read, and a storage failure
+    // must never be a route to quietly scanning less than the user asked for.
+    policy: null, // the employer's scanning policy, or null for an individual
+    // or unconnected install. NEVER treated as enforced when absent — see the
+    // header of src/policy.js for why that asymmetry is the whole safety
+    // argument. The three values above are computed through it, and the user's
+    // own stored keys are never overwritten by it.
   };
 
   /* ------------------------------------------------------------------ *
@@ -256,6 +266,31 @@
     return Date.now() < rec.hardStopAt;
   }
 
+  /**
+   * Is this switch pinned by the user's employer?
+   *
+   * Mirrored verbatim from isLocked() in src/policy.js, for the same reason
+   * entitledFrom() mirrors isUnlocked(): a content script is a classic script
+   * and cannot import a module. Keep the two identical, and keep them this
+   * short. test/policy.cjs runs both over the same matrix and fails if they
+   * ever disagree, so this is held together by a test rather than by hope.
+   *
+   * Read src/policy.js for why a missing or damaged record locks NOTHING.
+   */
+  function lockedBy(pol, name) {
+    if (!pol || typeof pol !== "object") return false;
+    if (pol.mode !== "enforced") return false;
+    if (!pol.locks || typeof pol.locks !== "object") return false;
+    return pol.locks[name] === true;
+  }
+
+  /** The user's own choice, unless their admin pinned it on. Never written
+   *  back to storage: when a policy relaxes, everyone's own setting is still
+   *  exactly where they left it. */
+  function effectiveFrom(userValue, pol, name) {
+    return lockedBy(pol, name) ? true : userValue;
+  }
+
   /** May GuardAI detect, warn and mask? */
   function isActive() {
     return state.enabled && state.entitled;
@@ -286,10 +321,19 @@
         "guardai_disabled_categories",
         "guardai_aggressive_names",
         "guardai_image_hard_stop",
+        "guardai_file_scanning",
+        "guardai_image_scanning",
         "guardai_theme",
         "guardai_entitlement",
+        "guardai_policy",
       ]);
-      state.enabled = data.guardai_enabled !== false; // default ON
+      // Read the policy before anything it governs, so the three effective
+      // values below are computed once from a settled record rather than
+      // being corrected afterwards.
+      state.policy = data.guardai_policy || null;
+      state.enabled = effectiveFrom(data.guardai_enabled !== false, state.policy, "enabled");
+      state.fileScanning = effectiveFrom(data.guardai_file_scanning !== false, state.policy, "files");
+      state.imageScanning = effectiveFrom(data.guardai_image_scanning !== false, state.policy, "images");
       state.entitled = entitledFrom(data.guardai_entitlement);
       state.maskingEnabled = data.guardai_masking_enabled === true; // default OFF
       state.autoRestore = data.guardai_auto_restore !== false; // default ON
@@ -318,10 +362,47 @@
     document.documentElement.classList.toggle("guardai-light", light);
   }
 
+  /** Recompute everything the policy governs from what is currently stored.
+   *  Called when the policy changes, because one policy change can move three
+   *  switches at once and each of them has to end up at its effective value,
+   *  not at whatever the user last chose. */
+  async function reapplyPolicy() {
+    try {
+      const d = await chrome.storage.local.get([
+        "guardai_enabled", "guardai_file_scanning", "guardai_image_scanning",
+      ]);
+      state.enabled = effectiveFrom(d.guardai_enabled !== false, state.policy, "enabled");
+      state.fileScanning = effectiveFrom(d.guardai_file_scanning !== false, state.policy, "files");
+      state.imageScanning = effectiveFrom(d.guardai_image_scanning !== false, state.policy, "images");
+      applyEnabledState();
+    } catch (_) {
+      // Storage unreadable. Leave every value exactly as it is rather than
+      // guessing: the last known state is right more often than a default.
+    }
+  }
+
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
+    if (changes.guardai_policy) {
+      // An admin switched the company between Flexible and Enforced. This is
+      // the whole "no browser restart" guarantee: the worker writes the record
+      // and every open tab arrives here, including tabs the user is typing in
+      // right now.
+      state.policy = changes.guardai_policy.newValue || null;
+      reapplyPolicy();
+    }
+    if (changes.guardai_file_scanning) {
+      state.fileScanning = effectiveFrom(
+        changes.guardai_file_scanning.newValue !== false, state.policy, "files");
+    }
+    if (changes.guardai_image_scanning) {
+      state.imageScanning = effectiveFrom(
+        changes.guardai_image_scanning.newValue !== false, state.policy, "images");
+    }
     if (changes.guardai_enabled) {
-      state.enabled = changes.guardai_enabled.newValue !== false;
+      // Through the policy, not raw. A locked switch stays on even if
+      // something writes false to the key it shadows.
+      state.enabled = effectiveFrom(changes.guardai_enabled.newValue !== false, state.policy, "enabled");
       applyEnabledState();
     }
     if (changes.guardai_entitlement) {
@@ -4570,6 +4651,24 @@
    * injected at document_start so even a site listening on window registers
    * after we do.
    */
+  /**
+   * Is this one file in scope for scanning right now?
+   *
+   * Images and documents are two separate switches because they are two
+   * separate costs to the user: OCR on a screenshot is slower and more
+   * intrusive than reading a PDF's text layer, and people reasonably want one
+   * without the other. An unknown or unsupported file counts as a document,
+   * which is the conservative reading: it means "unsupported" still gets
+   * reported honestly instead of being silently dropped by an image switch.
+   */
+  function shouldScanFile(file) {
+    const FS = window.GuardAI && window.GuardAI.FileScan;
+    if (!FS || typeof FS.classify !== "function") return state.fileScanning;
+    let kind = "";
+    try { kind = (FS.classify(file && file.name, file && file.type) || {}).kind; } catch (_) {}
+    return kind === "image" ? state.imageScanning : state.fileScanning;
+  }
+
   function onAttach(e) {
     if (releasingFiles) return;          // our own re-dispatch
     if (!isActive()) return;             // master off, or unlicensed
@@ -4582,6 +4681,14 @@
 
     // Already looked at and let through by the user, in this tab.
     if (files.every((f) => approvedFiles.has(fileKey(f)))) return;
+
+    // Attachment scanning switched off — by the user, or pinned on by their
+    // admin, which effectiveFrom() has already resolved into these two values.
+    // Both are checked here rather than deeper in, so a file we are not going
+    // to check is never taken custody of in the first place: the site's own
+    // attach behaviour runs untouched and the user sees nothing at all, rather
+    // than a card telling them about a check that did not happen.
+    if (!files.some(shouldScanFile)) return;
 
     const input = e.type === "change" ? e.target : null;
 
@@ -4750,10 +4857,19 @@
    * presented the way a scanned, clean one is.
    */
   async function reviewFiles(files, origin) {
-    const card = showFileCard(files);
+    // A batch can mix a PDF with a screenshot while only one of the two
+    // switches is on. Only the in-scope files are read, named on the card, or
+    // counted — but the FULL batch is what gets released, so the ones we were
+    // told not to look at are attached without comment. That is what the
+    // switch means, and it keeps the card's promise intact: it never describes
+    // a file it did not read.
+    const scanning = files.filter(shouldScanFile);
+    if (!scanning.length) { releaseFiles(files, origin); return; }
+
+    const card = showFileCard(scanning);
     const results = [];
 
-    for (const file of files) {
+    for (const file of scanning) {
       try {
         const res = await scanFile(file, (p) => card.progress(file, p));
         results.push({ file, res });
@@ -5481,6 +5597,14 @@
     }
     // Warm up the optional NLP layer in the background (no-op if disabled).
     nlp.init().catch(() => {});
+
+    // Ask the worker to re-read the company policy. Fire and forget: this page
+    // is already usable with whatever was last stored, and the answer arrives
+    // through storage.onChanged like every other setting. What it buys is the
+    // guarantee that matters — however long the worker has been asleep, you
+    // cannot begin composing a message under a policy older than this page
+    // load. The worker throttles it, so a tab storm costs one request.
+    try { chrome.runtime.sendMessage({ type: "GUARDAI_POLICY_SYNC" }); } catch (_) {}
 
     startObserving();
     updateLockedNotice();
