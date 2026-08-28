@@ -68,6 +68,7 @@ const SUITES = [
   { name: "toggle-preserves-data.cjs (toggle pauses, never wipes history)", file: "test/toggle-preserves-data.cjs" },
   { name: "clear-remasks-page.cjs (Clear visibly remasks before wiping, both trigger paths)", file: "test/clear-remasks-page.cjs" },
   { name: "panel-item-delete.cjs (per-item forget, leaves other items untouched)", file: "test/panel-item-delete.cjs" },
+  { name: "message-marks.cjs (What AI sees shows only fakes; no real-value caption)", file: "test/message-marks.cjs" },
   { name: "popup-clear-arm.cjs (popup Clear is click-to-arm, not window.confirm)", file: "test/popup-clear-arm.cjs" },
   { name: "panel-no-autoopen.cjs (panel never pops open on its own)", file: "test/panel-no-autoopen.cjs" },
   { name: "panel-autopanel-setting.cjs (opt-in panel auto-open after Mask & Send)", file: "test/panel-autopanel-setting.cjs" },

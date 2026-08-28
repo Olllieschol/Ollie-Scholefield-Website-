@@ -575,23 +575,6 @@
   white-space: nowrap;
   cursor: pointer;
 }
-/* Marks with a caption stack the original/replacement underneath in small grey. */
-.guardai-panel__mark[data-sub] {
-  display: inline-block;
-  text-align: center;
-  line-height: 1.2;
-  vertical-align: -0.35em;
-  padding-bottom: 2px;
-}
-.guardai-panel__mark[data-sub]::after {
-  content: attr(data-sub);
-  display: block;
-  margin-top: 1px;
-  font-size: 10px;
-  font-weight: 400;
-  color: #8a8a8f;
-  white-space: nowrap;
-}
 /* Passwords keep their real fake as text (so it sends correctly) but render as dots. */
 .guardai-panel__mark--secret { -webkit-text-security: disc; text-security: disc; }
 .guardai-panel__msgempty {
@@ -1082,7 +1065,6 @@ html.guardai-light .guardai-panel__readview {
   color: #0f172a;
 }
 html.guardai-light .guardai-panel__editable:focus { border-color: #94a3b8; }
-html.guardai-light .guardai-panel__mark[data-sub]::after { color: #94a3b8; }
 html.guardai-light .guardai-panel__msgempty { color: #94a3b8; }
 html.guardai-light .guardai-panel__msgempty b { color: #475569; }
 html.guardai-light .guardai-panel__msghint { color: #94a3b8; }

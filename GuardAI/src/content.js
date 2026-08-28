@@ -2465,13 +2465,13 @@
     let cursor = 0;
     for (const it of positioned) {
       if (it.start > cursor) out.push(escapeHtml(activeReview.original.slice(cursor, it.start)));
-      out.push(markHtml(it, "ai"));
+      out.push(markHtml(it));
       cursor = it.end;
     }
     if (cursor < activeReview.original.length) out.push(escapeHtml(activeReview.original.slice(cursor)));
     // Append any manual (start<0) items that aren't part of the original text run.
     for (const it of activeReview.items) {
-      if (it.start < 0) out.push(" " + markHtml(it, "ai"));
+      if (it.start < 0) out.push(" " + markHtml(it));
     }
     msgEditableEl.innerHTML = out.join("");
 
@@ -2492,8 +2492,9 @@
     clone.querySelectorAll(".guardai-panel__mark").forEach((m) => {
       const real = m.getAttribute("data-real") || "";
       m.textContent = real;
-      // No grey fake-value caption in the "What you see" view — keep only the
-      // coloured highlight on the real word.
+      // Neither view carries a caption any more (see markHtml). Kept as a
+      // cheap guarantee that a stray data-sub from anywhere can never render
+      // the FAKE underneath the real text in this view.
       m.removeAttribute("data-sub");
     });
     msgRealViewEl.innerHTML = clone.innerHTML;
@@ -2535,22 +2536,28 @@
   }
 
   /**
-   * Build the HTML for a masked item. `view` is "ai" (show the fake, real as the
-   * grey caption) or "you" (show the real, fake as the caption). data-real and
-   * data-fake are always carried so the hover tooltip can act on the item.
-   * innerText still equals the fake in the editable, so sends stay masked.
+   * Build the HTML for a masked item in the "What AI sees" editable: the mark
+   * shows the FAKE, and nothing else.
+   *
+   * It used to carry the real value as a small grey caption underneath. That
+   * is the one view whose entire job is to show only what leaves the browser,
+   * and the real value sitting under every mark both undermined that and
+   * duplicated the "What you see" tab an inch to the right. buildReadView()
+   * had already dropped the mirror-image caption from that tab; this brings
+   * the two into line.
+   *
+   * data-real and data-fake are still carried so the hover tooltip (Remove
+   * mask / Change replacement) can act on the item, and innerText still
+   * equals the fake, so sends stay masked.
    */
-  function markHtml(it, view) {
+  function markHtml(it) {
     const st = markStyle(it.type, it.manual);
     const secret = it.type === "PASSWORD" ? " guardai-panel__mark--secret" : "";
-    const main = view === "you" ? it.value : it.fake;
-    const sub = view === "you" ? it.fake : it.value;
-    const subAttr = it.type === "PASSWORD" ? "" : ` data-sub="${escapeHtml(sub)}"`;
     return (
       `<mark class="guardai-panel__mark${secret}" contenteditable="false" ` +
       `data-type="${escapeHtml(it.type)}" data-real="${escapeHtml(it.value)}" ` +
-      `data-fake="${escapeHtml(it.fake)}" style="--mk:${st.color}"${subAttr}>` +
-      escapeHtml(main) +
+      `data-fake="${escapeHtml(it.fake)}" style="--mk:${st.color}">` +
+      escapeHtml(it.fake) +
       `</mark>`
     );
   }
@@ -2683,7 +2690,6 @@
     // Update the live mark in the editable.
     mark.textContent = newFake;
     mark.setAttribute("data-fake", newFake);
-    if (type !== "PASSWORD") mark.setAttribute("data-sub", real);
     // Update the model + the MASKED tab.
     for (const it of review.items) {
       if (it.value === real) it.fake = newFake;
@@ -2881,6 +2887,10 @@
   // "never auto-open, just badge, unless already visibly open" behavior)
   // without needing to drive a full mutation-observer + response cycle.
   window.GuardAI._panelHooks = {
+    // markHtml is the ONLY producer of marks in the "What AI sees" editable,
+    // so asserting on it asserts the view's whole contract: the fake is shown,
+    // the real value is not.
+    markHtml,
     logActivity,
     isPanelVisible: () => !!(panelEl && panelEl.style.display !== "none"),
     isReopenVisible: () => !!(reopenEl && reopenEl.style.display !== "none"),
@@ -2952,7 +2962,6 @@
     mark.setAttribute("data-type", type);
     mark.setAttribute("data-real", real);
     mark.setAttribute("data-fake", fake);
-    if (type !== "PASSWORD") mark.setAttribute("data-sub", real); // grey original underneath
     mark.style.setProperty("--mk", st.color);
     mark.textContent = fake; // real fake stays; CSS hides passwords visually
 
