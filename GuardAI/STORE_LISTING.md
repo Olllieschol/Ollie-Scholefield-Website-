@@ -180,15 +180,25 @@ the extension still installs and works on older Chrome.
 ## Image scanning — what it claims, and what it does not
 
 OCR reads what it can see, which is less than a person can. So an image never
-gets the document flow's "checked / nothing found" wording and is **never
-auto-attached the way a clean document is**. There are three outcomes and they
-read differently on purpose:
+gets the document flow's "checked / nothing found" wording. There are three
+outcomes and they read differently on purpose:
 
-| Outcome | What the card says |
-|---|---|
-| Found something | Same category rows and counts as a document, plus "GuardAI may not have read all of it" |
-| Read it, found nothing | "Nothing found, your call" — it read what it could see, cannot read everything a person can, look it over yourself |
-| Could not read it | "GuardAI could not read this image properly" — treat as unchecked |
+| Outcome | What happens | What it says |
+|---|---|---|
+| Found something | **Stops and waits** | Same category rows and counts as a document, plus "GuardAI may not have read all of it" |
+| Read it, found nothing | **Attaches, with a notice** | "Attached — nothing found, but have a look": it read what it could see, can't read everything in an image, so this **isn't a clean bill of health** and the judgement is still yours |
+| Could not read it | **Stops and waits** | "GuardAI could not read this image properly" — treat as unchecked |
+
+The middle row was a hard stop until 2026-08-28 and is now a notice. The
+reasoning that made it a stop is still true, and the wording still says it —
+but a click on every clean screenshot, while a clean *document* attaches on
+its own, teaches people to dismiss the card without reading, which is exactly
+what the two outcomes that carry news depend on. The honesty lives in the
+words rather than in the friction.
+
+**Always stop on images** (Settings → Modes, default off) restores the hard
+stop for teams that want one. It changes only that middle row: an image with
+findings, or one GuardAI could not read, stops either way.
 
 PNG, JPEG and WebP. There is no "send the text instead" option for an image: a
 screenshot's meaning is its layout, so there is nothing faithful to paste, and

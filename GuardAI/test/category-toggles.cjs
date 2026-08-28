@@ -77,6 +77,30 @@ for (const t of catalogueTypes) {
     "the aggressive-names row warns about false positives");
   check(agg && /warning card|masking mode/i.test(agg.note || ""),
     "the aggressive-names row states the silent-mode interaction");
+
+  const stop = MODES.find((m) => m.key === "guardai_image_hard_stop");
+  check(!!stop, "the always-stop-on-images mode is present");
+  check(stop && /off by default/i.test(stop.desc),
+    "the always-stop-on-images row says it is off by default");
+  check(stop && /always stops|always stop/i.test(stop.note || ""),
+    "…and its note says the other two image outcomes stop either way",
+    stop ? stop.note : "");
+
+  /**
+   * EVERY mode key must be read by the side that acts on it. settings.js
+   * writes chrome.storage.local[key] and content.js reads it; a typo in
+   * either leaves a switch that moves, persists, and does nothing at all —
+   * a failure with no error message and no visible symptom except that the
+   * product ignores the user. Neither file's own tests can see it, because
+   * each is internally consistent.
+   */
+  const contentSrc = fs.readFileSync(path.join(ROOT, "src", "content.js"), "utf8");
+  for (const mode of MODES) {
+    const readInLoad = contentSrc.includes(`"${mode.key}"`);
+    const readOnChange = contentSrc.includes(`changes.${mode.key}`);
+    check(readInLoad, `content.js reads ${mode.key} at startup`);
+    check(readOnChange, `content.js reacts to ${mode.key} changing live`);
+  }
 }
 
 check(producedTypes.size === catalogueTypes.size,

@@ -211,6 +211,10 @@
     aggressiveNames: false, // "Aggressive name detection" — opt-in, default OFF
     disabledCategories: [], // finding TYPEs the user switched off in "What
     // GuardAI masks" (settings.html). Empty by default — everything on.
+    imageHardStop: false, // "Always stop on images" — opt-in, default OFF.
+    // OFF means an image OCR read and found nothing in is attached with a
+    // notice rather than a decision. It never affects the other two image
+    // outcomes: found-something and could-not-read always stop.
   };
 
   /* ------------------------------------------------------------------ *
@@ -281,6 +285,7 @@
         "guardai_autopanel_enabled",
         "guardai_disabled_categories",
         "guardai_aggressive_names",
+        "guardai_image_hard_stop",
         "guardai_theme",
         "guardai_entitlement",
       ]);
@@ -297,6 +302,9 @@
       // malformed value can never silently turn on the noisier mode.
       state.aggressiveNames = data.guardai_aggressive_names === true;
       detector.setAggressiveNames(state.aggressiveNames);
+      // Same shape, same reason: only an explicit `true` restores the hard
+      // stop, so a missing or malformed value leaves the lighter default.
+      state.imageHardStop = data.guardai_image_hard_stop === true;
       applyThemeToPage(data.guardai_theme === "light");
     } catch (err) {
       console.warn("[GuardAI] could not read settings, using defaults:", err);
@@ -340,6 +348,12 @@
     if (changes.guardai_aggressive_names) {
       state.aggressiveNames = changes.guardai_aggressive_names.newValue === true;
       detector.setAggressiveNames(state.aggressiveNames);
+    }
+    if (changes.guardai_image_hard_stop) {
+      // Live, like every other mode toggle: a team that switches this on
+      // should not have to reload the tabs they already have open before the
+      // next screenshot obeys it.
+      state.imageHardStop = changes.guardai_image_hard_stop.newValue === true;
     }
     if (changes.guardai_disabled_categories) {
       state.disabledCategories = Array.isArray(changes.guardai_disabled_categories.newValue)
@@ -4770,8 +4784,19 @@
     // frame: an image with findings sailed through with "Checked — nothing
     // blocked". A verdict this code does not recognise is a file it cannot
     // vouch for, and must fail CLOSED.
+    //
+    // "img-nothing" is the one image outcome that may release on its own, and
+    // only while the hard-stop setting is off. Reason it survives the rule
+    // above: OCR did read the image and the rules did run over what it read,
+    // so this is a check that happened — unlike img-unreadable, where there
+    // is no result to report at all. What it is NOT is a clean bill of
+    // health, and cleared() has a separate wording for it that says so.
+    // Making it a decision meant a click on every clean screenshot, which
+    // trains people to click past the two states that DO carry news.
+    const softImage = (r) => r.res.action === "img-nothing" && !state.imageHardStop;
     const unchecked = results.filter((r) =>
-      r.res.action !== "pass" && r.res.action !== "block" && r.res.action !== "img-found");
+      r.res.action !== "pass" && r.res.action !== "block" && r.res.action !== "img-found" &&
+      !softImage(r));
 
     reportFileStats(results);
 
@@ -5181,25 +5206,49 @@
         else if (typeof p.pct === "number") row.textContent = `reading the image… ${p.pct}%`;
       },
 
-      /** Read, nothing blocking. Brief, then gone. */
+      /**
+       * Read, nothing blocking. Brief, then gone — a notice, not a decision.
+       *
+       * TWO wordings, and which one is used is decided by whether an IMAGE is
+       * present, not by what was found. A document extractor reads every
+       * character, so "checked" is a claim it can make. OCR reads what it can
+       * see, so for an image that claim would be false — the notice says we
+       * looked, says what we found, and says plainly that we cannot read
+       * everything in an image. It attaches either way; the difference is
+       * only in what it promises.
+       */
       cleared(results, released) {
         if (fileCardEl !== wrap) return;
         const counted = results.reduce((n, r) => n + ((r.res.summary && r.res.summary.total) || 0), 0);
+        const anyImage = results.some((r) => r.res.action === "img-nothing" || r.res.kind === "image");
+        const one = names.length === 1;
+        const it = one ? "this image" : "these images";
+
+        const body = anyImage
+          ? (results.every((r) => r.res.action === "img-nothing" || r.res.kind === "image")
+              ? `GuardAI read what it could see in ${it} and found nothing sensitive. ` +
+                `It can't read everything in an image, so this isn't a clean bill of health — ` +
+                `if ${one ? "it shows" : "they show"} something private, that's still your call.`
+              : `GuardAI read these files and found nothing sensitive. It can't read everything ` +
+                `in an image, so the screenshot among them isn't a clean bill of health — ` +
+                `if it shows something private, that's still your call.`)
+          : (counted
+              ? `GuardAI read ${one ? "this file" : "these files"} and found ` +
+                `${counted} item${counted === 1 ? "" : "s"} of ordinary personal information — ` +
+                `names, addresses and the like — but nothing it would stop you sending.`
+              : `GuardAI read ${one ? "this file" : "these files"} and found nothing sensitive.`);
+
         render(
-          head("Checked — nothing blocked") +
-            `<p class="guardai-filecard__note">` +
-            escapeHtml(
-              counted
-                ? `GuardAI read ${names.length === 1 ? "this file" : "these files"} and found ` +
-                  `${counted} item${counted === 1 ? "" : "s"} of ordinary personal information — ` +
-                  `names, addresses and the like — but nothing it would stop you sending.`
-                : `GuardAI read ${names.length === 1 ? "this file" : "these files"} and found nothing sensitive.`
-            ) +
-            `</p>` +
+          head(anyImage ? "Attached — nothing found, but have a look" : "Checked — nothing blocked") +
+            `<p class="guardai-filecard__note">${escapeHtml(body)}</p>` +
             (released ? "" :
               `<p class="guardai-filecard__note guardai-filecard__note--warn">Attach it again to send it.</p>`)
         );
-        setTimeout(() => { if (fileCardEl === wrap) dismissFileCard(); }, released ? 4000 : 9000);
+        // An image notice sits a little longer than a document one: it is
+        // asking the reader to do something (look at their own screenshot)
+        // rather than just reporting that a check ran.
+        setTimeout(() => { if (fileCardEl === wrap) dismissFileCard(); },
+          released ? (anyImage ? 6500 : 4000) : 9000);
       },
 
       /** Something blocks, or something could not be read. The user decides. */

@@ -974,17 +974,22 @@ console.log("\n--- 10e. all three cards teach ONE button language ---");
      render() but are assembled by different branches, and it is the state
      with NOTHING found where a neutral "Attach anyway" would be most
      tempting to click without reading. */
-  for (const [label, res] of [
+  for (const [label, res, seed] of [
     ["found something", { kind: "image", label: "PNG screenshot / image", action: "img-found", pages: 0,
       summary: { counts: { MEDICARE: 1 }, blocking: ["MEDICARE"], other: [], blockingCount: 1, total: 1, pageHits: {} } }],
-    ["read it, found nothing", { kind: "image", label: "PNG screenshot / image", action: "img-nothing", pages: 0,
-      summary: { counts: {}, blocking: [], other: [], blockingCount: 0, total: 0, pageHits: {} } }],
+    // Nothing-found is a NOTICE by default and has no buttons at all (§13b),
+    // so it is exercised here in the one configuration where it still renders
+    // a decision — rather than dropped, which would lose the coverage
+    // precisely where a team has asked to be stopped.
+    ["read it, found nothing (hard stop on)", { kind: "image", label: "PNG screenshot / image", action: "img-nothing", pages: 0,
+      summary: { counts: {}, blocking: [], other: [], blockingCount: 0, total: 0, pageHits: {} } },
+      { guardai_image_hard_stop: true }],
     ["could not read it", { kind: "image", label: "JPEG image", action: "img-unreadable", pages: 0,
       reason: "The text in this image is too unclear to read reliably." }],
     ["a blocked document", { kind: "docx", label: "Word document", action: "block", pages: 0,
       summary: { counts: { TFN: 1 }, blocking: ["TFN"], other: [], blockingCount: 1, total: 1, pageHits: {} } }],
   ]) {
-    const ww = loadPage(CHATGPT);
+    const ww = loadPage(CHATGPT, "https://chatgpt.com/c/x", seed || {});
     await settle(10);
     ww.GuardAI._fileHooks.setParser(async () => res);
     const inp = ww.document.getElementById("upload-files");
@@ -1108,7 +1113,7 @@ console.log("\n--- 9. the master switch means hands off ---");
   check(saw2 === 0, "control: with the switch on, the same file IS held", `${saw2}`);
 }
 
-console.log("\n--- 13. images: three states, three different screens, none of them 'clean' ---");
+console.log("\n--- 13. images: three outcomes, three different screens, none of them 'clean' ---");
 {
   /* (a) Found something: the same category rows and counts as a document,
      plus the line owning that OCR is a partial read. Held until decided. */
@@ -1141,9 +1146,14 @@ console.log("\n--- 13. images: three states, three different screens, none of th
   await settle(10);
   check(released === 1 && !H.cardEl(), "'Attach anyway' releases it through the same path as a document");
 
-  /* (b) Nothing found: the dangerous state. It must HOLD — auto-releasing
-     here is exactly the bank-statement-looks-clean outcome — and its words
-     must not borrow the document flow's "checked/clean" promises. */
+  /* (b) Nothing found: a NOTICE, not a decision.
+     Changed 2026-08-28. It used to hold and wait for a click, on the
+     reasoning that an OCR pass is never a clean bill of health. That
+     reasoning is still true and the wording still says so — but requiring a
+     click on every clean screenshot, while a clean DOCUMENT auto-attaches,
+     trained people to click past the card, which is what the two states
+     that DO carry news depend on. So it attaches and tells you. The honesty
+     lives in the words now, not in the friction. */
   const w2 = loadPage(CHATGPT);
   await settle(10);
   const H2 = w2.GuardAI._fileHooks;
@@ -1160,18 +1170,74 @@ console.log("\n--- 13. images: three states, three different screens, none of th
   await settle(10);
 
   const card2 = H2.cardEl();
-  check(!!card2 && released2 === 0,
-    "CONTROL (the dangerous direction): nothing-found does NOT auto-release", `released=${released2}`);
-  check(/nothing found, your call/.test(card2.textContent), "the header hands the judgement over");
-  check(/look it over yourself/.test(card2.textContent), "and the body says to");
-  check(/cannot read everything a person can/.test(card2.textContent),
-    "…because OCR reads less than a person — photos of screens included",
-    card2.textContent.slice(0, 200));
-  check(!/Checked — nothing blocked/.test(card2.textContent) && !/found nothing sensitive/.test(card2.textContent),
-    "the document flow's 'checked/clean' wording appears NOWHERE on it");
-  card2.querySelector(".guardai-filecard__btn--cancel").click();
-  await settle(4);
-  check(!H2.cardEl() && released2 === 0, "'Don't attach' closes without releasing");
+  check(released2 === 1, "nothing-found attaches on its own, like a clean document",
+    `released=${released2}`);
+  check(!!card2, "and still says something — the notice is not silence");
+  check(!card2.querySelector(".guardai-filecard__btn--allow") &&
+        !card2.querySelector(".guardai-filecard__btn--cancel"),
+    "…with NO buttons: it is a notice, not a decision");
+  // The honesty, which is the whole reason this state has its own wording.
+  check(/read what it could see/.test(card2.textContent),
+    "the notice says we looked", card2.textContent.slice(0, 220));
+  check(/found nothing sensitive/.test(card2.textContent), "…and what we found");
+  check(/can't read everything in an image/.test(card2.textContent),
+    "…and that we cannot read everything in an image");
+  check(/isn't a clean bill of health/.test(card2.textContent),
+    "…said in those words, so it cannot be read as one");
+  check(/your call/.test(card2.textContent), "…and that the judgement is still theirs");
+  check(!/Checked — nothing blocked/.test(card2.textContent),
+    "the DOCUMENT flow's 'Checked' header appears nowhere on an image notice",
+    card2.textContent.slice(0, 120));
+  check(/Attached/.test(card2.textContent), "the header says what actually happened");
+
+  /* (b2) The setting restores the hard stop, for teams that want it. */
+  const w2b = loadPage(CHATGPT, "https://chatgpt.com/c/x", { guardai_image_hard_stop: true });
+  await settle(10);
+  const H2b = w2b.GuardAI._fileHooks;
+  H2b.setParser(async () => ({
+    kind: "image", label: "PNG screenshot / image", action: "img-nothing", pages: 0,
+    summary: { counts: {}, blocking: [], other: [], blockingCount: 0, total: 0, pageHits: {} },
+  }));
+  let released2b = 0;
+  w2b.document.querySelector("main").addEventListener("change", () => { released2b++; });
+  const shot2b = makeFile(w2b, "clean.png", 5000, "image/png");
+  const in2b = w2b.document.getElementById("upload-photos");
+  in2b.files = Object.assign([shot2b], { item: () => shot2b });
+  in2b.dispatchEvent(new w2b.Event("change", { bubbles: true }));
+  await settle(10);
+  const card2b = H2b.cardEl();
+  check(released2b === 0 && !!card2b,
+    "with 'Always stop on images' ON, the same file waits instead", `released=${released2b}`);
+  check(!!card2b.querySelector(".guardai-filecard__btn--allow") &&
+        !!card2b.querySelector(".guardai-filecard__btn--cancel"),
+    "…as a real decision, with both buttons");
+  check(/nothing found, your call/.test(card2b.textContent),
+    "…under the decision header, not the notice one");
+  card2b.querySelector(".guardai-filecard__btn--allow").click();
+  await settle(6);
+  check(released2b === 1, "…and 'Attach anyway' still releases it", `released=${released2b}`);
+
+  /* (b3) The setting is opt-in and cannot be turned on by accident: only an
+     explicit true counts, the same rule every other mode toggle follows. */
+  for (const [label, seeded] of [
+    ["absent", undefined], ["false", false], ["the string 'true'", "true"], ["1", 1], ["null", null],
+  ]) {
+    const seed = seeded === undefined ? {} : { guardai_image_hard_stop: seeded };
+    const wx = loadPage(CHATGPT, "https://chatgpt.com/c/x", seed);
+    await settle(10);
+    wx.GuardAI._fileHooks.setParser(async () => ({
+      kind: "image", label: "PNG screenshot / image", action: "img-nothing", pages: 0,
+      summary: { counts: {}, blocking: [], other: [], blockingCount: 0, total: 0, pageHits: {} },
+    }));
+    let rel = 0;
+    wx.document.querySelector("main").addEventListener("change", () => { rel++; });
+    const fx = makeFile(wx, "c.png", 5000, "image/png");
+    const ix = wx.document.getElementById("upload-photos");
+    ix.files = Object.assign([fx], { item: () => fx });
+    ix.dispatchEvent(new wx.Event("change", { bubbles: true }));
+    await settle(10);
+    check(rel === 1, `hard stop stays OFF when the setting is ${label}`, `released=${rel}`);
+  }
 
   /* (c) Could not read it: unmistakable, and marked unchecked. */
   const w3 = loadPage(CHATGPT);
@@ -1221,6 +1287,61 @@ console.log("\n--- 13. images: three states, three different screens, none of th
     "and rendered as unchecked, not as an empty findings list");
   check(card5 && !/nothing blocked|nothing sensitive/i.test(card5.textContent),
     "with no trace of the clean-file wording");
+
+  /* (d3) The relaxation is scoped to ONE outcome. With the setting off — the
+     default, the loosest configuration — the two image states that carry news
+     must still stop. This is the assertion that would catch a future "just
+     auto-release images" simplification. */
+  for (const [label, res] of [
+    ["found something", { kind: "image", label: "PNG screenshot / image", action: "img-found", pages: 0,
+      summary: { counts: { TFN: 1 }, blocking: ["TFN"], other: [], blockingCount: 1, total: 1, pageHits: {} } }],
+    ["could not read it", { kind: "image", label: "JPEG image", action: "img-unreadable", pages: 0,
+      reason: "The text in this image is too unclear to read reliably." }],
+  ]) {
+    const wy = loadPage(CHATGPT);           // setting OFF: the default
+    await settle(10);
+    wy.GuardAI._fileHooks.setParser(async () => res);
+    let rel = 0;
+    wy.document.querySelector("main").addEventListener("change", () => { rel++; });
+    const fy = makeFile(wy, "x.png", 5000, "image/png");
+    const iy = wy.document.getElementById("upload-photos");
+    iy.files = Object.assign([fy], { item: () => fy });
+    iy.dispatchEvent(new wy.Event("change", { bubbles: true }));
+    await settle(10);
+    const cy = wy.GuardAI._fileHooks.cardEl();
+    check(rel === 0 && !!cy,
+      `unchanged with the setting off: [${label}] still stops and waits`, `released=${rel}`);
+    check(!!cy && !!cy.querySelector(".guardai-filecard__btn--allow"),
+      `…and still offers a real decision`);
+  }
+
+  /* (d4) A mixed batch: one clean document plus one nothing-found image. The
+     batch releases, and the notice must NOT let the document's "checked"
+     promise cover the image sitting beside it. */
+  {
+    const wz = loadPage(CHATGPT);
+    await settle(10);
+    wz.GuardAI._fileHooks.setParser(async (file) => (/\.png$/.test(file.name)
+      ? { kind: "image", label: "PNG screenshot / image", action: "img-nothing", pages: 0,
+          summary: { counts: {}, blocking: [], other: [], blockingCount: 0, total: 0, pageHits: {} } }
+      : { kind: "pdf", label: "PDF document", action: "pass", pages: 2,
+          summary: { counts: {}, blocking: [], other: [], blockingCount: 0, total: 0, pageHits: {} } }));
+    let rel = 0;
+    wz.document.querySelector("main").addEventListener("change", () => { rel++; });
+    const a = makeFile(wz, "notes.pdf", 5000, "application/pdf");
+    const b = makeFile(wz, "shot.png", 5000, "image/png");
+    const iz = wz.document.getElementById("upload-files");
+    iz.files = Object.assign([a, b], { item: (i) => [a, b][i] });
+    iz.dispatchEvent(new wz.Event("change", { bubbles: true }));
+    await settle(14);
+    const cz = wz.GuardAI._fileHooks.cardEl();
+    check(rel === 1, "a clean document + a nothing-found image releases as one batch", `released=${rel}`);
+    check(!!cz && /can't read everything in an image/.test(cz.textContent),
+      "…and the notice still carries the image caveat",
+      cz ? cz.textContent.slice(0, 200) : "no card");
+    check(!!cz && !/Checked — nothing blocked/.test(cz.textContent),
+      "…and does NOT fall back to the document 'Checked' header just because a document is present");
+  }
 
   /* (d) Control in the other direction: the doc flow still auto-releases a
      clean PDF, so holding every image did not quietly start holding

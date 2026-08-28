@@ -39,6 +39,16 @@
       note: "With Masking mode on, an uncertain match still shows the warning card instead " +
             "of being swapped silently, so a false positive can't quietly rewrite your message.",
     },
+    {
+      key: "guardai_image_hard_stop",
+      title: "Always stop on images",
+      desc: "Off by default. When GuardAI reads a screenshot and finds nothing, it attaches " +
+            "the image and tells you what it did, rather than making you click. Turn this on " +
+            "and every image waits for you instead.",
+      note: "This only changes the case where nothing was found. An image with sensitive " +
+            "details in it, or one GuardAI could not read properly, always stops and waits — " +
+            "with or without this setting.",
+    },
   ];
 
   /**
@@ -124,7 +134,11 @@
     section.className = "group";
     const heading = document.createElement("div");
     heading.className = "group__title";
-    heading.textContent = "Detection mode";
+    // "Modes", not "Detection mode": the second entry changes what GuardAI
+    // DOES with a result rather than what it detects, and a heading that says
+    // "detection" over it would misdescribe the only setting in this section
+    // that can change whether a file waits for you.
+    heading.textContent = "Modes";
     section.appendChild(heading);
     const list = document.createElement("div");
     list.className = "group__list";
