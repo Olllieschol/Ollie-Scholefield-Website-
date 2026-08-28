@@ -2279,12 +2279,21 @@
     el.style.top = top + "px";
   }
 
-  /** Let the user drag the popup by its grip/header; it stays where dropped. */
-  function makePromptDraggable(el) {
-    const handles = [
-      el.querySelector(".guardai-prompt__grip"),
-      el.querySelector(".guardai-prompt__head"),
-    ].filter(Boolean);
+  /**
+   * Let the user drag a popup by its grip/header; it stays where dropped.
+   *
+   * Takes the handle selectors rather than hardcoding them so the file card can
+   * reuse this. That card re-renders its whole body between states, so it calls
+   * this again after each render — hence `el._dragged` living on the element
+   * rather than in here: it has to survive the handlers being rebuilt, or a
+   * card the user moved would snap back to centre the moment it changed state.
+   */
+  function makePromptDraggable(el, opts) {
+    const o = opts || {};
+    const grip = o.grip || ".guardai-prompt__grip";
+    const head = o.head || ".guardai-prompt__head";
+    const draggingClass = o.draggingClass || "guardai-prompt--dragging";
+    const handles = [el.querySelector(grip), el.querySelector(head)].filter(Boolean);
     let startX = 0;
     let startY = 0;
     let baseLeft = 0;
@@ -2307,7 +2316,7 @@
       document.removeEventListener("mouseup", onUp, true);
       document.removeEventListener("touchmove", onMove, true);
       document.removeEventListener("touchend", onUp, true);
-      el.classList.remove("guardai-prompt--dragging");
+      el.classList.remove(draggingClass);
     };
     const onDown = (e) => {
       // Don't start a drag from the close button or any control.
@@ -2319,7 +2328,7 @@
       baseLeft = rect.left;
       baseTop = rect.top;
       el._dragged = true;
-      el.classList.add("guardai-prompt--dragging");
+      el.classList.add(draggingClass);
       e.preventDefault();
       document.addEventListener("mousemove", onMove, true);
       document.addEventListener("mouseup", onUp, true);
@@ -4689,9 +4698,66 @@
 
   let fileCardEl = null;
 
+  /**
+   * Put the card in the middle of what the user is actually looking at.
+   *
+   * Not the middle of the window. Every one of these sites has a sidebar, so
+   * the viewport centre sits well to the left of the column the conversation is
+   * in — centred by the numbers, visibly off-centre to a person. The composer
+   * is the best available proxy for that column: it is centred in it on every
+   * platform, and findEditor() already knows how to locate it past the decoys.
+   * Where there is no usable composer, the viewport centre is the fallback.
+   *
+   * Vertically it is the viewport, which needs no proxy.
+   *
+   * Does nothing once the user has dragged the card. The whole point of being
+   * able to move it is that it stays where it was put, and this runs again
+   * after every re-render — checking, then the category list, then the result —
+   * so without that check it would haul the card back to centre three times.
+   */
+  function placeFileCard(el) {
+    const w = el.offsetWidth || 400;
+    const h = el.offsetHeight || 320;
+
+    if (el._dragged) {
+      // Still keep it on screen: the states differ in height, and one that
+      // grew after being dragged to the bottom edge would hang off it.
+      const left = Math.max(8, Math.min(parseFloat(el.style.left) || 0, window.innerWidth - w - 8));
+      const top = Math.max(8, Math.min(parseFloat(el.style.top) || 0, window.innerHeight - h - 8));
+      el.style.left = left + "px";
+      el.style.top = top + "px";
+      return;
+    }
+
+    let centreX = window.innerWidth / 2;
+    try {
+      const editor = findEditor();
+      if (editor) {
+        const r = editor.getBoundingClientRect();
+        // A zero-width rect means unlaid-out or hidden, not "at the left edge".
+        if (r && r.width > 0) centreX = r.left + r.width / 2;
+      }
+    } catch (_) {
+      /* no composer on this page — the viewport centre is fine */
+    }
+
+    let left = Math.round(centreX - w / 2);
+    let top = Math.round((window.innerHeight - h) / 2);
+    left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
+    top = Math.max(8, Math.min(top, window.innerHeight - h - 8));
+    el.style.left = left + "px";
+    el.style.top = top + "px";
+  }
+
   function dismissFileCard() {
     if (fileCardEl) { fileCardEl.remove(); fileCardEl = null; }
   }
+
+  // A card is fixed to the viewport, so a resize can leave it half off-screen —
+  // and it can be open for a while on a long PDF.
+  window.addEventListener("resize", () => {
+    if (fileCardEl) placeFileCard(fileCardEl);
+  }, true);
 
   function fileSizeText(bytes) {
     if (!bytes) return "";
@@ -4724,9 +4790,19 @@
       `</div>`;
 
     const render = (html) => {
-      wrap.innerHTML = html;
+      wrap.innerHTML =
+        `<div class="guardai-filecard__grip" title="Drag to move" aria-label="Drag to move"></div>` +
+        html;
       const close = wrap.querySelector(".guardai-filecard__close");
       if (close) close.onclick = () => dismissFileCard();
+      // innerHTML threw the old handles away, so both have to be re-attached.
+      // _dragged lives on the element, so a card the user moved stays moved.
+      makePromptDraggable(wrap, {
+        grip: ".guardai-filecard__grip",
+        head: ".guardai-filecard__head",
+        draggingClass: "guardai-filecard--dragging",
+      });
+      placeFileCard(wrap);
     };
 
     render(
@@ -4877,6 +4953,7 @@
   window.GuardAI._fileHooks = {
     filesFrom,
     endDrag,
+    placeFileCard,
     acceptsFile,
     pickReleaseInput,
     releaseFiles,

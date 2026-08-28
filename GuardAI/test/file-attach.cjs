@@ -108,7 +108,8 @@ function loadPage(bodyHTML, url = "https://chatgpt.com/c/x", seed = {}) {
   w.Element.prototype.getBoundingClientRect = function () {
     const width = Number(this.getAttribute("data-w") || 100);
     const height = Number(this.getAttribute("data-h") || 20);
-    return { x: 0, y: 0, top: 0, left: 0, right: width, bottom: height, width, height };
+    const left = Number(this.getAttribute("data-x") || 0);
+    return { x: left, y: 0, top: 0, left, right: left + width, bottom: height, width, height };
   };
   for (const f of ["names-gazetteer.js", "detector.js", "masker.js", "nlp-detector.js", "filescan.js", "content.js"]) {
     w.eval(read(f));
@@ -123,7 +124,7 @@ const settle = async (n = 8) => { for (let i = 0; i < n; i++) await tick(); };
 /* ChatGPT's real composer: three file inputs, two of them image-only. */
 const CHATGPT = `
   <main>
-    <div contenteditable="true" id="prompt-textarea" data-w="700" data-h="40"></div>
+    <div contenteditable="true" id="prompt-textarea" data-x="345" data-w="560" data-h="40"></div>
     <div class="hidden"><input multiple type="file" id="upload-files"></div>
     <input class="sr-only" type="file" id="upload-photos" accept="image/*" multiple>
     <input class="sr-only" type="file" id="upload-camera" accept="image/*" capture multiple>
@@ -483,44 +484,79 @@ console.log("\n--- 8b. if the reader itself never starts ---");
   check(siteSaw === 1, "'Attach anyway' still hands it back", `${siteSaw}`);
 }
 
-console.log("\n--- 8c. the card sits in the middle of the screen ---");
+console.log("\n--- 8c. where the card sits, and staying where it is put ---");
 {
-  // Strip comments FIRST — the rule explains these very properties in a comment
-  // directly above them, and matching the raw text would find the explanation
-  // rather than the declaration. That exact mistake was caught by a negative
-  // control once already, in test/msgtoggle-placement.cjs.
-  const rule = css.slice(css.indexOf(".guardai-filecard {"));
-  const body = rule.slice(0, rule.indexOf("}")).replace(/\/\*[\s\S]*?\*\//g, "");
+  // Reported 2026-08-28: the card was centred by the numbers and looked
+  // off-centre. Every one of these sites has a sidebar, so the middle of the
+  // WINDOW is well left of the column the conversation is in. The composer is
+  // the proxy for that column. jsdom viewport is 1024x768; the fixture's
+  // composer sits at x=345 with width 560, the way a 345px sidebar leaves it.
+  const w = loadPage(CHATGPT);
+  await settle();
+  const H = w.GuardAI._fileHooks;
+  H.setParser(() => new Promise(() => {}));
 
-  check(/position:\s*fixed/.test(body), "fixed to the viewport, not the page");
-  check(/top:\s*50%/.test(body) && /left:\s*50%/.test(body), "anchored to the centre",
-    (body.match(/top:[^;]*/) || [""])[0] + " " + (body.match(/left:[^;]*/) || [""])[0]);
-  check(/transform:\s*translate\(-50%,\s*-50%\)/.test(body),
-    "and pulled back by half its own size, so it is centred at any height",
-    (body.match(/transform:[^;]*/) || [""])[0]);
-  check(!/right:\s*\d/.test(body) && !/bottom:\s*\d/.test(body),
-    "the old bottom-right corner anchoring is gone",
-    (body.match(/(right|bottom):[^;]*/) || [""])[0]);
+  const input = w.document.getElementById("upload-files");
+  const file = makeFile(w, "contract.pdf", 4000, "application/pdf");
+  input.files = Object.assign([file], { item: () => file });
+  input.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await settle(10);
 
-  // The animation must carry the centring translate through every frame, or the
-  // card jumps to the corner for the length of the animation and back again.
-  const kf = css.slice(css.indexOf("@keyframes guardai-filecard-pop"));
-  const kfBody = kf.slice(0, kf.indexOf("}\n}") + 3).replace(/\/\*[\s\S]*?\*\//g, "");
-  check(/animation:\s*guardai-filecard-pop/.test(body),
-    "it uses its own keyframes, not the shared guardai-pop",
-    (body.match(/animation:[^;]*/) || [""])[0]);
-  const frames = kfBody.match(/transform:[^;]*/g) || [];
-  check(frames.length >= 2 && frames.every((f) => /translate\(-50%,\s*-50%\)/.test(f)),
-    "every frame of that animation keeps the centring translate",
-    frames.join(" | "));
+  const card = H.cardEl();
+  check(!!card, "the card exists");
+  // offsetWidth is 0 under jsdom, so placeFileCard falls back to its declared
+  // 400x320 — which is what the real card measures, and makes this exact.
+  const CARD_W = 400;
+  const composerCentre = 345 + 560 / 2;                 // 625
+  const windowCentre = w.innerWidth / 2;                // 512
+  const left = parseFloat(card.style.left);
+  check(Math.abs(left + CARD_W / 2 - composerCentre) <= 1,
+    "centred on the composer, not the window",
+    `left=${left}, card centre=${left + CARD_W / 2}, composer centre=${composerCentre}`);
+  check(Math.abs(left + CARD_W / 2 - windowCentre) > 50,
+    "control: that is genuinely different from the window centre, so the check above bites",
+    `window centre=${windowCentre}`);
+  check(!!card.style.top, "and it is positioned vertically too", card.style.top);
 
-  // Control: guardai-pop, the SHARED animation, must NOT carry the translate —
-  // otherwise the assertion above would pass against any keyframe block and
-  // proves nothing about this one.
-  const shared = css.slice(css.indexOf("@keyframes guardai-pop"));
-  const sharedBody = shared.slice(0, shared.indexOf("}\n}") + 3);
-  check(!/translate\(-50%/.test(sharedBody),
-    "control: the shared pop animation does not centre, so the check above is real");
+  // Dragging it must stick — the card re-renders between states, and a card
+  // that snapped back to centre each time would be worse than an immovable one.
+  check(!!card.querySelector(".guardai-filecard__grip"), "it has a drag handle");
+  card.style.left = "60px";
+  card.style.top = "40px";
+  card._dragged = true;
+  H.placeFileCard(card);
+  check(card.style.left === "60px" && card.style.top === "40px",
+    "a dragged card is left where it was put", `${card.style.left} ${card.style.top}`);
+
+  // …but never dragged off the screen, including when a later state is taller.
+  card.style.left = "5000px";
+  card.style.top = "5000px";
+  H.placeFileCard(card);
+  const l2 = parseFloat(card.style.left), t2 = parseFloat(card.style.top);
+  check(l2 <= w.innerWidth - CARD_W - 8 && l2 >= 8, "…and clamped back on screen horizontally", String(l2));
+  check(t2 <= w.innerHeight - 320 - 8 && t2 >= 8, "…and vertically", String(t2));
+}
+
+console.log("\n--- 8d. no composer, no problem ---");
+{
+  // A platform where findEditor() comes up empty must still get a placed card,
+  // centred on the window rather than jammed against the left edge.
+  const w = loadPage(`<main><div class="hidden"><input multiple type="file" id="upload-files"></div></main>`);
+  await settle();
+  const H = w.GuardAI._fileHooks;
+  H.setParser(() => new Promise(() => {}));
+  const input = w.document.getElementById("upload-files");
+  const file = makeFile(w, "contract.pdf", 4000, "application/pdf");
+  input.files = Object.assign([file], { item: () => file });
+  input.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await settle(10);
+
+  const card = H.cardEl();
+  check(!!card, "the card still appears with no composer on the page");
+  const left = parseFloat(card.style.left);
+  check(Math.abs(left + 400 / 2 - w.innerWidth / 2) <= 1,
+    "and falls back to the window centre", `left=${left}`);
+  check(left >= 8, "not pinned to the edge");
 }
 
 console.log("\n--- 9. the master switch means hands off ---");
