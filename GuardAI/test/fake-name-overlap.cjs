@@ -23,10 +23,15 @@
  * previous flaky assertion in that same file made it easy to dismiss as more
  * of the same. Both were real.
  *
- * SCOPE MATTERS. This applies to NAME_PII only. ORG stand-ins are SUPPOSED to
- * share a word — "Bellweather Logistics" -> "Coastline Logistics" keeps the
- * sentence readable, and "Logistics" is a designator rather than an identity.
- * A blanket rule would have broken that, so the test asserts both directions.
+ * SCOPE. Originally NAME_PII only. It is now every generator that picks from
+ * a word list — six of the twenty — because scoping it to one type is exactly
+ * what let the identical bug resurface twice more (§6, §7).
+ *
+ * What must NOT be blanket-rejected is a shared STRUCTURE word. "Bellweather
+ * Logistics" -> "Coastline Logistics" keeps the sentence readable, and
+ * "Logistics" is a designator rather than an identity; so is "Street" in an
+ * address. The tests assert both directions: the identifying word never
+ * survives, the classifying word always may.
  *
  * Exit code 1 on any failure.
  */
@@ -215,6 +220,188 @@ const REALS = [
     for (let i = 0; i < 100; i++) phoneVaried.add(masker.previewFake("PHONE", "0427 336 901", new Set()));
     check(phoneVaried.size > 80, "control: PHONE is untouched by the name-token guard",
       `${phoneVaried.size}/100 distinct`);
+  }
+
+  /* ---- 7. ORG and ADDRESS — the same bug, third and fourth instance ---- */
+  console.log("\n--- the identifying word never survives, the classifying word may ---");
+  {
+    /**
+     * Reported from a live offer letter, 2026-08-29:
+     *
+     *     real    MERIDIAN FACILITIES GROUP PTY LTD
+     *     masked  MERIDIAN PTY LTD
+     *
+     * "Meridian" is in the ORG stem pool, so the stand-in drew the very word
+     * it was replacing. Measured before the fix: ORG 6.2%, and ADDRESS — which
+     * nobody had looked at — 17.8%, the worst of the four instances.
+     *
+     * The fix is NOT "add ORG to the guard": a blanket word check would strip
+     * "Logistics" and "Street" too, and an address that reads "60 Cedar
+     * Brisbane" tells the AI less than the real one did. Structure words are
+     * excluded from the COMPARISON instead, so the designator still carries.
+     */
+    const masker = new w.GuardAI.Masker();
+    await masker.load();
+    const DRAWS = 4000;
+    const STRUCT = new Set(["ave", "st", "rd", "cres", "pde", "ct", "dr", "street",
+      "crescent", "road", "parade", "court", "drive", "avenue", "pty", "ltd",
+      "group", "holdings", "partners", "enterprises", "logistics", "industries",
+      "consulting"]);
+
+    // -- ORG: the reported case, and the pool at large.
+    for (const real of ["MERIDIAN FACILITIES GROUP PTY LTD", "Coastline Logistics",
+                        "Kestrel Industries Pty Ltd", "Pinnacle Consulting Group"]) {
+      const realWords = new Set(words(real));
+      let leak = 0;
+      const ex = new Set();
+      for (let i = 0; i < DRAWS; i++) {
+        const f = masker.previewFake("ORG", real, new Set());
+        // Only the STEM identifies; the designator is carried on purpose.
+        if (realWords.has(f.split(/\s+/)[0].toLowerCase())) { leak++; if (ex.size < 2) ex.add(f); }
+      }
+      check(leak === 0, `an ORG stand-in never reuses the real stem — ${JSON.stringify(real)}`,
+        `${leak}/${DRAWS}: ${[...ex].join(" | ")}`);
+    }
+
+    // -- ADDRESS: street name and suburb are both identifying.
+    for (const real of ["22 Oak Crescent Melbourne", "7 Jacaranda Ave Perth",
+                        "14 Wattle Street Brunswick"]) {
+      const realWords = new Set(words(real).filter((t) => !STRUCT.has(t)));
+      let leak = 0;
+      const ex = new Set();
+      for (let i = 0; i < DRAWS; i++) {
+        const f = masker.previewFake("ADDRESS", real, new Set());
+        const hit = words(f).filter((t) => !STRUCT.has(t) && realWords.has(t));
+        if (hit.length) { leak++; if (ex.size < 2) ex.add(`${f} [${hit}]`); }
+      }
+      check(leak === 0, `an ADDRESS stand-in never reuses the real street or suburb — ${JSON.stringify(real)}`,
+        `${leak}/${DRAWS}: ${[...ex].join(" | ")}`);
+    }
+
+    // -- The other direction, and the reason a blanket rule was wrong. These
+    //    are the assertions that fail if someone "simplifies" the guard by
+    //    dropping STRUCTURE_WORDS.
+    let keptDesignator = 0, keptPtyLtd = 0, keptStreetType = 0;
+    for (let i = 0; i < 400; i++) {
+      if (/logistics/i.test(masker.previewFake("ORG", "Bellweather Logistics", new Set()))) keptDesignator++;
+      if (/pty ltd/i.test(masker.previewFake("ORG", "Tanner & Roe Pty Ltd", new Set()))) keptPtyLtd++;
+      if (/\b(Ave|St|Rd|Cres|Pde|Ct|Dr)\b/.test(
+        masker.previewFake("ADDRESS", "22 Oak Crescent Melbourne", new Set()))) keptStreetType++;
+    }
+    check(keptDesignator === 400, "an ORG stand-in still reads as a logistics company", `${keptDesignator}/400`);
+    check(keptPtyLtd === 400, "an ORG stand-in still reads as a Pty Ltd entity", `${keptPtyLtd}/400`);
+    check(keptStreetType === 400, "an ADDRESS stand-in still reads as a street address", `${keptStreetType}/400`);
+
+    // -- CONTROL: the pool must not be exhausted by the guard. With the
+    //    designator fixed, the ORG stem pool IS the capacity — at 16 stems a
+    //    20-company document handed the SAME stand-in to two companies, which
+    //    makes unmasking ambiguous. 40 stems moves that limit to 39.
+    for (const [n, expect] of [[20, 0], [30, 0], [38, 0]]) {
+      const avoid = new Set();
+      let dupes = 0;
+      for (let i = 0; i < n; i++) {
+        const f = masker.previewFake("ORG", `Distinct${i} Logistics`, avoid);
+        if (avoid.has(f)) dupes++;
+        avoid.add(f);
+      }
+      check(dupes === expect, `control: ${n} companies in one document still get ${n} distinct stand-ins`,
+        `${dupes} duplicates`);
+    }
+    const addrAvoid = new Set();
+    let addrDupes = 0;
+    for (let i = 0; i < 300; i++) {
+      const f = masker.previewFake("ADDRESS", `${i + 1} Oak Crescent Melbourne`, addrAvoid);
+      if (addrAvoid.has(f)) addrDupes++;
+      addrAvoid.add(f);
+    }
+    check(addrDupes === 0, "control: 300 addresses still get 300 distinct stand-ins", `${addrDupes} duplicates`);
+  }
+
+  /* ---- 8. The retry must not corrupt the value's shape ---- */
+  console.log("\n--- a rejected draw is retried without mangling the shape ---");
+  {
+    /**
+     * The collision retry used to re-call the generator as
+     * `generateFake(type, real + ":" + guard)`. The seed was ALREADY random
+     * per call, so the suffix added no randomness — but `real` is what the
+     * shape-preserving generators read their structure from, so the retry
+     * silently produced malformed values:
+     *
+     *     BANK_ACCOUNT  "8827 3410" -> "7753 1402:5"   the counter, emitted
+     *     LICENCE    "NSW45612378"  -> "428432530"     state prefix dropped
+     *     REF_CODE      "SUP-2026"  -> "CPK-05809"     wrong digit count
+     *
+     * Latent while the guard almost never fired. §7 widened it to ORG (6% of
+     * draws) and ADDRESS (18%), which would have made this common — so it is
+     * pinned here rather than left to be discovered in a masked document.
+     *
+     * HOW THE RETRY IS FORCED, and why the obvious way does not work. The
+     * first version of this test filled `avoid` with 300 real draws and
+     * asserted on the result. It passed — and it passed against the BUG,
+     * because BANK_ACCOUNT draws from a 10^8 space, so 300 pre-drawn values
+     * never collide and the retry was never entered. Four of the five cases
+     * were asserting on a first draw that had never been rejected.
+     *
+     * `previewFake` only ever calls `avoid.has(f)`, so a counting stub in its
+     * place rejects the first N draws deterministically and puts every case
+     * genuinely inside the loop.
+     */
+    const masker = new w.GuardAI.Masker();
+    await masker.load();
+    /** Rejects the first `n` candidates, then accepts. */
+    const rejectFirst = (n) => { let left = n; return { has: () => left-- > 0 }; };
+
+    // The stub must actually be driving the loop: with n=0 and n=6 the code
+    // path differs, and a stub that never fired would make the rest vacuous.
+    {
+      let entered = 0;
+      const counting = { has: () => (entered++, entered <= 4) };
+      masker.previewFake("BANK_ACCOUNT", "8827 3410", counting);
+      check(entered >= 5, "control: the stub really does push the draw into the retry loop",
+        `avoid.has() called ${entered}x`);
+    }
+
+    const CASES = [
+      ["BANK_ACCOUNT", "8827 3410", /^\d{4} \d{4}$/, "two groups of four"],
+      ["BANK_ACCOUNT", "044-772-19", /^\d{3}-\d{3}-\d{2}$/, "hyphenated 3-3-2"],
+      ["LICENCE", "NSW45612378", /^NSW\d{8}$/, "state prefix kept"],
+      ["REF_CODE", "SUP-2026", /^[A-Z]{3}-\d{4}$/, "same letter and digit count"],
+      ["ORG", "Coastline Logistics", /^\S+ Logistics$/, "designator kept"],
+      ["ADDRESS", "22 Oak Crescent Melbourne", /^\d+ \S+ (Ave|St|Rd|Cres|Pde|Ct|Dr) \S+$/, "still an address"],
+      ["DOB", "14 March 1991", /^\d{1,2} [A-Z][a-z]+ \d{4}$/, "prose date stays prose"],
+    ];
+    for (const [type, real, shape, label] of CASES) {
+      let bad = 0;
+      const ex = new Set();
+      for (let i = 0; i < 500; i++) {
+        // 1-8 forced rejections, so both a single retry and a long run of
+        // them are covered.
+        const f = masker.previewFake(type, real, rejectFirst((i % 8) + 1));
+        if (!shape.test(f)) { bad++; if (ex.size < 2) ex.add(f); }
+      }
+      check(bad === 0, `${type} keeps its shape under retry pressure (${label})`,
+        `${bad}/500 malformed: ${[...ex].join(" | ")}`);
+    }
+
+    // The OTHER retry site. previewFake is the PREVIEW path; _getOrCreate is
+    // the one that actually commits a mapping, and it carried the same bug.
+    // The test helper masks via previewFake, so this calls the committing
+    // path directly — 38 companies sharing one designator against a 40-stem
+    // pool forces genuine rejections, since each registration shrinks what is
+    // left.
+    {
+      const m2 = new w.GuardAI.Masker();
+      await m2.load();
+      const fakes = [];
+      for (let i = 0; i < 38; i++) fakes.push(m2._getOrCreate("ORG", `Aldermere${i} Logistics`));
+      const malformed = fakes.filter((f) => !/^\S+ Logistics$/.test(f));
+      check(malformed.length === 0,
+        "_getOrCreate's retry keeps the designator too (38 companies committed)",
+        `${malformed.length} malformed: ${malformed.slice(0, 3).join(" | ")}`);
+      check(new Set(fakes).size === 38,
+        "control: and all 38 committed stand-ins are distinct, so the retry really ran",
+        `${new Set(fakes).size}/38 distinct`);
+    }
   }
 
   console.log(`\nFAKE-NAME-OVERLAP: ${failures === 0 ? "ALL PASS" : failures + " FAILURES"}`);

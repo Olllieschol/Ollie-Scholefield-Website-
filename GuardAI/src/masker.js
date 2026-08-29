@@ -103,10 +103,29 @@
   // real name's own "Pty Ltd" / "Logistics" / "Group" ending so the fake keeps
   // the same shape and industry sense. (This replaces an earlier unused
   // COMPANIES pool of complete names, which couldn't preserve that.)
+  /*
+   * 40 stems, not the original 16. The collision guard removes the real
+   * company's own stem from the draw, so with a fixed designator the pool IS
+   * the capacity: at 16, a document listing 20 companies exhausted the retry
+   * budget and handed the same stand-in to two different companies (measured
+   * 4 duplicates at n=20), which makes unmasking ambiguous. Widening also
+   * drops the base collision rate, since a real company is less likely to be
+   * one of 40 than one of 16.
+   *
+   * Invented compounds rather than borrowed names — though "Meridian" below
+   * is exactly the case that proves you cannot invent your way clear of a
+   * real company's name, which is why the guard exists rather than a
+   * carefully-curated pool.
+   */
   const ORG_NAMES = [
     "Northwind", "Riverstone", "Harbourview", "Bluestone", "Ironbark",
     "Silverbrook", "Kestrel", "Meridian", "Copperfield", "Brightwater",
     "Stonebridge", "Wattlebank", "Redgum", "Coastline", "Pinnacle", "Lantern",
+    "Fernbrook", "Greystone", "Hollowmere", "Larkspur", "Marrowbank",
+    "Oakhaven", "Peppertree", "Quarrymill", "Saltbush", "Tussockvale",
+    "Umberhill", "Windgrove", "Yarrabend", "Ashvale", "Cloudbank", "Dunmore",
+    "Elderbrook", "Falconridge", "Hartfield", "Jarrahbank", "Kingsvale",
+    "Loxley", "Nettlefold", "Ospreybank",
   ];
   // Fallback ending, used only when the real name had no recognisable
   // designator of its own to carry over.
@@ -380,9 +399,9 @@
       // Sophie Newman" could come back as "Got it, Oliver".
       //
       // `real` was already passed to every generator and simply ignored here,
-      // so this needs no plumbing — only the FIRST token is used, which also
-      // means previewFake()'s collision retry (which appends ":<n>" to `real`)
-      // still resolves to the same gender.
+      // so this needs no plumbing — only the FIRST token is used. The
+      // collision retry re-calls with `real` unchanged, so every attempt
+      // resolves to the same gender pool.
       const firstToken = String(real || "").trim().split(/[\s'’-]+/)[0] || "";
       const gaz = (typeof window !== "undefined" && window.GuardAI &&
                    window.GuardAI.NAME_GAZETTEER) || null;
@@ -465,42 +484,74 @@
   window.GuardAI.MASKABLE_TYPES = MASKABLE;
 
   /**
-   * Does this stand-in reuse one of the real name's own words?
+   * Does this stand-in carry one of the real value's own words back out?
    *
-   * Found 2026-08-22 by the name-matching suite, which failed roughly 1 run in
-   * 60: "Aisha Al-Rashid" was masked to "Aisha Halloway". The surname was
-   * replaced and the GIVEN NAME WAS SENT VERBATIM to the AI. The existing
-   * guard only rejected a fake equal to the whole real value, so a
-   * part-for-part collision walked straight through it — and with 40 names per
-   * pool it lands about 1 time in 40 whenever the real given name is one the
-   * pool also contains.
+   * ═══ THE SHAPE OF THIS BUG, AND WHY IT KEPT COMING BACK ══════════════════
    *
-   * Scoped to NAME_PII deliberately. ORG stand-ins are SUPPOSED to share a
-   * word: "Bellweather Logistics" -> "Coastline Logistics" keeps the sentence
-   * readable, and "Logistics" is a designator, not an identity. Names have no
-   * equivalent — every word in one is identifying.
+   * Every generator that picks from a fixed word list can draw the very word
+   * it is standing in for. Found and fixed three times, each time for one
+   * type, each time leaving the identical fault live everywhere else:
+   *
+   *   2026-08-22  NAME_PII  "Aisha Al-Rashid"  -> "Aisha Halloway"       3.5%
+   *   2026-08-29  EMAIL     "marcus.ellery@…"  -> "blake.ellery63@…"     2.4%
+   *               USERNAME  "mellery"          -> "bellery63"            2.25%
+   *   2026-08-29  ORG       "MERIDIAN FACILITIES GROUP PTY LTD"
+   *                                            -> "MERIDIAN PTY LTD"     6.2%
+   *               ADDRESS   "22 Oak Crescent Melbourne"
+   *                                            -> "33 Oak Dr Canberra"  17.8%
+   *
+   * The lesson, recorded because scoping this to a type is what caused all
+   * three recurrences: the gap is never "does THIS type need the guard". It
+   * is "what else reaches for this pool". So the membership test below is
+   * derived from the audit of all 20 generators — the six that call pick()
+   * on a word list are in, the fourteen that build from digits are out — and
+   * a new generator that reaches for a pool must be added here.
+   *
+   * ═══ WHAT COUNTS AS "THE REAL VALUE'S OWN WORD" ═════════════════════════
+   *
+   * Not every shared word is a leak, and a blanket rule would wreck two of
+   * these types. An ORG stand-in is SUPPOSED to keep "Logistics" or "Pty
+   * Ltd", and an ADDRESS stand-in is supposed to keep "Street" — those words
+   * describe the SHAPE of the thing, so the AI still reads "a logistics
+   * company at a street address" and reasons correctly. They identify
+   * nobody. The distinctive word — "Meridian", "Oak", "Melbourne" — is the
+   * part that names the thing, and that is the part that must never survive.
+   *
+   * So structure words are excluded from the comparison rather than the
+   * types being excluded from the guard.
    */
-  /**
-   * Types whose fake is built out of the NAME POOLS, and can therefore draw
-   * the very name it is standing in for.
-   *
-   * This guard was added for NAME_PII in 4f23af5, after `Aisha Al-Rashid`
-   * masked to `Aisha Halloway` — 3.5% of draws, the given name sent to the
-   * AI verbatim. It was scoped to NAME_PII, and the same collision was still
-   * live everywhere else that draws from those pools. Measured 2026-08-29:
-   *
-   *     real    Marcus Ellery / marcus.ellery@meridianfacilities.com.au
-   *     masked  Rupert Wells  / blake.ellery63@example.com.au
-   *
-   * — 2.4% for one surname, 5.3% against a set of ten. A real name fragment
-   * leaving a document whose name was masked is the failure the whole
-   * mechanism exists to prevent, so the guard now covers every generator
-   * that reaches for those pools: EMAIL and USERNAME as well as NAME_PII.
-   */
-  const NAME_POOL_TYPES = new Set(["NAME_PII", "EMAIL", "USERNAME"]);
+  const POOL_TYPES = new Set(["NAME_PII", "EMAIL", "USERNAME", "ORG", "ADDRESS"]);
 
-  function sharesNameToken(type, real, fake) {
-    if (!NAME_POOL_TYPES.has(type)) return false;
+  /**
+   * Words a stand-in is MEANT to share, because they classify rather than
+   * identify. Kept as one list because the two sets do not overlap and the
+   * comparison only ever asks "is this word structure?".
+   */
+  const STRUCTURE_WORDS = new Set([
+    // Company designators and industry descriptors — mirrors the ORG
+    // generator's own regex, which re-attaches the real name's ending.
+    "pty", "ltd", "limited", "inc", "incorporated", "llc", "llp", "plc",
+    "corp", "corporation", "gmbh", "group", "holdings", "partners",
+    "partnership", "enterprises", "industries", "solutions", "services",
+    "systems", "technologies", "consulting", "consultancy", "consultants",
+    "logistics", "trading", "ventures", "associates", "agency", "studios",
+    "studio", "laboratories", "labs", "foundation", "institute", "company",
+    "contractors", "constructions", "developments", "investments", "removals",
+    "freight", "transport", "supplies", "distribution", "manufacturing",
+    "engineering", "motors", "and", "the", "of",
+    // Street types, in both the abbreviated form the generator emits and the
+    // long form real addresses are usually written in.
+    "ave", "avenue", "st", "street", "rd", "road", "cres", "crescent",
+    "pde", "parade", "ct", "court", "dr", "drive", "lane", "ln", "place",
+    "pl", "way", "terrace", "tce", "close", "cl", "boulevard", "blvd",
+    "highway", "hwy", "circuit", "cct", "grove", "gr", "esplanade", "esp",
+    // Address noise that carries no identity.
+    "unit", "suite", "level", "apt", "apartment", "shop", "po", "box",
+    "nsw", "vic", "qld", "wa", "sa", "tas", "nt", "act",
+  ]);
+
+  function sharesPoolWord(type, real, fake) {
+    if (!POOL_TYPES.has(type)) return false;
     // Only the LOCAL PART can carry a person's name, so the domain is cut
     // before comparing. This is about COST, not safety, and the distinction
     // was measured rather than assumed: comparing whole addresses still
@@ -509,11 +560,15 @@
     // match on "com"/"au" for most pairs, which burns retries generating
     // fakes it will throw away. Cutting the domain keeps the guard cheap.
     const body = (v) => (type === "EMAIL" ? String(v || "").split("@")[0] : String(v || ""));
+    // A person's name has no structure words — every word in one identifies,
+    // so "Grace" as a surname must still collide with "Grace" as a given
+    // name. Only ORG and ADDRESS have a classifying vocabulary.
+    const structural = type === "ORG" || type === "ADDRESS";
     const words = (v) =>
       body(v)
         .toLowerCase()
         .split(/[^\p{L}\p{M}]+/u)
-        .filter((t) => t.length > 1);
+        .filter((t) => t.length > 1 && !(structural && STRUCTURE_WORDS.has(t)));
     const realWords = new Set(words(real));
     if (words(fake).some((w) => realWords.has(w))) return true;
 
@@ -535,6 +590,24 @@
     return false;
   }
 
+  /**
+   * `real` is a STRUCTURAL hint, never a randomness source — the seed is
+   * freshly random on every call, so calling this twice with the same `real`
+   * already gives two different fakes.
+   *
+   * That matters because the collision retries above used to re-call this as
+   * `generateFake(type, real + ":" + guard)`. The suffix added nothing (the
+   * seed was already fresh) and corrupted the shape of every generator that
+   * reads structure off `real`:
+   *
+   *     BANK_ACCOUNT  "8827 3410"   -> "7753 1402:5"   retry counter emitted
+   *     LICENCE       "NSW45612378" -> "428432530"     state prefix lost
+   *     REF_CODE      "SUP-2026"    -> "CPK-05809"     wrong digit count
+   *     ORG           "… Logistics" -> "… Partners"    designator lost
+   *
+   * Latent while the guard rarely fired. Widening the guard to ORG (6%) and
+   * ADDRESS (18%) would have made it common, so the suffix is gone.
+   */
   function generateFake(type, real) {
     const gen = GENERATORS[type] || (() => "[redacted]");
     return gen(real, randomSeed());
@@ -636,10 +709,10 @@
         (this.fakeToReal.has(fake) ||
           fake === real ||
           this.realToFake.has(fake) ||
-          sharesNameToken(type, real, fake)) &&
+          sharesPoolWord(type, real, fake)) &&
         guard < 50
       ) {
-        fake = generateFake(type, real + ":" + guard);
+        fake = generateFake(type, real);
         guard++;
       }
       this._evictIfNeeded();
@@ -676,12 +749,12 @@
         this.fakeToReal.has(f) ||
         f === real ||
         this.realToFake.has(f) ||
-        sharesNameToken(type, real, f) ||
+        sharesPoolWord(type, real, f) ||
         (avoid && avoid.has(f));
       let fake = generateFake(type, real);
       let guard = 0;
       while (taken(fake) && guard < 100) {
-        fake = generateFake(type, real + ":" + guard);
+        fake = generateFake(type, real);
         guard++;
       }
       return fake;
