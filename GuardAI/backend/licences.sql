@@ -182,29 +182,61 @@ $$;
 grant execute on function public.activate_licence(text)    to anon;
 grant execute on function public.refresh_entitlement(uuid) to anon;
 
--- ---------------------------------------------------------------------------
--- The Chrome Web Store reviewer's licence.
+-- ===========================================================================
+-- The Chrome Web Store reviewer's licence — NOT DEFINED IN THIS FILE.
 --
--- Store review is not a one-off. Every update is reviewed, by a different
--- person, months apart, and a key that expires or burns an activation will be
--- exhausted by the third submission — at which point the reviewer installs the
--- extension, finds it does nothing, and rejects it as non-functional.
+-- It used to be, as a literal `GK-REVIEW-CHROME-STORE-0001` that never
+-- expired. This repository is public. A never-expiring credential committed
+-- to a public repo is a standing liability, and that one was revoked on
+-- 2026-08-29 after exactly that was noticed.
 --
--- So: never expires (current_period_end null), effectively unlimited
--- activations, and plan 'review' so the extension can tell it apart. It
--- reports nothing, exactly like an individual licence.
+-- THE FIX IS NOT A BETTER KEY IN THIS FILE. A fresh key written here leaks on
+-- the next push, the same way, and an expiry only bounds how long the next
+-- leak lasts. So the key lives in two places and neither is the repo:
 --
--- It is worth roughly $14/month to anyone who finds it, which is not worth
--- protecting heavily, but revoke it if it turns up somewhere public:
---     update public.licences set status = 'cancelled' where plan = 'review';
--- ---------------------------------------------------------------------------
-insert into public.licences (key, plan, current_period_end, max_activations)
-values ('GK-REVIEW-CHROME-STORE-0001', 'review', null, 1000000)
-on conflict (key) do nothing;
+--   1. The Developer Dashboard's "Privacy practices -> test credentials"
+--      field, which is where the reviewer reads it from.
+--   2. The licences table, put there by hand with the template below.
+--
+-- MINT A NEW ONE PER SUBMISSION. That is the trade this design makes and it
+-- is worth stating plainly, because the old comment here argued the opposite
+-- and it was not wrong: store review recurs on every update, months apart,
+-- with a different person each time, so a key that has expired by the time
+-- the NEXT update is reviewed gets that update rejected as non-functional.
+-- A per-submission key with a 90-day life keeps the reviewer working and
+-- keeps a leak bounded — but only if minting one is part of the release
+-- checklist rather than something remembered. See STORE_LISTING.md.
+--
+-- Template. Generate the code with real entropy (crypto.randomBytes over an
+-- alphabet with no 0/O/1/I, since a reviewer may retype it), never a
+-- sequential one — `...-0001` invites `...-0002`.
+--
+--   insert into public.licences (key, plan, status, current_period_end, max_activations)
+--   values ('GK-REVIEW-<random>', 'review', 'active', now() + interval '90 days', 10000);
+--
+-- On max_activations: generous on purpose. The failure that costs real money
+-- is a reviewer hitting DEVICE_LIMIT and rejecting the submission, not a
+-- stranger getting a bounded free ride. The expiry is what bounds the leak.
+--
+-- REVOKING: by key, never by plan.
+--
+--   update public.licences set status = 'cancelled' where key = 'GK-REVIEW-...';
+--
+-- The old comment here said `where plan = 'review'`, which cancels EVERY
+-- reviewer key including the one for the submission currently in flight.
+-- ===========================================================================
 
 -- ---------------------------------------------------------------------------
--- Handy checks after running the above.
+-- Handy checks.
 -- ---------------------------------------------------------------------------
--- select key, plan, status, current_period_end, max_activations from public.licences;
--- select public.activate_licence('GK-REVIEW-CHROME-STORE-0001');
+-- select key, plan, status, current_period_end, max_activations
+--   from public.licences where plan = 'review' order by created_at desc;
+-- select public.activate_licence('<the key>');
 -- select public.refresh_entitlement('<the token that came back>');
+--
+-- How many activations a key has taken — worth checking on a key you are
+-- revoking, since it tells you whether anyone actually found it:
+-- select l.key, count(a.token) as activations, max(a.last_seen_at) as last_used
+--   from public.licences l
+--   left join public.licence_activations a on a.licence_id = l.id
+--  where l.plan = 'review' group by l.key order by activations desc;

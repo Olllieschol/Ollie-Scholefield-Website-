@@ -24,6 +24,7 @@
  */
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const ROOT = path.join(__dirname, "..");
 const sql = fs.readFileSync(path.join(ROOT, "backend", "licences.sql"), "utf8");
@@ -114,23 +115,66 @@ const COMPANY_CODES = new Set(["SEAT_LIMIT_REACHED", "INVALID_CODE"]);
 
   console.log("\n--- the reviewer licence ---");
   {
+    /**
+     * This section used to assert that a reviewer key EXISTED in this file,
+     * never expired, and had effectively unlimited activations. Every one of
+     * those was a sound argument — store review recurs on every update, months
+     * apart, with a different person each time, so a key that lapses or runs
+     * out of seats gets a future update rejected as non-functional.
+     *
+     * And together they described a never-expiring credential committed to a
+     * PUBLIC repository, which is what `GK-REVIEW-CHROME-STORE-0001` was until
+     * it was revoked on 2026-08-29.
+     *
+     * The test was not wrong about review; it was reasoning about the key's
+     * lifetime while taking its location for granted. So the assertions are
+     * inverted: the invariant now is that no literal key is in the file at
+     * all, and what the file carries is the procedure for minting one per
+     * submission. That is testable, and it is the part that actually failed.
+     */
     const E = await import("../src/entitlement.js");
-    const m = sql.match(/values \('(GK-[A-Z0-9-]+)', 'review', (null|[^,]+), (\d+)\)/);
-    check(!!m, "there is a reviewer licence in the file", m ? m[1] : "not found");
-    if (m) {
-      const [, key, expiry, activations] = m;
+    const listing = fs.readFileSync(path.join(ROOT, "STORE_LISTING.md"), "utf8");
+
+    // A live key is one in an INSERT. The revoked one is named in prose in
+    // both files, explaining why it is gone, and must not trip this.
+    const live = sql.match(/values\s*\(\s*'(GK-[A-Z0-9-]+)'/i);
+    check(!live, "NO literal reviewer key is inserted by this file — it leaks on the next push",
+      live && live[1]);
+    const listingKey = listing.match(/`(GK-REVIEW-(?!CHROME-STORE-0001)[A-Z0-9-]{6,})`/);
+    check(!listingKey, "and none is written into the store listing either", listingKey && listingKey[1]);
+
+    // What the file must carry instead.
+    check(/insert into public\.licences[\s\S]{0,400}'review'[\s\S]{0,200}interval\s*'\d+\s*days'/i.test(sql),
+      "the file carries a mint template with a FINITE expiry");
+    check(/where key =/.test(sql) && !/set status = 'cancelled' where plan = 'review'/.test(sql),
+      "revoking is BY KEY — `where plan = 'review'` would cancel the submission currently in flight");
+    check(/max_activations/.test(sql) && /DEVICE_LIMIT/.test(sql),
+      "and it says why activations stay generous: a reviewer hitting DEVICE_LIMIT rejects the submission");
+
+    /**
+     * The constraints a minted key has to satisfy, checked against a key
+     * generated the documented way. The file no longer holds one to inspect,
+     * so this proves the RULE still produces something the extension accepts
+     * — which is what the old assertions were really protecting.
+     */
+    const AB = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"; // no 0/O/1/I — reviewers retype
+    const rnd = (n) => Array.from(crypto.randomBytes(n)).map((b) => AB[b % 32]).join("");
+    const maxlen = Math.min(
+      ...[fs.readFileSync(path.join(ROOT, "popup.html"), "utf8"),
+          fs.readFileSync(path.join(ROOT, "settings.html"), "utf8")]
+        .map((h) => Number((h.match(/maxlength="(\d+)"/) || [])[1] || 0)));
+    check(maxlen >= 20, "the activation inputs have a maxlength to check against", String(maxlen));
+    let bad = 0;
+    for (let i = 0; i < 500; i++) {
+      const key = "GK-REVIEW-" + [rnd(5), rnd(5), rnd(5)].join("-");
       const parsed = E.parseCode(key);
-      check(parsed && parsed.kind === "individual",
-        "it is shaped like a licence key the extension will route correctly", JSON.stringify(parsed));
-      check(parsed && parsed.code === key, "and needs no normalising — it is already upper-case", parsed && parsed.code);
-      check(expiry === "null",
-        "IT NEVER EXPIRES — store review recurs on every update, months apart, and a key that lapses gets the extension rejected as non-functional",
-        expiry);
-      check(Number(activations) >= 1000,
-        "and cannot exhaust its activations across repeat review rounds", activations);
-      check(key.length <= 32,
-        "it fits the popup and settings input maxlength, so a reviewer can actually paste it", String(key.length));
+      if (!parsed || parsed.kind !== "individual" || parsed.code !== key || key.length > maxlen) bad++;
     }
+    check(bad === 0,
+      `a key minted the documented way parses as a licence, needs no normalising, and fits maxlength ${maxlen}`,
+      `${bad}/500 failed`);
+    check(Math.round(15 * Math.log2(32)) >= 80 - 5,
+      "and carries ~75 bits, against an RPC with no rate limit");
   }
 
   console.log("\n--- key entropy ---");

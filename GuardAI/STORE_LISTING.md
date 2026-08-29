@@ -53,6 +53,19 @@ titled Guard4AI:
 Shot 5 needs retaking regardless of the rename, since that settings page has
 changed twice since it was captured.
 
+### Release checklist
+
+1. `bash tools/package.sh` — check the version in the filename is what you
+   intended.
+2. **Mint a fresh reviewer key** (SQL under *Reviewer access*) and paste it
+   into Privacy practices → test credentials. The old one is revoked; there is
+   no standing key any more, and a submission without one is rejected as
+   non-functional.
+3. Retake any screenshot showing a changed UI or the old name.
+4. Confirm `hello@guard4ai.com` receives mail — a privacy policy with a dead
+   contact address is its own rejection.
+5. After the submission is approved, revoke that submission's key by key.
+
 ---
 
 ## Privacy policy
@@ -91,7 +104,7 @@ non-functional.** The Developer Dashboard's *Privacy practices → test
 credentials / instructions* field is the remedy and must be filled in on every
 submission.
 
-Paste this into that field:
+Paste this into that field, substituting the key for this submission:
 
 > Guard4AI masks personal data before it is sent to AI chat sites. It stays
 > inactive until a licence key is entered, so please activate it first:
@@ -99,7 +112,7 @@ Paste this into that field:
 > 1. Install the extension.
 > 2. Click the Guard4AI toolbar icon.
 > 3. Paste this key into the "Activate" field and click Activate:
->    `GK-REVIEW-CHROME-STORE-0001`
+>    `GK-REVIEW-…` ← the key minted for THIS submission
 > 4. Open https://chatgpt.com and type, without sending:
 >    `Contact Sarah Chen on 0412 345 678`
 > 5. Press Enter. Guard4AI intercepts the send and offers to replace the name
@@ -108,15 +121,50 @@ Paste this into that field:
 > Detection runs entirely in the browser. The only network request the
 > extension makes is the licence check in step 3.
 
-**The review key never expires and cannot exhaust its activations.** That is
-deliberate: review recurs on every update, months apart, with a different
-person each time, and a key that lapses or runs out of seats gets a future
-update rejected. It is defined at the bottom of `backend/licences.sql`.
+### The reviewer key is per-submission, and is never written down here
 
-Revoke it if it leaks:
+**The literal key is deliberately absent from this file and from
+`backend/licences.sql`.** It used to be in both, as a never-expiring
+`GK-REVIEW-CHROME-STORE-0001`, and this repository is public — so it was
+revoked on 2026-08-29. Writing a fresh key here leaks it again on the next
+push; an expiry only bounds how long the next leak lasts. It lives in the
+Developer Dashboard field above and in the `licences` table, and nowhere else.
+
+**This is a real trade, not a free win.** The old design never expired on
+purpose: review recurs on every update, months apart, with a different person
+each time, and a key that has lapsed by the time the NEXT update is reviewed
+gets that update rejected as non-functional. A 90-day per-submission key keeps
+a leak bounded, at the cost of making "mint a reviewer key" a release step
+that has to actually happen. Hence its place on the checklist below.
+
+Note also **which side of the expiry has grace**: `activate_licence` raises
+`LICENCE_EXPIRED` immediately once `current_period_end` passes, so a reviewer
+who *types the key* after expiry is stopped dead. The 14-day `GRACE_MS` in
+`src/entitlement.js` only extends an install that already activated. So the
+expiry has to outlast the last moment a reviewer might enter it — including a
+rejection and a resubmission — not the last moment they might use it.
+
+**Per submission:**
 
 ```sql
-update public.licences set status = 'cancelled' where plan = 'review';
+-- Mint. Generate <random> with real entropy, never sequentially.
+insert into public.licences (key, plan, status, current_period_end, max_activations)
+values ('GK-REVIEW-<random>', 'review', 'active', now() + interval '90 days', 10000);
+```
+
+```sql
+-- Revoke, once the submission is through. BY KEY, never by plan: `where plan
+-- = 'review'` cancels every reviewer key, including one for a submission
+-- still in flight.
+update public.licences set status = 'cancelled' where key = 'GK-REVIEW-<random>';
+```
+
+```sql
+-- Worth running on any key you revoke: did anyone but the reviewer find it?
+select l.key, count(a.token) as activations, max(a.last_seen_at) as last_used
+  from public.licences l
+  left join public.licence_activations a on a.licence_id = l.id
+ where l.plan = 'review' group by l.key order by activations desc;
 ```
 
 ## Permission justifications
