@@ -2085,6 +2085,17 @@
   ]);
 
   const AMBIGUOUS_FIRST = new Set([
+    // Added 2026-08-29 alongside the gazetteer top-up: every one of these is
+    // a real given name AND an ordinary word, and adding them to the
+    // gazetteer without adding them here turned sentences into people —
+    // measured "please grant access" -> a name, "the willow tree" -> a name,
+    // "cole slaw" -> a name. The cost is the same one this set already
+    // accepts for "grace" and "rose": the LOWERCASE path stops recovering
+    // them. Capitalised detection is untouched, so "Grant Sullivan" and
+    // "Willow Baker" still mask normally.
+    "grant", "willow", "wren", "violet", "holly", "harley", "robin", "pat",
+    "val", "ray", "cole", "rowan", "marley", "skye", "eden", "india",
+    "poppy", "sandy",
     // ordinary nouns / verbs / adjectives
     "grace", "hope", "faith", "joy", "rose", "lily", "daisy", "jasmine",
     "amber", "pearl", "ruby", "crystal", "summer", "autumn", "dawn", "sky",

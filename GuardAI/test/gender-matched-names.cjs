@@ -108,7 +108,13 @@ function check(ok, label, detail) {
 
   /* ---- 3. Detection is completely unaffected ---- */
   console.log("\n--- detection unchanged by the split ---");
-  check(gaz.first.size === 927,
+  // A FLOOR, not an equality. This asserted `=== 927` — the size on the day
+  // the gender split landed — which made it a change-detector for the list's
+  // length rather than a check that the split lost nothing, and it failed the
+  // moment the Anglo-Celtic bucket was topped up (2026-08-29, 927 -> 1,279).
+  // The invariant that matters is the partition below; this one only has to
+  // say the list never SHRINKS silently.
+  check(gaz.first.size >= 927,
     "the union still holds every given name the list had before the split",
     String(gaz.first.size));
   check(gaz.firstMale.size + gaz.firstFemale.size + gaz.firstUnisex.size === gaz.first.size,

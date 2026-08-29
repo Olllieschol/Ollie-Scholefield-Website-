@@ -147,19 +147,49 @@ console.log("\n--- 3. names are still found where they actually appear ---");
   check(names("Ng Wei Ming").length > 0, "…and so is one vouched for by its SURNAME");
 }
 
-console.log("\n--- 4. THE COST: a bare unvouched name alone on a line is missed ---");
+console.log("\n--- 4. THE COST, after the gazetteer top-up ---");
 {
-  // Documented, not tuned away. If these start passing, limit #2 has been
-  // fixed and this section should be rewritten rather than deleted.
-  for (const n of ["Dana Whitcombe", "Dianne Alcorn", "Marcus Ellery", "Xylophia Quandrix"]) {
-    const first = n.split(" ")[0].toLowerCase();
-    check(!gaz.isFirst(first), `fixture: the gazetteer does NOT vouch for "${first}"`);
-    check(names(n).length === 0,
-      `LIMIT: "${n}" alone on a line is missed — no context, and not in the gazetteer`,
+  /**
+   * This section originally recorded four bare signature names as lost:
+   * Dana Whitcombe, Dianne Alcorn, Marcus Ellery, Xylophia Quandrix. Three
+   * were lost only because the gazetteer was thin in its LARGEST group —
+   * capping Anglo-Celtic at ~32% of 927 names left it the worst-covered
+   * group in the list. The quota was dropped and the bucket topped up
+   * (927 -> 1,279 given names) on 2026-08-29, and those three now survive,
+   * which is what this section's own note said should happen.
+   *
+   * What remains is limit #2 proper, and no list will close it: a name
+   * genuinely absent from the gazetteer, standing alone on a line with no
+   * context at all, is missed.
+   */
+  for (const n of ["Dana Whitcombe", "Dianne Alcorn", "Marcus Ellery"]) {
+    check(names(n).length > 0,
+      `recovered by the top-up: "${n}" alone on a line is a person again`,
       JSON.stringify(names(n)));
   }
-  check(names("Dianne Alcorn is the contact").length > 0,
+  check(!gaz.isFirst("xylophia") && !gaz.isLast("quandrix"),
+    "fixture: the gazetteer vouches for neither part of the invented name");
+  check(names("Xylophia Quandrix").length === 0,
+    "LIMIT: a name the list has never heard of, alone on a line, is still missed");
+  check(names("Xylophia Quandrix is the contact").length > 0,
     "…and the same name in a sentence is still caught, so the loss is only the bare line");
+}
+
+console.log("\n--- 4b. the top-up did not turn sentences into people ---");
+{
+  // Every name added that is also an ordinary English word went into
+  // AMBIGUOUS_FIRST at the same time. Without that, the lowercase path read
+  // "please grant access" and "cole slaw" as names — measured, 13 of them.
+  for (const s of ["please grant access", "the willow tree", "cole slaw side",
+                   "a robin bird", "the holly bush", "a rowan tree"]) {
+    const f = det.scan(s + " and the phone is 0412 556 781").filter((x) => x.type === "NAME_PII");
+    check(f.length === 0, `ordinary words stay ordinary: "${s}"`, JSON.stringify(f.map((x) => x.value)));
+  }
+  // …and the same words capitalised are still people.
+  for (const s of ["Grant Sullivan", "Willow Baker", "Cole Harrington"]) {
+    check(det.scan(s + " called on 0412 556 781").some((x) => x.type === "NAME_PII"),
+      `…but capitalised they are still names: "${s}"`);
+  }
 }
 
 console.log("\n--- 5. the six over-capture incidents are untouched ---");
