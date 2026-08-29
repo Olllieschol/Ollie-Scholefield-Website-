@@ -72,6 +72,7 @@ const SUITES = [
   { name: "panel-item-delete.cjs (per-item forget, leaves other items untouched)", file: "test/panel-item-delete.cjs" },
   { name: "message-marks.cjs (What AI sees shows only fakes; no real-value caption)", file: "test/message-marks.cjs" },
   { name: "popup-clear-arm.cjs (popup Clear is click-to-arm, not window.confirm)", file: "test/popup-clear-arm.cjs" },
+  { name: "popup-notice-once.cjs (standing notices say their piece once; a NEW lock says it again)", file: "test/popup-notice-once.cjs" },
   { name: "panel-no-autoopen.cjs (panel never pops open on its own)", file: "test/panel-no-autoopen.cjs" },
   { name: "panel-autopanel-setting.cjs (opt-in panel auto-open after Mask & Send)", file: "test/panel-autopanel-setting.cjs" },
   { name: "silent-mode.cjs (silent auto-mask + safe fallback)", file: "test/silent-mode.cjs" },

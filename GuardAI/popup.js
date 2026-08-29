@@ -89,7 +89,71 @@
     const any = lockedOn || lockedMasking ||
       Boolean(policy && policy.mode === "enforced" && policy.locks &&
               Object.keys(policy.locks).length);
-    banner.classList.toggle("is-on", any);
+    showOnce(banner, "policy", any, lockFingerprint(policy));
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Banners that say their piece once.
+   *
+   * Both of these state a standing fact — your admin can see counts; some
+   * settings are pinned — and neither is an alert. Repeating them on every
+   * popup open turns the top of the screen into furniture the user learns to
+   * look past, which is a cost paid by the messages that DO need reading.
+   * Settings keeps both facts permanently: the activation card names the
+   * company, and every pinned control carries its own "Locked by admin" row.
+   *
+   * "Once" is keyed to WHAT WAS SAID, not to a boolean. If the admin later
+   * pins another setting, or the seat is moved to a different company, that
+   * is a new fact and it gets one more showing. A plain "dismissed forever"
+   * flag would mean someone is never told about a restriction that did not
+   * exist when they last looked — which is the one outcome this banner
+   * exists to prevent.
+   * ------------------------------------------------------------------ */
+
+  const SEEN_KEY = "guardai_notices_seen";
+
+  /** Identify a policy by the locks it names, order-independent. */
+  function lockFingerprint(policy) {
+    if (!policy || policy.mode !== "enforced" || !policy.locks) return "none";
+    const on = Object.keys(policy.locks).filter((k) => policy.locks[k] === true).sort();
+    return on.length ? "enforced:" + on.join(",") : "none";
+  }
+
+  /**
+   * Show `banner` only if this exact `fingerprint` has not been shown before,
+   * then remember it. Storage failures fail OPEN — the banner shows — because
+   * showing a standing notice twice is a smaller harm than never showing it.
+   */
+  /**
+   * Serialised, because both banners record into the SAME storage key and
+   * they are painted from two different places (the policy one during
+   * render(), the company one when the worker answers). Run concurrently,
+   * each reads the record before the other writes, and the second write
+   * drops the first one's entry — so whichever banner lost the race would
+   * reappear on every open forever. Caught by test/popup-notice-once.cjs §1,
+   * which is the only section where both banners are live at once.
+   */
+  let seenChain = Promise.resolve();
+
+  function showOnce(banner, name, shouldShow, fingerprint) {
+    if (!banner) return seenChain;
+    if (!shouldShow) { banner.classList.remove("is-on"); return seenChain; }
+    seenChain = seenChain.then(async () => {
+      try {
+        const data = await chrome.storage.local.get([SEEN_KEY]);
+        const seen = (data && data[SEEN_KEY]) || {};
+        if (seen[name] === fingerprint) return;      // already said, unchanged
+        banner.classList.add("is-on");
+        await chrome.storage.local.set({
+          [SEEN_KEY]: Object.assign({}, seen, { [name]: fingerprint }),
+        });
+      } catch (_) {
+        // Could not read or record it — show it. Twice is a smaller harm
+        // than never.
+        banner.classList.add("is-on");
+      }
+    });
+    return seenChain;
   }
 
   /* ---- Load everything from storage and paint the UI ---- */
@@ -487,8 +551,10 @@
       chrome.runtime.sendMessage({ type: "GUARDAI_COMPANY_STATUS" }, (res) => {
         if (chrome.runtime.lastError) return;
         const conn = res && res.connection;
-        banner.classList.toggle("is-on", Boolean(conn));
+        // Name it before deciding to show it: the fingerprint is the company,
+        // so being moved to a different company says its piece again.
         if (conn) $("company-name").textContent = conn.companyName;
+        showOnce(banner, "company", Boolean(conn), conn ? String(conn.companyName || "?") : "none");
       });
     } catch (_) {
       /* worker asleep — the banner simply stays hidden this time */
