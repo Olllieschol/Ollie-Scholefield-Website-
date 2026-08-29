@@ -761,6 +761,20 @@
     }
 
     /**
+     * Would this stand-in carry a word of the real value back out?
+     *
+     * Public because a caller that BUILDS a fake rather than drawing one has
+     * to run the same check. Deriving a person's fake email from their fake
+     * name (so the masked signature block is coherent) is exactly that case:
+     * "Dakota Ellery" -> "dakota.ellery45@…" is a fine stand-in for
+     * "dana.whitcombe@…" and a leak for "dakota.smith@…", and only the real
+     * value can tell the two apart.
+     */
+    wouldLeak(type, real, fake) {
+      return sharesPoolWord(type, real, fake);
+    }
+
+    /**
      * Register a real->fake pair the user committed in the preview (either an
      * auto-generated or a custom replacement). Reuses an existing mapping for
      * the same real value. Caller is responsible for calling save().

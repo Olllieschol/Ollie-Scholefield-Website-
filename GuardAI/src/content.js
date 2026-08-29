@@ -1042,6 +1042,27 @@
         fake,
       });
     }
+    // Give each person's identifiers THEIR stand-in name, so a masked
+    // signature block reads as one person rather than three. See the note
+    // above identifierOwner: this is not cosmetic — the name an AI infers
+    // from a fake address is unrestorable unless it is a fake we know.
+    {
+      const nameItems = items.filter((it) => it.type === "NAME_PII" && nameParts(it.value));
+      const owned = new Map(); // real identifier -> derived fake
+      for (const it of items) {
+        if (it.type !== "EMAIL" && it.type !== "USERNAME") continue;
+        if (owned.has(it.value)) { it.fake = owned.get(it.value); continue; }
+        const owner = identifierOwner(it, nameItems);
+        if (!owner) continue;
+        const derived = safeDerivedFake(it, owner.fake, usedFakes);
+        if (!derived) continue;
+        usedFakes.add(derived);
+        fakeByReal.set(it.value, derived);
+        owned.set(it.value, derived);
+        it.fake = derived;
+      }
+    }
+
     // Safety net: explicitly verify no two DISTINCT real values share a fake.
     // Generation already avoids this via `usedFakes`, but a final pass guarantees
     // it so unmasking can never restore the wrong identity to the wrong row.
@@ -5050,6 +5071,135 @@
   const titleCase = (v) => v.replace(/\p{L}[\p{L}'\u2019-]*/gu,
     (w) => w[0].toUpperCase() + w.slice(1).toLowerCase());
 
+  /* ---- identifiers that belong to a person ------------------------------ *
+   *
+   * An email address usually CONTAINS its owner's name, so masking the two
+   * independently produced a signature block naming three different people:
+   *
+   *     Dakota Ellery                       (real: Dana Whitcombe)
+   *     declan.marshall45@placeholder.com   (real: dana.whitcombe@\u2026)
+   *
+   * Filed as cosmetic. It is not. On a live round trip ChatGPT read the local
+   * part, inferred a person from it, and reported "the sender is Dakota
+   * Ellery but the email belongs to Declan Marshall" as a defect IN THE
+   * DOCUMENT \u2014 two of its fifteen findings were artefacts of our masking. And
+   * "Declan Marshall" cannot be restored: the mapping table holds the whole
+   * address, never the name the AI read out of it, so the fake name survived
+   * into the user's own reading of the reply.
+   *
+   * Deriving the address from the person's own stand-in fixes both. The
+   * signature reads as one person, and the name the AI infers is now a fake
+   * that IS in the table, so it restores like any other.
+   */
+
+  /** Shared mailboxes belong to no one; binding them to a nearby person would
+   *  invent a relationship the real document does not have. */
+  const ROLE_ACCOUNTS = new Set([
+    "info", "admin", "hr", "accounts", "payroll", "support", "help", "contact",
+    "enquiries", "enquiry", "sales", "office", "reception", "careers", "jobs",
+    "noreply", "no-reply", "donotreply", "billing", "finance", "team", "mail",
+    "hello", "service", "orders", "invoices", "recruitment", "people",
+  ]);
+
+  /** First and last token of a name, lowercased and stripped to letters. */
+  function nameParts(name) {
+    const parts = String(name || "").trim().split(/\s+/)
+      .map((p) => p.toLowerCase().replace(/[^\p{L}]/gu, ""))
+      .filter(Boolean);
+    if (parts.length < 2) return null;
+    return { first: parts[0], last: parts[parts.length - 1] };
+  }
+
+  /**
+   * Which masked person does this identifier belong to?
+   *
+   * Containment first \u2014 the real address naming the real person is EVIDENCE
+   * from the document. Proximity second and deliberately tight, because it is
+   * an inference: it can only bind a personal-looking address to the single
+   * name beside it, which is the signature-block shape and little else.
+   * Guessing wrong costs coherence, exactly what we have today, so a wrong
+   * guess is never worse than not guessing \u2014 but a guess that INVENTS a
+   * relationship the document does not assert would be, hence the narrow window.
+   */
+  const OWNER_WINDOW = 120;
+  function identifierOwner(item, nameItems) {
+    if (!nameItems.length) return null;
+    const local = item.type === "EMAIL"
+      ? String(item.value).split("@")[0]
+      : String(item.value);
+    const lower = local.toLowerCase();
+    const tokens = lower.split(/[^\p{L}]+/u).filter((t) => t.length > 1);
+    if (tokens.length === 1 && ROLE_ACCOUNTS.has(tokens[0])) return null;
+
+    const scored = [];
+    for (const n of nameItems) {
+      const np = nameParts(n.value);
+      if (!np) continue;
+      let score = 0;
+      // The surname is the strong signal; substring as well as token, since
+      // handles run the initial straight onto it ("mellery").
+      if (np.last.length > 2 && (tokens.includes(np.last) || lower.includes(np.last))) score += 3;
+      if (np.first.length > 1 && (tokens.includes(np.first) || lower.includes(np.first))) score += 2;
+      // "p.raghunathan91" \u2014 the initial only breaks a tie once the surname
+      // already matched, so it can never bind on its own.
+      if (score >= 3 && lower[0] === np.first[0]) score += 1;
+      if (score > 0) scored.push({ n, score, dist: Math.abs(n.start - item.start) });
+    }
+    if (scored.length) {
+      // Two people can share a surname \u2014 "Priya Raghunathan" and "Anand
+      // Raghunathan" both match "p.raghunathan91". Highest score wins, then
+      // whichever is nearest in the document.
+      scored.sort((a, b) => b.score - a.score || a.dist - b.dist);
+      return scored[0].n;
+    }
+    // Proximity: only when exactly ONE person is named in the window.
+    const near = nameItems.filter((n) => Math.abs(n.start - item.start) <= OWNER_WINDOW);
+    const distinct = new Set(near.map((n) => n.value));
+    return distinct.size === 1 ? near[0] : null;
+  }
+
+  /**
+   * Rebuild an identifier's stand-in around the owner's stand-in name, keeping
+   * the domain and trailing digits the generator already chose so the shape,
+   * and everything the shape reveals, is unchanged.
+   */
+  function deriveIdentifierFake(type, generated, ownerFake) {
+    const np = nameParts(ownerFake);
+    if (!np) return null;
+    if (type === "EMAIL") {
+      const at = String(generated).indexOf("@");
+      if (at < 0) return null;
+      const digits = (generated.slice(0, at).match(/\d+$/) || [""])[0];
+      return `${np.first}.${np.last}${digits}${generated.slice(at)}`;
+    }
+    if (type === "USERNAME") {
+      const digits = (String(generated).match(/\d+$/) || [""])[0];
+      return `${np.first[0]}${np.last}${digits}`;
+    }
+    return null;
+  }
+
+  /**
+   * The derived stand-in, or null to keep the random draw.
+   *
+   * Separate from the loop that uses it so a test can drive the REFUSALS
+   * directly. They are the part that matters and the part chance will not
+   * reach: a leak needs the owner's random fake name to collide with the real
+   * address, about 1 draw in 40, so a test that waits for one to happen is
+   * asserting on a coin it mostly never flips.
+   */
+  function safeDerivedFake(item, ownerFake, usedFakes) {
+    const derived = deriveIdentifierFake(item.type, item.fake, ownerFake);
+    if (!derived || derived === item.fake) return null;
+    // The owner's stand-in name can itself collide with the REAL address — a
+    // fake "Dakota Ellery" is a leak for a real "dakota.smith@…". Safety
+    // outranks coherence: keep the random draw when that happens.
+    if (masker.wouldLeak(item.type, item.value, derived)) return null;
+    // And never take a stand-in another value already holds.
+    if ((usedFakes && usedFakes.has(derived)) || masker.fakeToReal.has(derived)) return null;
+    return derived;
+  }
+
   /* ---- the preview ---- */
 
   let filePreviewEl = null;
@@ -5635,6 +5785,11 @@
     catLabel,
     setParser: (fn) => { parserTransport = fn; },
     startSafeText,
+    // The person-to-identifier rule, exposed so its REFUSALS can be driven
+    // directly rather than waited for — see safeDerivedFake.
+    identifierOwner,
+    deriveIdentifierFake,
+    safeDerivedFake,
     // Builds the SAME model + masked string the preview and all four actions
     // share, then clears the global so tests can assert on it in isolation.
     buildDocPreview: async (text) => {
