@@ -1,7 +1,7 @@
 /**
- * GuardAI — entitlement state machine.
+ * Guard4AI — entitlement state machine.
  * ---------------------------------------------------------------------------
- * The one place that decides whether GuardAI is allowed to run. Everything
+ * The one place that decides whether Guard4AI is allowed to run. Everything
  * else — the worker, the popup, the content script — reads that decision; none
  * of them re-derives it.
  *

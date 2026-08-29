@@ -1,5 +1,5 @@
 /**
- * GuardAI — the one language feature the PDF reader needs and older Chrome
+ * Guard4AI — the one language feature the PDF reader needs and older Chrome
  * does not have.
  *
  * pdf.js 6.2 calls Uint8Array.prototype.toHex(), a 2025 addition that Chrome
@@ -26,7 +26,7 @@
    * toHex below: that one needs Chrome 140, this one needs 145, so a browser
    * new enough to read a PDF's text can still be too old to rasterise one.
    * Without this, a scanned PDF on Chrome 140-144 throws inside render() and
-   * the user gets "could not read" on a file GuardAI can in fact read.
+   * the user gets "could not read" on a file Guard4AI can in fact read.
    */
   if (typeof Map.prototype.getOrInsertComputed !== "function") {
     Object.defineProperty(Map.prototype, "getOrInsertComputed", {

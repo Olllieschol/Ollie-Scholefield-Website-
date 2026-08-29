@@ -1,5 +1,5 @@
 /**
- * GuardAI — popup.js
+ * Guard4AI — popup.js
  * ---------------------------------------------------------------------------
  * Privacy dashboard logic. Reads/writes chrome.storage.local only.
  * Shows session stats, computes a privacy score, and exposes the master
@@ -68,7 +68,7 @@
       if (label) {
         label.title = lockedOn
           ? "Turned on by your organisation"
-          : "Enable or disable GuardAI";
+          : "Enable or disable Guard4AI";
       }
     }
     if (els.masking) {
@@ -83,7 +83,7 @@
     // same explanation as someone whose on/off switch is.
     //
     // The wording names no specific setting on purpose. It used to promise
-    // that GuardAI "can't be switched off" and that "files and images are
+    // that Guard4AI "can't be switched off" and that "files and images are
     // always checked", which was true when Enforced meant a fixed trio and is
     // now simply wrong: an admin can pin any one setting on its own.
     const any = lockedOn || lockedMasking ||
@@ -230,7 +230,7 @@
     _storageErrorEl.className = "gd-error-banner";
     _storageErrorEl.setAttribute("role", "alert");
     _storageErrorEl.innerHTML =
-      "<strong>Storage unavailable.</strong> GuardAI can't read its saved data " +
+      "<strong>Storage unavailable.</strong> Guard4AI can't read its saved data " +
       "right now. Your protection still works on the page — try reopening this " +
       "panel, or reload the extension if it persists.";
     document.body.insertBefore(_storageErrorEl, document.body.firstChild);
@@ -425,7 +425,7 @@
   /* ------------------------------------------------------------------ *
    * Licence card.
    *
-   * The whole point of this card is that a locked GuardAI is never a dead
+   * The whole point of this card is that a locked Guard4AI is never a dead
    * popup. Somebody who installs the extension, opens this, and finds a
    * disabled dashboard with no explanation has been given a broken product;
    * the code field is right here, so activation is one click from the place
@@ -466,11 +466,11 @@
     const left = daysLeft(rec);
     const plural = left === 1 ? "day" : "days";
     if (state === "locked") {
-      $("lock-title").textContent = "GuardAI is not active";
+      $("lock-title").textContent = "Guard4AI is not active";
       $("lock-body").textContent =
         "Nothing is being masked. Enter your licence key, or the invite code from your workplace.";
     } else if (rec && rec.kind === "legacy") {
-      $("lock-title").textContent = "GuardAI now needs a licence";
+      $("lock-title").textContent = "Guard4AI now needs a licence";
       $("lock-body").textContent =
         `Still protecting you for ${left} more ${plural}. Enter a licence key or an invite code to keep it on.`;
     } else {
@@ -522,11 +522,11 @@
             btn.disabled = false;
             btn.textContent = "Activate";
             if (chrome.runtime.lastError || !res) {
-              return setLockMsg("Could not reach GuardAI. Check your connection and try again.", "bad");
+              return setLockMsg("Could not reach Guard4AI. Check your connection and try again.", "bad");
             }
             if (!res.ok) return setLockMsg(res.error || "Could not activate. Try again.", "bad");
             input.value = "";
-            setLockMsg("GuardAI is on. Open tabs are protected straight away.", "good");
+            setLockMsg("Guard4AI is on. Open tabs are protected straight away.", "good");
             paintLicence(res.state, res.record);
             render();
             renderCompanyBanner();
@@ -534,7 +534,7 @@
         } catch (_) {
           btn.disabled = false;
           btn.textContent = "Activate";
-          setLockMsg("Could not reach GuardAI. Try again.", "bad");
+          setLockMsg("Could not reach Guard4AI. Try again.", "bad");
         }
       };
       btn.addEventListener("click", activate);

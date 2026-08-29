@@ -1,5 +1,5 @@
 /**
- * GuardAI — names-gazetteer.js
+ * Guard4AI — names-gazetteer.js
  * ---------------------------------------------------------------------------
  * Given names and surnames used ONLY by the opt-in "Aggressive name detection"
  * mode. The default rule (a full name alongside other PII) is shape-based and

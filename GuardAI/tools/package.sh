@@ -14,13 +14,13 @@
 # fails the suite rather than shipping a broken extension.
 #
 # Usage:  bash tools/package.sh
-# Output: dist/guardai-<version>.zip
+# Output: dist/guard4ai-<version>.zip
 # ---------------------------------------------------------------------------
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSION=$(node -p "require('./manifest.json').version" 2>/dev/null || echo "dev")
-OUT="dist/guardai-${VERSION}.zip"
+OUT="dist/guard4ai-${VERSION}.zip"
 
 # Everything that ships, and nothing else. settings.html is here despite not
 # appearing in manifest.json — it is opened with chrome.tabs.create(), so

@@ -1,5 +1,5 @@
 /**
- * GuardAI — file scanning policy.
+ * Guard4AI — file scanning policy.
  * ---------------------------------------------------------------------------
  * Pure logic: no DOM, no chrome.*, no fetch, no parsing. Everything here is a
  * decision about text that somebody else extracted, which is what makes it
@@ -62,7 +62,7 @@
   /**
    * Deliberately NOT supported in v1, listed by name so the warning can say
    * what the file is rather than "unsupported file". A user who attaches a
-   * spreadsheet deserves to be told GuardAI cannot read spreadsheets yet, not
+   * spreadsheet deserves to be told Guard4AI cannot read spreadsheets yet, not
    * that their file is unrecognisable.
    */
   const KNOWN_UNSUPPORTED = {
@@ -231,7 +231,7 @@
         found = detector.scan(part.text) || [];
       } catch (err) {
         // One bad window must not lose the other nineteen.
-        console.warn("[GuardAI] file scan window failed, continuing:", err);
+        console.warn("[Guard4AI] file scan window failed, continuing:", err);
         continue;
       }
       for (const f of found) {
@@ -642,7 +642,7 @@
       return {
         action: ACTION.IMG_UNREADABLE,
         reason: chars < OCR_MIN_CHARS
-          ? "GuardAI could not make out text in this image."
+          ? "Guard4AI could not make out text in this image."
           : "The text in this image is too unclear to read reliably.",
       };
     }

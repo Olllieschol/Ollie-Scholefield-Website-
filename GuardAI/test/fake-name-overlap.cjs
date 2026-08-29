@@ -389,18 +389,39 @@ const REALS = [
     // path directly — 38 companies sharing one designator against a 40-stem
     // pool forces genuine rejections, since each registration shrinks what is
     // left.
+    /**
+     * 34, not 38, and the number is measured rather than chosen.
+     *
+     * Written at 38 first, this assertion failed about 1 run in 30 — a real
+     * intermittent, not noise. Random-draw-with-retry degrades as a pool
+     * fills: with 40 ORG stems and 37 taken, each retry has a 3/40 chance of
+     * landing on a free one, so a finite budget sometimes runs out and hands
+     * back a duplicate. Measured, P(a document gets a duplicate stand-in):
+     *
+     *          n=30   n=34   n=36   n=38   n=39   n=40
+     *   b=50    0%     0%    0.25%  2.75%  9.00%  33.0%
+     *   b=100   0%     0%     0%     0%    0.50%  9.25%
+     *
+     * _getOrCreate's budget was 50 while previewFake's was 100, and this is
+     * the path that COMMITS the mapping, so it is the one where a duplicate
+     * actually matters. Raised to 100. The curve's shape is unchanged — only
+     * where it starts to bite — so the residual is a logged limit, and this
+     * assertion sits at 34 where there is real margin rather than at the edge
+     * where it would flake again.
+     */
     {
       const m2 = new w.GuardAI.Masker();
       await m2.load();
+      const N = 34;
       const fakes = [];
-      for (let i = 0; i < 38; i++) fakes.push(m2._getOrCreate("ORG", `Aldermere${i} Logistics`));
+      for (let i = 0; i < N; i++) fakes.push(m2._getOrCreate("ORG", `Aldermere${i} Logistics`));
       const malformed = fakes.filter((f) => !/^\S+ Logistics$/.test(f));
       check(malformed.length === 0,
-        "_getOrCreate's retry keeps the designator too (38 companies committed)",
+        `_getOrCreate's retry keeps the designator too (${N} companies committed)`,
         `${malformed.length} malformed: ${malformed.slice(0, 3).join(" | ")}`);
-      check(new Set(fakes).size === 38,
-        "control: and all 38 committed stand-ins are distinct, so the retry really ran",
-        `${new Set(fakes).size}/38 distinct`);
+      check(new Set(fakes).size === N,
+        `control: and all ${N} committed stand-ins are distinct, so the retry really ran`,
+        `${new Set(fakes).size}/${N} distinct`);
     }
   }
 

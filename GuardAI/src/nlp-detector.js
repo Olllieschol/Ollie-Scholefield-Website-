@@ -1,11 +1,11 @@
 /**
- * GuardAI — nlp-detector.js
+ * Guard4AI — nlp-detector.js
  * ---------------------------------------------------------------------------
  * OPTIONAL context-aware detection layer using Transformers.js (local NER).
  *
  * WHY THIS IS OPTIONAL & SELF-HOSTED
  * ----------------------------------
- * GuardAI guarantees that *nothing leaves your device*. A Transformers.js
+ * Guard4AI guarantees that *nothing leaves your device*. A Transformers.js
  * model is several megabytes, so to honour that promise the model files must
  * be BUNDLED INSIDE THE EXTENSION and served locally — never fetched from a
  * CDN at runtime (that would be an external network call).
@@ -15,13 +15,13 @@
  * fully-wired drop-in upgrade: if you add the library + model locally it will
  * automatically enhance detection with contextual Named Entity Recognition
  * (people, organisations, locations) that pure regex can't catch. If the files
- * are absent, it silently disables itself and GuardAI keeps working on
+ * are absent, it silently disables itself and Guard4AI keeps working on
  * patterns alone.
  *
  * TO ENABLE (see README for full steps):
- *   1. Download Transformers.js (transformers.min.js) into  GuardAI/lib/
+ *   1. Download Transformers.js (transformers.min.js) into  Guard4AI/lib/
  *   2. Download a small ONNX NER model (e.g. Xenova/bert-base-NER quantized)
- *      into  GuardAI/models/bert-base-NER/
+ *      into  Guard4AI/models/bert-base-NER/
  *   3. Set ENABLE_NLP below to true.
  *
  * Everything still runs 100% locally — the env config below explicitly
@@ -39,7 +39,7 @@
   const MODEL_NAME = "bert-base-NER";
 
   /**
-   * Maps NER entity groups to GuardAI finding types.
+   * Maps NER entity groups to Guard4AI finding types.
    * PER = person, ORG = organisation, LOC = location/address.
    */
   const ENTITY_MAP = {
@@ -94,7 +94,7 @@
           return true;
         } catch (err) {
           // Library/model not present — degrade silently to patterns only.
-          console.info("[GuardAI] NLP layer unavailable, using pattern engine.", err?.message);
+          console.info("[Guard4AI] NLP layer unavailable, using pattern engine.", err?.message);
           this.available = false;
           return false;
         }
@@ -104,7 +104,7 @@
     }
 
     /**
-     * Run NER over text and return GuardAI-shaped findings.
+     * Run NER over text and return Guard4AI-shaped findings.
      * Returns [] if NLP is disabled/unavailable so callers can always await it.
      */
     async scan(text) {
@@ -116,7 +116,7 @@
       try {
         entities = await this._pipeline(text, { aggregation_strategy: "simple" });
       } catch (err) {
-        console.info("[GuardAI] NLP inference failed, skipping.", err?.message);
+        console.info("[Guard4AI] NLP inference failed, skipping.", err?.message);
         return [];
       }
 

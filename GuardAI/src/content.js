@@ -1,5 +1,5 @@
 /**
- * GuardAI — content.js
+ * Guard4AI — content.js
  * ---------------------------------------------------------------------------
  * The orchestrator injected into supported AI chat sites. It ties together:
  *   - detector.js      (find sensitive data)
@@ -23,7 +23,7 @@
 
   const { Detector, NlpDetector, Masker } = window.GuardAI;
 
-  // Crisp brand mark used in every GuardAI surface's header (warning card,
+  // Crisp brand mark used in every Guard4AI surface's header (warning card,
   // review panel, collapsed badge) in place of the old colour shield emoji.
   // This is the actual brand mark (green shield + black
   // "G", same artwork as icons/icon{16,48,128}.png) rather than a generic
@@ -308,12 +308,12 @@
     return list.filter(function (type) { return !lockedBy(pol, "cat:" + type); });
   }
 
-  /** May GuardAI detect, warn and mask? */
+  /** May Guard4AI detect, warn and mask? */
   function isActive() {
     return state.enabled && state.entitled;
   }
 
-  /** May GuardAI put already-masked data back? See the note above. */
+  /** May Guard4AI put already-masked data back? See the note above. */
   function canRestore() {
     return state.enabled && (state.entitled || masker.size > 0);
   }
@@ -370,11 +370,11 @@
       state.imageHardStop = data.guardai_image_hard_stop === true;
       applyThemeToPage(data.guardai_theme === "light");
     } catch (err) {
-      console.warn("[GuardAI] could not read settings, using defaults:", err);
+      console.warn("[Guard4AI] could not read settings, using defaults:", err);
     }
   }
 
-  /** Add / remove html.guardai-light on the host page to switch all GuardAI
+  /** Add / remove html.guardai-light on the host page to switch all Guard4AI
    * elements between dark (default) and light mode without touching anything
    * that belongs to the host site. */
   function applyThemeToPage(light) {
@@ -765,16 +765,16 @@
    * back to execCommand("insertText") on text containing a newline.
    */
   async function typeText(el, text) {
-    console.log("[GuardAI] typeText — filling editor, el in DOM:", document.contains(el), "len:", text.length);
+    console.log("[Guard4AI] typeText — filling editor, el in DOM:", document.contains(el), "len:", text.length);
     el.focus();
 
     // Re-resolve if the node was detached by a React/ProseMirror remount.
     const refresh = () => {
       if (document.contains(el)) return true;
       const fresh = findEditor();
-      if (!fresh) { console.error("[GuardAI] typeText — no editor found"); return false; }
+      if (!fresh) { console.error("[Guard4AI] typeText — no editor found"); return false; }
       el = fresh; el.focus();
-      console.log("[GuardAI] typeText — re-found editor after remount");
+      console.log("[Guard4AI] typeText — re-found editor after remount");
       return true;
     };
 
@@ -819,7 +819,7 @@
         pasteInto(el, text);
         await delay(BIG ? 150 : 60);
         if (landedLive()) {
-          console.log("[GuardAI] typeText — paste landed on attempt", attempt + 1);
+          console.log("[Guard4AI] typeText — paste landed on attempt", attempt + 1);
           return true;
         }
       }
@@ -885,10 +885,10 @@
       if (!(await fillPerLine())) break;
       await delay(40);
       if (landedLive()) {
-        console.log("[GuardAI] typeText — per-line fill landed on attempt", attempt + 1, "editorLen:", getEditorText(el).length, "wantLen:", text.length);
+        console.log("[Guard4AI] typeText — per-line fill landed on attempt", attempt + 1, "editorLen:", getEditorText(el).length, "wantLen:", text.length);
         return true;
       }
-      console.warn("[GuardAI] typeText — per-line attempt", attempt + 1, "did not fully land. editorText:", JSON.stringify(getEditorText(el).slice(0, 200)));
+      console.warn("[Guard4AI] typeText — per-line attempt", attempt + 1, "did not fully land. editorText:", JSON.stringify(getEditorText(el).slice(0, 200)));
     }
 
     // ---- Fallback 1: ONE synthetic paste of the whole block (already tried
@@ -903,10 +903,10 @@
     // holds a slowly growing half-document — strictly worse than failing,
     // because the caller shows a clear error and clears the box.
     if (text.length > 1500) {
-      console.error("[GuardAI] typeText — all strategies failed for large text; aborting rather than crawling");
+      console.error("[Guard4AI] typeText — all strategies failed for large text; aborting rather than crawling");
       return false;
     }
-    console.log("[GuardAI] typeText — per-line + paste failed, falling back to safe char-by-char");
+    console.log("[Guard4AI] typeText — per-line + paste failed, falling back to safe char-by-char");
     if (!refresh()) return false;
     clearEditor(el);
     await delay(20);
@@ -978,7 +978,7 @@
    *      reviews, optionally masks anything we missed (which re-types the input
    *      live), then presses send themselves.
    * The matching fake->real swap happens automatically in the AI response.
-   * GuardAI never reads or writes the system clipboard, so a value the user
+   * Guard4AI never reads or writes the system clipboard, so a value the user
    * copied stays intact for their next paste.
    * ------------------------------------------------------------------ */
   /**
@@ -992,8 +992,8 @@
     // DIAGNOSTIC: log exactly what text the detector scanned (what the editor
     // handed back). If this differs from what was pasted, indices/masking are
     // computed against a reformatted string — capture this from the real site.
-    console.log("[GuardAI] buildReviewModel — original captured (len " + (original || "").length + "):", JSON.stringify((original || "").slice(0, 300)));
-    console.log("[GuardAI] buildReviewModel — findings:", findings.map((f) => `${f.type}@${f.index}:${JSON.stringify(f.value)}`).join(" | "));
+    console.log("[Guard4AI] buildReviewModel — original captured (len " + (original || "").length + "):", JSON.stringify((original || "").slice(0, 300)));
+    console.log("[Guard4AI] buildReviewModel — findings:", findings.map((f) => `${f.type}@${f.index}:${JSON.stringify(f.value)}`).join(" | "));
     const fakeByReal = new Map();
     // Every distinct fake we've assigned in THIS batch. Seeded as we go so the
     // next previewFake() avoids colliding with a fake already given to a
@@ -1204,11 +1204,11 @@
   async function doMaskAndSend(editor, original, findings, opts) {
     const silent = !!(opts && opts.silent);
     const prebuilt = !!(opts && opts.prebuilt);
-    console.log("[GuardAI] doMaskAndSend — building review model");
+    console.log("[Guard4AI] doMaskAndSend — building review model");
     // Guard up front: if we can't resolve a chat box at all, bail cleanly with a
     // clear message instead of operating on a null editor later.
     if (!editor && !findEditor()) {
-      console.error("[GuardAI] doMaskAndSend — no chat box found at entry");
+      console.error("[Guard4AI] doMaskAndSend — no chat box found at entry");
       if (silent) return false;
       showErrorToast("Couldn't find the chat box — try reloading the page, then send again.");
       return;
@@ -1223,14 +1223,14 @@
     // can never null-deref. We re-attach it to the global before rendering/send.
     const model = review;
     if (!model) {
-      console.error("[GuardAI] doMaskAndSend — review model missing after build");
+      console.error("[Guard4AI] doMaskAndSend — review model missing after build");
       if (silent) return false;
       showErrorToast("Something interrupted masking — please try again.");
       return;
     }
     await registerReviewItems();
     const masked = computeMasked();
-    console.log("[GuardAI] doMaskAndSend — masked text:", masked);
+    console.log("[Guard4AI] doMaskAndSend — masked text:", masked);
     let live = liveEditor();
     if (!live) {
       // One retry after a short settle — the page may still be updating.
@@ -1238,12 +1238,12 @@
       live = liveEditor();
     }
     if (!live) {
-      console.error("[GuardAI] doMaskAndSend — no editor found");
+      console.error("[Guard4AI] doMaskAndSend — no editor found");
       if (silent) return false;
       showErrorToast("Could not find the chat input — please click in the chat box and try again.");
       return;
     }
-    console.log("[GuardAI] doMaskAndSend — typing into editor:", live);
+    console.log("[Guard4AI] doMaskAndSend — typing into editor:", live);
     model.editor = live;
     // Suppress all sends during the fill so a long multi-line block can never be
     // submitted mid-fill (the message-splitting bug). We clear it only just before
@@ -1268,13 +1268,13 @@
     // Restore the global review if a soft-nav cleared it mid-fill. Safe because
     // the fullyLanded() gate below refuses to send into a navigated-away editor.
     review = model;
-    console.log("[GuardAI] doMaskAndSend — typeText ok:", ok);
+    console.log("[Guard4AI] doMaskAndSend — typeText ok:", ok);
     // HARD GATE: never send unless the WHOLE masked text is in the box. If the
     // fill came up short we must NOT trigger a send — doing so would dispatch a
     // partial/split message (the exact corruption we're fixing). Surface the
     // panel for review instead so the user can see/recover, and warn loudly.
     if (!ok || !live || !fullyLanded(live, masked)) {
-      console.error("[GuardAI] doMaskAndSend — masked text did not fully land; aborting send");
+      console.error("[Guard4AI] doMaskAndSend — masked text did not fully land; aborting send");
       suppressSends = false; // abort path: re-enable normal sending for recovery
       state.lastMaskedText = null;
       // Uncover immediately: the fallback below hands the box back to the user,
@@ -1299,7 +1299,7 @@
       if (live) live.focus();
       return;
     }
-    console.log("[GuardAI] doMaskAndSend — full text landed, triggering send");
+    console.log("[Guard4AI] doMaskAndSend — full text landed, triggering send");
     state.lastMaskedText = masked;
     const replacements = review.items.map((it) => ({
       type: it.type,
@@ -1365,9 +1365,9 @@
    */
   async function doMaskAndEdit(editor, original, findings, opts) {
     const prebuilt = !!(opts && opts.prebuilt);
-    console.log("[GuardAI] doMaskAndEdit — building review model");
+    console.log("[Guard4AI] doMaskAndEdit — building review model");
     if (!editor && !findEditor()) {
-      console.error("[GuardAI] doMaskAndEdit — no chat box found at entry");
+      console.error("[Guard4AI] doMaskAndEdit — no chat box found at entry");
       showErrorToast("Couldn't find the chat box — try reloading the page, then try again.");
       return;
     }
@@ -1378,13 +1378,13 @@
     // nulls the global `review` mid-fill can never null-deref here.
     const model = review;
     if (!model) {
-      console.error("[GuardAI] doMaskAndEdit — review model missing after build");
+      console.error("[Guard4AI] doMaskAndEdit — review model missing after build");
       showErrorToast("Something interrupted masking — please try again.");
       return;
     }
     await registerReviewItems();
     const masked = computeMasked();
-    console.log("[GuardAI] doMaskAndEdit — masked text:", masked);
+    console.log("[Guard4AI] doMaskAndEdit — masked text:", masked);
     let live = liveEditor();
     if (!live) {
       // One retry after a short settle — the page may still be updating.
@@ -1392,11 +1392,11 @@
       live = liveEditor();
     }
     if (!live) {
-      console.error("[GuardAI] doMaskAndEdit — no editor found");
+      console.error("[Guard4AI] doMaskAndEdit — no editor found");
       showErrorToast("Could not find the chat input — please click in the chat box and try again.");
       return;
     }
-    console.log("[GuardAI] doMaskAndEdit — typing into editor:", live);
+    console.log("[Guard4AI] doMaskAndEdit — typing into editor:", live);
     model.editor = live;
     // Mask & Edit must NEVER send. Suppress every send pathway for the whole fill;
     // clear it once the fill is done (the panel, not a send, is the next step).
@@ -1411,7 +1411,7 @@
     live = liveEditor();
     model.editor = live;
     review = model; // restore global if a soft-nav cleared it mid-fill
-    console.log("[GuardAI] doMaskAndEdit — typeText ok:", ok, "— opening panel for review (NO send)");
+    console.log("[Guard4AI] doMaskAndEdit — typeText ok:", ok, "— opening panel for review (NO send)");
     state.lastMaskedText = masked;
     const replacements = review.items.map((it) => ({
       type: it.type,
@@ -1425,7 +1425,7 @@
     // before they edit/send. The "What AI sees" tab still shows the full masked
     // text from the review model regardless.
     if (!ok || !live || !fullyLanded(live, masked)) {
-      console.warn("[GuardAI] doMaskAndEdit — masked text did not fully land in the chat box");
+      console.warn("[Guard4AI] doMaskAndEdit — masked text did not fully land in the chat box");
       showErrorToast("Heads up: the masked text may not have fully loaded into the chat box. Review it in the panel and use the panel's Send button.");
     }
     editMode = true;
@@ -1446,7 +1446,7 @@
    * Nothing is typed into the real chat input yet — that happens on panel Send.
    */
   async function doManualMask(editor, original) {
-    console.log("[GuardAI] doManualMask — setting up empty review for manual masking");
+    console.log("[Guard4AI] doManualMask — setting up empty review for manual masking");
     await masker.load();
     // Build an empty review with no auto-detected items so the panel shows
     // the original text with no marks, ready for the user to highlight.
@@ -1470,14 +1470,14 @@
    * no usable button appears.
    */
   function triggerSend(editor) {
-    console.log("[GuardAI] triggerSend — polling for send button");
+    console.log("[Guard4AI] triggerSend — polling for send button");
     let tries = 0;
     const MAX = 30; // ~1.5s at 50ms
     const attempt = () => {
       tries++;
       const btn = findEnabledSendButton();
       if (btn) {
-        console.log("[GuardAI] triggerSend — clicking send button:", btn);
+        console.log("[Guard4AI] triggerSend — clicking send button:", btn);
         bypassNext = true; // let our own click pass through the interceptor
         btn.click();
         return;
@@ -1488,9 +1488,9 @@
       }
       // Fallback: synthetic Enter on the editor. Prefer a freshly-resolved
       // editor over the possibly-detached captured reference.
-      console.log("[GuardAI] triggerSend — no send button found after", MAX, "tries, firing synthetic Enter");
+      console.log("[Guard4AI] triggerSend — no send button found after", MAX, "tries, firing synthetic Enter");
       const live = (document.contains(editor) ? editor : null) || findEditor();
-      if (!live) { console.error("[GuardAI] triggerSend — no editor for Enter fallback"); return; }
+      if (!live) { console.error("[Guard4AI] triggerSend — no editor for Enter fallback"); return; }
       bypassNext = true;
       live.focus();
       live.dispatchEvent(
@@ -1629,7 +1629,7 @@
     } else {
       showReopen();
     }
-    // The very first time GuardAI actually masks something for a new user,
+    // The very first time Guard4AI actually masks something for a new user,
     // their own text visibly changes — explain what just happened so that
     // moment builds trust instead of alarm.
     if (kind === "mask") {
@@ -1660,10 +1660,10 @@
         `<span class="guardai-firstrun__title">Your data was just masked</span>` +
         `<button class="guardai-firstrun__close" aria-label="Dismiss">&times;</button>` +
         `</div>` +
-        `<p class="guardai-firstrun__body">GuardAI replaced your sensitive details with realistic ` +
+        `<p class="guardai-firstrun__body">Guard4AI replaced your sensitive details with realistic ` +
         `fakes before sending, so the AI never sees the real thing. When it replies, ` +
-        `GuardAI swaps your real data back in — only you ever see it. Manage everything ` +
-        `from the GuardAI panel.</p>` +
+        `Guard4AI swaps your real data back in — only you ever see it. Manage everything ` +
+        `from the Guard4AI panel.</p>` +
         `<button class="guardai-firstrun__ok">Got it</button>`;
       document.body.appendChild(el);
       firstMaskExplainerEl = el;
@@ -1720,12 +1720,12 @@
       el.innerHTML =
         `<div class="guardai-locked__head">` +
         `<span class="guardai-locked__shield">${SHIELD_SVG}</span>` +
-        `<span class="guardai-locked__title">GuardAI is not active</span>` +
+        `<span class="guardai-locked__title">Guard4AI is not active</span>` +
         `<button class="guardai-locked__close" aria-label="Dismiss">&times;</button>` +
         `</div>` +
         `<p class="guardai-locked__body">Nothing is being masked on this page. ` +
         `Enter your licence key or your workplace invite code to switch it on.</p>` +
-        `<button class="guardai-locked__ok">Activate GuardAI</button>`;
+        `<button class="guardai-locked__ok">Activate Guard4AI</button>`;
       document.body.appendChild(el);
       lockedNoticeEl = el;
 
@@ -1756,7 +1756,7 @@
   }
 
   function ensurePanel() {
-    // Never show the panel while GuardAI is switched off, no matter which
+    // Never show the panel while Guard4AI is switched off, no matter which
     // code path got here (boot/soft-nav restoring a saved log, a stray
     // in-flight unmask pass finishing after the toggle, etc.) — the master
     // toggle must mean everything visibly goes away, not just new activity.
@@ -1771,7 +1771,7 @@
     panelEl.innerHTML =
       `<div class="guardai-panel__header">` +
       `<span class="guardai-panel__shield">${SHIELD_SVG}</span>` +
-      `<span class="guardai-panel__title">GuardAI</span>` +
+      `<span class="guardai-panel__title">Guard4AI</span>` +
       `<button class="guardai-panel__close" title="Close" aria-label="Close">&times;</button>` +
       `</div>` +
       `<div class="guardai-panel__toggle">` +
@@ -1799,7 +1799,7 @@
       `<div class="guardai-panel__editable" contenteditable="true" spellcheck="false"></div>` +
       `<div class="guardai-panel__readview" style="display:none"></div>` +
       `<button class="guardai-panel__apply" style="display:none">Apply changes</button>` +
-      `<div class="guardai-panel__msgempty">Nothing to edit yet. Choose <b>Mask &amp; Edit</b> when GuardAI detects sensitive data and your masked message appears here.</div>` +
+      `<div class="guardai-panel__msgempty">Nothing to edit yet. Choose <b>Mask &amp; Edit</b> when Guard4AI detects sensitive data and your masked message appears here.</div>` +
       `</div>` +
       `</div>` +
       `<div class="guardai-panel__footer">` +
@@ -1851,8 +1851,8 @@
       // Deliberately a plain confirm(), not our own styled dialog: this is
       // the one moment where matching the browser's own unmistakable native
       // prompt is more useful than staying on-brand — it can't be missed or
-      // misread as just another GuardAI card.
-      if (window.confirm("Clear all GuardAI data? This forgets every real<->fake pairing and the activity log. This can't be undone.")) {
+      // misread as just another Guard4AI card.
+      if (window.confirm("Clear all Guard4AI data? This forgets every real<->fake pairing and the activity log. This can't be undone.")) {
         clearSession();
       }
     };
@@ -1996,12 +1996,12 @@
 
   function showReopen() {
     // Same invariant as ensurePanel(): the collapsed badge must never appear
-    // while GuardAI is off.
+    // while Guard4AI is off.
     if (!canRestore()) return;
     if (!reopenEl) {
       reopenEl = document.createElement("button");
       reopenEl.className = "guardai-reopen";
-      reopenEl.setAttribute("aria-label", "Open GuardAI activity");
+      reopenEl.setAttribute("aria-label", "Open Guard4AI activity");
       reopenEl.innerHTML =
         `<span class="guardai-reopen__shield">${SHIELD_SVG}</span>` +
         `<span class="guardai-reopen__count"></span>`;
@@ -2023,7 +2023,7 @@
     if (!activityLog.length) {
       maskedListEl.innerHTML =
         `<div class="guardai-panel__empty">No activity yet. When you mask data or ` +
-        `GuardAI restores a response, it appears here.</div>`;
+        `Guard4AI restores a response, it appears here.</div>`;
       return;
     }
     // Newest first, capped to the most recent 20 so the log never stacks endlessly.
@@ -2064,7 +2064,7 @@
         // of data (a live real<->fake pair); "Restored"/"Revealed" rows are
         // just log echoes of that same pair being unmasked elsewhere, not a
         // separate thing to delete. Deleting the Masked row is what actually
-        // makes GuardAI forget that value — this is the answer to "let me
+        // makes Guard4AI forget that value — this is the answer to "let me
         // pick which ones to delete" instead of only an all-or-nothing Clear.
         const delBtn = isMask
           ? `<button class="guardai-panel__itemdel" data-id="${it.id}" title="Forget this item" aria-label="Forget this item">&times;</button>`
@@ -2110,7 +2110,7 @@
   let suppressSends = false;
 
   function diag(...args) {
-    console.log("[GuardAI][diag]", ...args);
+    console.log("[Guard4AI][diag]", ...args);
   }
 
   async function handleSendAttempt(editor) {
@@ -2225,7 +2225,7 @@
         diag("BLOCKED Enter during mask flow");
         return;
       }
-      // Never intercept keystrokes from inside GuardAI's own panel or overlays.
+      // Never intercept keystrokes from inside Guard4AI's own panel or overlays.
       if (e.target && typeof e.target.closest === "function" &&
           e.target.closest(".guardai-panel, .guardai-prompt, .guardai-msgpop, .guardai-marktip")) return;
       // Resolve the editor the user is actually typing in (not just the first
@@ -2258,7 +2258,7 @@
       const btn = e.target.closest(CONFIG.sendButton.join(","));
       if (!btn) return;
       if (!isActive()) return; // off or unlicensed — never intercept the send
-      // Never intercept clicks inside GuardAI's own UI.
+      // Never intercept clicks inside Guard4AI's own UI.
       if (btn.closest(".guardai-panel, .guardai-prompt")) return;
       // During the mask flow's fill, block site send-button clicks too.
       if (suppressSends && !bypassNext) {
@@ -2303,7 +2303,7 @@
   function showErrorToast(msg) {
     const t = document.createElement("div");
     t.className = "guardai-toast guardai-toast--error";
-    t.textContent = "\u26A0\uFE0F GuardAI: " + msg;
+    t.textContent = "\u26A0\uFE0F Guard4AI: " + msg;
     document.body.appendChild(t);
     setTimeout(() => t.remove(), 6000);
   }
@@ -2362,7 +2362,7 @@
    * category, explains in plain English WHY each is risky on this platform, and
    * offers four choices: Mask & Send, Mask & Edit, Manual mask, Send anyway
    * (plus the × in the header to dismiss without sending). This is the
-   * teaching moment that makes GuardAI useful for non-technical users. */
+   * teaching moment that makes Guard4AI useful for non-technical users. */
 
   function showWarning(editor, text, findings, resend) {
     dismissMaskPrompt();
@@ -2403,7 +2403,7 @@
       `<div class="guardai-prompt__grip" title="Drag to move" aria-label="Drag to move"></div>` +
       `<div class="guardai-prompt__head">` +
       `<span class="guardai-prompt__shield">${SHIELD_SVG}</span>` +
-      `<span class="guardai-prompt__text">GuardAI detected sensitive data</span>` +
+      `<span class="guardai-prompt__text">Guard4AI detected sensitive data</span>` +
       `<button class="guardai-prompt__close" aria-label="Dismiss">&times;</button>` +
       `</div>` +
       `<p class="guardai-prompt__platform">Sending to ${escapeHtml(
@@ -2422,38 +2422,38 @@
     maskPromptEl = wrap;
 
     wrap.querySelector(".guardai-prompt__close").onclick = () => {
-      console.log("[GuardAI] ✕ Close clicked — dismissing popup");
+      console.log("[Guard4AI] ✕ Close clicked — dismissing popup");
       dismissMaskPrompt();
       const live = editor && document.contains(editor) ? editor : findEditor();
       if (live) live.focus();
     };
     wrap.querySelector(".guardai-prompt__btn--anyway").onclick = () => {
-      console.log("[GuardAI] Send Anyway clicked — sending original unmasked text");
+      console.log("[Guard4AI] Send Anyway clicked — sending original unmasked text");
       dismissMaskPrompt();
       reportStats({ sentUnmasked: 1 });
       resend();
     };
     wrap.querySelector(".guardai-prompt__btn--send").onclick = () => {
-      console.log("[GuardAI] Mask & Send clicked — starting mask flow");
+      console.log("[Guard4AI] Mask & Send clicked — starting mask flow");
       dismissMaskPrompt();
       doMaskAndSend(editor, text, findings).catch((err) => {
-        console.error("[GuardAI] Mask & Send failed:", err);
+        console.error("[Guard4AI] Mask & Send failed:", err);
         showErrorToast("Mask & Send failed — please reload the page and try again.");
       });
     };
     wrap.querySelector(".guardai-prompt__btn--edit").onclick = () => {
-      console.log("[GuardAI] Mask & Edit clicked — starting mask+review flow");
+      console.log("[Guard4AI] Mask & Edit clicked — starting mask+review flow");
       dismissMaskPrompt();
       doMaskAndEdit(editor, text, findings).catch((err) => {
-        console.error("[GuardAI] Mask & Edit failed:", err);
+        console.error("[Guard4AI] Mask & Edit failed:", err);
         showErrorToast("Mask & Edit failed — please reload the page and try again.");
       });
     };
     wrap.querySelector(".guardai-prompt__btn--manual").onclick = () => {
-      console.log("[GuardAI] Manual mask clicked — opening panel with unmasked message");
+      console.log("[Guard4AI] Manual mask clicked — opening panel with unmasked message");
       dismissMaskPrompt();
       doManualMask(editor, text).catch((err) => {
-        console.error("[GuardAI] Manual mask failed:", err);
+        console.error("[Guard4AI] Manual mask failed:", err);
         showErrorToast("Manual mask failed — please reload the page and try again.");
       });
     };
@@ -2995,7 +2995,7 @@
     return "CUSTOM";
   }
 
-  /** Classify a value by SHAPE alone (no surrounding context). Returns a GuardAI
+  /** Classify a value by SHAPE alone (no surrounding context). Returns a Guard4AI
    * finding type or null. Order matters: most specific shapes first. */
   function inferTypeStructural(v) {
     if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return "EMAIL";
@@ -3218,7 +3218,7 @@
   async function panelSend() {
     const live = liveEditor();
     if (!live) {
-      console.error("[GuardAI] No editor found to send from.");
+      console.error("[Guard4AI] No editor found to send from.");
       showErrorToast("Could not find the chat input — click in the chat box and try Send again.");
       return;
     }
@@ -3228,7 +3228,7 @@
     // HARD GATE: only send if the full text landed atomically. Refuse to dispatch
     // a partial/split message; keep the panel open so the user can retry Send.
     if (!ok || !fullyLanded(live, finalText)) {
-      console.error("[GuardAI] panelSend — text did not fully land; aborting send");
+      console.error("[Guard4AI] panelSend — text did not fully land; aborting send");
       showErrorToast("The message didn't fully load into the chat box, so it was NOT sent. Please review it and press Send again.");
       state.lastMaskedText = null;
       return;
@@ -3869,7 +3869,7 @@
   }
 
   /** Things a message bubble is definitely not, and must never be grown into:
-   * GuardAI's own UI (the panel lists real AND fake values, so it matches
+   * Guard4AI's own UI (the panel lists real AND fake values, so it matches
    * every rule), and the composer (rewriting the box the user is typing in
    * would corrupt their draft). */
   const NOT_A_MESSAGE =
@@ -3897,7 +3897,7 @@
 
   /**
    * Grow a seed outwards to the element that behaves like the whole message
-   * bubble. Stops below `root`, at GuardAI's own UI, at the composer, at an
+   * bubble. Stops below `root`, at Guard4AI's own UI, at the composer, at an
    * ancestor that reaches into another match, and at a big height jump.
    *
    * Erring small is deliberate. A message split across two toggles is untidy;
@@ -4226,10 +4226,10 @@
   // left it. Purely a VIEW flag — it never gates what is stored.
   let panelWasOpenBeforeDisable = false;
 
-  /** Hide every piece of GuardAI UI we've injected into the page.
+  /** Hide every piece of Guard4AI UI we've injected into the page.
    *
    * Hides, never wipes: the activity log and the fake<->real mapping are the
-   * user's data and must survive the master toggle untouched. Turning GuardAI
+   * user's data and must survive the master toggle untouched. Turning Guard4AI
    * off means "stop doing things and get out of the way", not "forget what
    * you already found" — only Clear session / Clear may delete any of it. */
   function teardownUI() {
@@ -4398,8 +4398,8 @@
       return;
     }
     // If this page already has saved history, show the collapsed badge (not
-    // the full panel) — GuardAI must never pop the panel open just because
-    // you opened/reloaded a chat site. Only if GuardAI is enabled: without
+    // the full panel) — Guard4AI must never pop the panel open just because
+    // you opened/reloaded a chat site. Only if Guard4AI is enabled: without
     // that check, a reload while disabled would bring the badge back just
     // because past activity was saved, even though everything is off.
     if (activityLog.length && state.enabled) {
@@ -4582,7 +4582,7 @@
         frame.contentWindow.postMessage({ guardai: "parser-port" }, origin, [channel.port2]);
         parserPort = channel.port1;
         settled = true;
-        console.info(`[GuardAI] file reader ready in ${Date.now() - startedAt}ms`);
+        console.info(`[Guard4AI] file reader ready in ${Date.now() - startedAt}ms`);
         resolve(channel.port1);
       };
 
@@ -4606,7 +4606,7 @@
       function fail(why) {
         window.removeEventListener("message", onMessage, true);
         console.error(
-          `[GuardAI] file reader did not start (${why}). Frame URL: ${url} — check that ` +
+          `[Guard4AI] file reader did not start (${why}). Frame URL: ${url} — check that ` +
           `manifest.json lists parser.html under web_accessible_resources, and look for ` +
           `errors against parser.html on chrome://extensions.`
         );
@@ -4738,7 +4738,7 @@
   function onAttach(e) {
     if (releasingFiles) return;          // our own re-dispatch
     if (!isActive()) return;             // master off, or unlicensed
-    // Never intercept anything happening inside GuardAI's own UI.
+    // Never intercept anything happening inside Guard4AI's own UI.
     if (e.target && typeof e.target.closest === "function" &&
         e.target.closest(".guardai-panel, .guardai-prompt, .guardai-filecard")) return;
 
@@ -4768,8 +4768,8 @@
     if (e.type === "drop") endDrag(e.target);
 
     reviewFiles(files, input).catch((err) => {
-      console.warn("[GuardAI] file review failed:", err);
-      showErrorToast("Could not check that file, so it was not attached. Try again, or turn GuardAI off for this one.");
+      console.warn("[Guard4AI] file review failed:", err);
+      showErrorToast("Could not check that file, so it was not attached. Try again, or turn Guard4AI off for this one.");
     });
   }
 
@@ -4888,7 +4888,7 @@
       input.dispatchEvent(new Event("change", { bubbles: true }));
       return true;
     } catch (err) {
-      console.warn("[GuardAI] could not hand the file back:", err);
+      console.warn("[Guard4AI] could not hand the file back:", err);
       return false;
     } finally {
       // Cleared on a later task so the site's own handler — which may read
@@ -5275,7 +5275,7 @@
           done();
           await fn();
         } catch (err) {
-          console.error("[GuardAI] " + label + " (file) failed:", err);
+          console.error("[Guard4AI] " + label + " (file) failed:", err);
           showErrorToast(label + " failed — please reload the page and try again.");
         }
       };
@@ -5365,7 +5365,7 @@
         onCancel: () => { review = null; },
       });
     } catch (err) {
-      console.warn("[GuardAI] send-as-text failed:", err);
+      console.warn("[Guard4AI] send-as-text failed:", err);
       if (statusEl) statusEl.textContent = "Could not read the text out of this file.";
     }
   }
@@ -5541,17 +5541,17 @@
 
         const body = anyImage
           ? (results.every((r) => r.res.action === "img-nothing" || r.res.kind === "image")
-              ? `GuardAI read what it could see in ${it} and found nothing sensitive. ` +
+              ? `Guard4AI read what it could see in ${it} and found nothing sensitive. ` +
                 `It can't read everything in an image, so this isn't a clean bill of health — ` +
                 `if ${one ? "it shows" : "they show"} something private, that's still your call.`
-              : `GuardAI read these files and found nothing sensitive. It can't read everything ` +
+              : `Guard4AI read these files and found nothing sensitive. It can't read everything ` +
                 `in an image, so the screenshot among them isn't a clean bill of health — ` +
                 `if it shows something private, that's still your call.`)
           : (counted
-              ? `GuardAI read ${one ? "this file" : "these files"} and found ` +
+              ? `Guard4AI read ${one ? "this file" : "these files"} and found ` +
                 `${counted} item${counted === 1 ? "" : "s"} of ordinary personal information — ` +
                 `names, addresses and the like — but nothing it would stop you sending.`
-              : `GuardAI read ${one ? "this file" : "these files"} and found nothing sensitive.`);
+              : `Guard4AI read ${one ? "this file" : "these files"} and found nothing sensitive.`);
 
         render(
           head(anyImage ? "Attached — nothing found, but have a look" : "Checked — nothing blocked") +
@@ -5609,7 +5609,7 @@
             if (res.action === "unsupported") {
               return (
                 `<li class="guardai-filecard__file guardai-filecard__file--unchecked">${title}` +
-                `<p class="guardai-filecard__why">GuardAI cannot read ${escapeHtml(
+                `<p class="guardai-filecard__why">Guard4AI cannot read ${escapeHtml(
                   (res.label || "this kind of file").toLowerCase()
                 )}s yet, so this one has <strong>not been checked</strong>.</p></li>`
               );
@@ -5626,7 +5626,7 @@
               return (
                 `<li class="guardai-filecard__file guardai-filecard__file--unchecked">${title}` +
                 `<p class="guardai-filecard__why">${escapeHtml(
-                  res.reason || "GuardAI could not read this file."
+                  res.reason || "Guard4AI could not read this file."
                 )} It has <strong>not been checked</strong>.</p></li>`
               );
             }
@@ -5638,14 +5638,14 @@
             if (res.action === "img-unreadable") {
               return (
                 `<li class="guardai-filecard__file guardai-filecard__file--unchecked">${title}` +
-                `<p class="guardai-filecard__why"><strong>GuardAI could not read this image properly.</strong> ` +
+                `<p class="guardai-filecard__why"><strong>Guard4AI could not read this image properly.</strong> ` +
                 `${escapeHtml(res.reason || "")} Treat it as unchecked — attach it only if you know what it shows.</p></li>`
               );
             }
             if (res.action === "img-nothing") {
               return (
                 `<li class="guardai-filecard__file guardai-filecard__file--unchecked">${title}` +
-                `<p class="guardai-filecard__why">GuardAI read what it could see in this image and ` +
+                `<p class="guardai-filecard__why">Guard4AI read what it could see in this image and ` +
                 `nothing it read looks sensitive. It cannot read everything a person can — small print, ` +
                 `stylised text, a photo of a screen — so look it over yourself before attaching.</p></li>`
               );
@@ -5661,7 +5661,7 @@
               const rest = Math.max(0, all - read);
               return (
                 `<li class="guardai-filecard__file guardai-filecard__file--unchecked">${title}` +
-                `<p class="guardai-filecard__why">This is a scan, so GuardAI read it as pictures. ` +
+                `<p class="guardai-filecard__why">This is a scan, so Guard4AI read it as pictures. ` +
                 `<strong>It read the first ${read} page${read === 1 ? "" : "s"} of ${all} and ` +
                 `did not read the other ${rest}.</strong> Nothing sensitive turned up in the pages it ` +
                 `did read — but that says nothing about the rest, so treat this as ` +
@@ -5676,7 +5676,7 @@
             if (res.action !== "block" && res.action !== "img-found") {
               return (
                 `<li class="guardai-filecard__file guardai-filecard__file--unchecked">${title}` +
-                `<p class="guardai-filecard__why">GuardAI got a check result it does not recognise ` +
+                `<p class="guardai-filecard__why">Guard4AI got a check result it does not recognise ` +
                 `for this file, so treat it as <strong>not checked</strong>.</p></li>`
               );
             }
@@ -5718,10 +5718,10 @@
             // other 35 pages are a separate fact the user needs alongside.
             const partial = res.action === "img-found"
               ? (res.partial
-                  ? `<p class="guardai-filecard__why">Read from the scan itself — GuardAI read the ` +
+                  ? `<p class="guardai-filecard__why">Read from the scan itself — Guard4AI read the ` +
                     `first ${Number(res.pagesRead) || 0} page` + ((Number(res.pagesRead) || 0) === 1 ? "" : "s") +
                     ` of ${Number(res.pagesTotal) || 0} and did not read the rest.</p>`
-                  : `<p class="guardai-filecard__why">Read from the image itself — GuardAI may not have read all of it.</p>`)
+                  : `<p class="guardai-filecard__why">Read from the image itself — Guard4AI may not have read all of it.</p>`)
               : "";
 
             return (
@@ -5736,7 +5736,7 @@
             ? "Not attached — check this first"
             : onlyImgNothing
               ? "Not attached — nothing found, your call"
-              : "Not attached — GuardAI could not check it") +
+              : "Not attached — Guard4AI could not check it") +
             `<p class="guardai-filecard__platform">${escapeHtml(
               `Going to ${CONFIG.name}. ${CONFIG.note || ""}`
             )}</p>` +
@@ -5822,7 +5822,7 @@
       await masker.load();
       await loadActivity();
     } catch (err) {
-      console.warn("[GuardAI] boot step failed, continuing with defaults:", err);
+      console.warn("[Guard4AI] boot step failed, continuing with defaults:", err);
     }
     // Warm up the optional NLP layer in the background (no-op if disabled).
     nlp.init().catch(() => {});
@@ -5837,7 +5837,7 @@
 
     startObserving();
     updateLockedNotice();
-    console.info(`[GuardAI] active on ${CONFIG.name}. All processing is local. [build: 2026-07-09-upgrade-s1-s5]`);
+    console.info(`[Guard4AI] active on ${CONFIG.name}. All processing is local. [build: 2026-07-09-upgrade-s1-s5]`);
   }
 
   // Initialise immediately on injection — never gated behind DOMContentLoaded or

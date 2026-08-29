@@ -1,5 +1,5 @@
 /**
- * GuardAI — background.js  (Manifest V3 service worker, ES module)
+ * Guard4AI — background.js  (Manifest V3 service worker, ES module)
  * ---------------------------------------------------------------------------
  * Coordinates session statistics and storage defaults. It does NO network I/O.
  *
@@ -159,7 +159,7 @@ function connectError(raw) {
   if (text.includes("INVALID_CODE")) {
     return "That invite code was not recognised. Check it with your admin.";
   }
-  return "Could not reach GuardAI. Check your connection and try again.";
+  return "Could not reach Guard4AI. Check your connection and try again.";
 }
 
 /**
@@ -257,7 +257,7 @@ async function disconnectCompany() {
 /* ------------------------------------------------------------------ *
  * Entitlement.
  *
- * GuardAI does nothing until a code has been redeemed. The rules live in
+ * Guard4AI does nothing until a code has been redeemed. The rules live in
  * src/entitlement.js and are deliberately not repeated here: this half only
  * does the I/O — talk to the server, hand the answer to decide(), store what
  * comes back. If you are looking for the policy, it is not in this file.
@@ -375,7 +375,7 @@ function licenceError(raw) {
   if (text.includes("LICENCE_INACTIVE")) return "That licence is no longer active. Check your subscription.";
   if (text.includes("LICENCE_EXPIRED")) return "That licence has expired.";
   if (text.includes("DEVICE_LIMIT")) return "That licence is already in use on 3 devices. Deactivate one first.";
-  return "Could not reach GuardAI. Check your connection and try again.";
+  return "Could not reach Guard4AI. Check your connection and try again.";
 }
 
 /** Supabase returns timestamptz as ISO text, or null for "never expires". */
@@ -417,7 +417,7 @@ async function activateLicence(code) {
 async function activateCode(raw) {
   const parsed = parseCode(raw);
   if (!parsed) {
-    throw new Error("That doesn\u2019t look like a GuardAI code. Company codes start with GA-, licence keys with GK-.");
+    throw new Error("That doesn\u2019t look like a Guard4AI code. Company codes start with GA-, licence keys with GK-.");
   }
 
   if (parsed.kind === "company") {

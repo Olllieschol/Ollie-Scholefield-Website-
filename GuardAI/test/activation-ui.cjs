@@ -3,7 +3,7 @@
  *
  * ═══ WHAT THIS IS DEFENDING ════════════════════════════════════════════════
  *
- * A locked GuardAI must never be a DEAD POPUP. Somebody who installs the
+ * A locked Guard4AI must never be a DEAD POPUP. Somebody who installs the
  * extension, opens the dashboard and finds a greyed-out privacy score with no
  * explanation has been handed a broken product — and so has whoever is
  * reviewing the store listing, who will reject it rather than guess. The way
@@ -117,7 +117,7 @@ const vis = (el) => !!el && el.style.display !== "none";
     await wait(120);
     const card = env.document.getElementById("lock-card");
     check(card.classList.contains("is-on"), "the licence card is shown");
-    check(env.document.getElementById("lock-title").textContent === "GuardAI is not active",
+    check(env.document.getElementById("lock-title").textContent === "Guard4AI is not active",
       "and says plainly that nothing is running",
       env.document.getElementById("lock-title").textContent);
     check(!!env.document.getElementById("lock-code"),
@@ -254,7 +254,7 @@ const vis = (el) => !!el && el.style.display !== "none";
     await wait(150);
     const sec = env.document.getElementById("company");
     check(!sec.classList.contains("is-connected"), "locked shows the form");
-    check(env.document.getElementById("activate-heading").textContent === "Activate GuardAI",
+    check(env.document.getElementById("activate-heading").textContent === "Activate Guard4AI",
       "headed as activation, not as a company-only feature",
       env.document.getElementById("activate-heading").textContent);
     const ph = env.document.getElementById("company-code").getAttribute("placeholder");

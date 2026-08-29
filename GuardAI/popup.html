@@ -3,14 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GuardAI</title>
+    <title>Guard4AI</title>
     <!-- Inlined, not linked: an external stylesheet loses the race against
          Chrome's first paint of the popup window, so the window gets sized
          to the unstyled (full-width) layout and never shrinks back down —
          it just leaves a blank strip of body background beside the styled
          content once the CSS does land. Inlining removes the race outright. -->
     <style>
-/* GuardAI — popup styles (inlined; see the comment above for why).
+/* Guard4AI — popup styles (inlined; see the comment above for why).
  * Monochrome, high-contrast "serious security tool" palette. The ONLY colour
  * anywhere in the chrome is a single restrained functional red (--danger),
  * used strictly for destructive actions and genuine high-exposure warnings —
@@ -326,19 +326,19 @@ body.gd-disabled .gd-platforms { opacity: 0.45; pointer-events: none; }
   <body>
     <header class="gd-header">
       <div class="gd-brand">
-        <img class="gd-logo" src="icons/icon48.png" alt="GuardAI" width="26" height="26" />
+        <img class="gd-logo" src="icons/icon48.png" alt="Guard4AI" width="26" height="26" />
         <div>
-          <h1 class="gd-title">GuardAI</h1>
+          <h1 class="gd-title">Guard4AI</h1>
           <p class="gd-subtitle">Local AI privacy guard</p>
         </div>
       </div>
       <div class="gd-header-controls">
-        <!-- What GuardAI masks: per-category detection toggles -->
-        <button id="settings-btn" class="gd-theme-btn" title="What GuardAI masks" aria-label="What GuardAI masks">&#9881;</button>
+        <!-- What Guard4AI masks: per-category detection toggles -->
+        <button id="settings-btn" class="gd-theme-btn" title="What Guard4AI masks" aria-label="What Guard4AI masks">&#9881;</button>
         <!-- Dark/light mode toggle -->
         <button id="theme-toggle" class="gd-theme-btn" title="Toggle dark/light mode">&#9728;</button>
         <!-- Master enable/disable -->
-        <label class="gd-switch" title="Enable or disable GuardAI">
+        <label class="gd-switch" title="Enable or disable Guard4AI">
           <input type="checkbox" id="toggle-enabled" />
           <span class="gd-slider"></span>
         </label>
@@ -361,7 +361,7 @@ body.gd-disabled .gd-platforms { opacity: 0.45; pointer-events: none; }
 
     <!-- Licence: locked, or running out -->
     <section class="gd-lock" id="lock-card">
-      <h2 class="gd-lock__title" id="lock-title">GuardAI is not active</h2>
+      <h2 class="gd-lock__title" id="lock-title">Guard4AI is not active</h2>
       <p class="gd-lock__body" id="lock-body">
         Nothing is being masked. Enter your licence key, or the invite code from
         your workplace.

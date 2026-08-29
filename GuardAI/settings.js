@@ -1,7 +1,7 @@
 /**
- * GuardAI — settings.js
+ * Guard4AI — settings.js
  * ---------------------------------------------------------------------------
- * "What GuardAI masks": per-category detection toggles.
+ * "What Guard4AI masks": per-category detection toggles.
  *
  * The category list below is a MANUAL mirror of every finding type detector.js
  * actually produces (grep `finding("` in src/detector.js — 24 distinct types
@@ -40,7 +40,7 @@
       key: "guardai_file_scanning",
       lock: "files",
       title: "Check documents I attach",
-      desc: "On by default. GuardAI reads PDFs, Word documents and text files before " +
+      desc: "On by default. Guard4AI reads PDFs, Word documents and text files before " +
             "they're attached, and stops the ones carrying sensitive details. Reading " +
             "happens on your own device; the file never leaves it.",
       note: "Turning this off means attachments go straight to the AI tool unchecked. " +
@@ -50,7 +50,7 @@
       key: "guardai_image_scanning",
       lock: "images",
       title: "Read text in images I attach",
-      desc: "On by default. GuardAI runs text recognition over screenshots and photos " +
+      desc: "On by default. Guard4AI runs text recognition over screenshots and photos " +
             "before they're attached. This is slower than reading a document, and it " +
             "can't read everything in an image.",
       note: "Turning this off means screenshots are attached without being looked at. " +
@@ -96,7 +96,7 @@
     {
       key: "guardai_aggressive_names",
       title: "Aggressive name detection",
-      desc: "Off by default. Normally GuardAI only masks a full name when other personal " +
+      desc: "Off by default. Normally Guard4AI only masks a full name when other personal " +
             "information sits beside it. Turn this on to also catch names standing on their " +
             "own. It will flag more false positives, because words like Sydney, April and " +
             "Grace are both names and ordinary words.",
@@ -106,11 +106,11 @@
     {
       key: "guardai_image_hard_stop",
       title: "Always stop on images",
-      desc: "Off by default. When GuardAI reads a screenshot and finds nothing, it attaches " +
+      desc: "Off by default. When Guard4AI reads a screenshot and finds nothing, it attaches " +
             "the image and tells you what it did, rather than making you click. Turn this on " +
             "and every image waits for you instead.",
       note: "This only changes the case where nothing was found. An image with sensitive " +
-            "details in it, or one GuardAI could not read properly, always stops and waits — " +
+            "details in it, or one Guard4AI could not read properly, always stops and waits — " +
             "with or without this setting.",
     },
   ];
@@ -269,7 +269,7 @@
     section.className = "group";
     const heading = document.createElement("div");
     heading.className = "group__title";
-    // "Modes", not "Detection mode": the second entry changes what GuardAI
+    // "Modes", not "Detection mode": the second entry changes what Guard4AI
     // DOES with a result rather than what it detects, and a heading that says
     // "detection" over it would misdescribe the only setting in this section
     // that can change whether a file waits for you.
@@ -392,7 +392,7 @@
   }
 
   /* ------------------------------------------------------------------ *
-   * Activate GuardAI.
+   * Activate Guard4AI.
    *
    * One field, two kinds of key. The extension works out which from the
    * prefix (GA- workplace, GK- personal) rather than making somebody decide
@@ -451,9 +451,9 @@
     const heading = document.getElementById("activate-heading");
     const intro = document.getElementById("activate-intro");
     if (!running && heading && intro) {
-      heading.textContent = "Activate GuardAI";
+      heading.textContent = "Activate Guard4AI";
       intro.textContent =
-        "GuardAI needs a key before it will mask anything. Enter your personal " +
+        "Guard4AI needs a key before it will mask anything. Enter your personal " +
         "licence key, or the invite code your workplace gave you \u2014 one field " +
         "takes either, and there is no account and no password to set up.";
     }
@@ -473,10 +473,10 @@
         "Your masking activity is visible to your admin: counts and categories " +
         "only, never the values or your messages.";
     } else if (kind === "review") {
-      stateEl.textContent = "GuardAI is active (review build)";
+      stateEl.textContent = "Guard4AI is active (review build)";
       detailEl.textContent = "This key does not expire and reports nothing.";
     } else if (kind === "legacy") {
-      stateEl.textContent = "GuardAI now needs a licence";
+      stateEl.textContent = "Guard4AI now needs a licence";
       detailEl.textContent =
         `Still protecting you for ${left} more ${left === 1 ? "day" : "days"}. ` +
         "Enter a licence key or an invite code above to keep it on.";
@@ -486,7 +486,7 @@
         `Still protecting you for ${left} more ${left === 1 ? "day" : "days"}, ` +
         "so nothing stops mid-conversation. Renew or enter a new key above.";
     } else {
-      stateEl.textContent = "GuardAI is active";
+      stateEl.textContent = "Guard4AI is active";
       detailEl.textContent = "Personal licence. Nothing about your usage is reported to anyone.";
     }
   }

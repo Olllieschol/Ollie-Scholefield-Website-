@@ -1,5 +1,5 @@
 /**
- * GuardAI — masker.js
+ * Guard4AI — masker.js
  * ---------------------------------------------------------------------------
  * Reversible data masking ("encrypt before sending").
  *
@@ -639,14 +639,14 @@
         const entries = Array.isArray(data[STORAGE_KEY]) ? data[STORAGE_KEY] : [];
         for (const e of entries) {
           if (!e || typeof e.real !== "string" || typeof e.fake !== "string" || typeof e.type !== "string") {
-            console.warn("[GuardAI] skipping malformed mapping entry:", e);
+            console.warn("[Guard4AI] skipping malformed mapping entry:", e);
             continue;
           }
           this.realToFake.set(e.real, e);
           this.fakeToReal.set(e.fake, e);
         }
       } catch (err) {
-        console.warn("[GuardAI] could not load mapping table, starting empty:", err);
+        console.warn("[Guard4AI] could not load mapping table, starting empty:", err);
       } finally {
         // Always mark loaded, even on failure — otherwise every future call
         // would retry load() and could throw again instead of just proceeding
@@ -666,7 +666,7 @@
         const entries = Array.from(this.realToFake.values());
         await chrome.storage.local.set({ [STORAGE_KEY]: entries });
       } catch (err) {
-        console.warn("[GuardAI] could not persist mapping table (masking still works this session):", err);
+        console.warn("[Guard4AI] could not persist mapping table (masking still works this session):", err);
       }
     }
 
@@ -710,7 +710,16 @@
           fake === real ||
           this.realToFake.has(fake) ||
           sharesPoolWord(type, real, fake)) &&
-        guard < 50
+        // 100, matching previewFake. This is the COMMITTING path, where
+        // running out of retries is worse: previewFake only shows a
+        // duplicate, this one records it, and two companies sharing a
+        // stand-in makes unmasking ambiguous. Random-draw-with-retry
+        // degrades as a pool fills — measured on ORG's 40 stems, the chance
+        // a document exhausts the budget was 0% at 34 companies, 2.75% at
+        // 38 and 33% at 40 with a budget of 50. Doubling it does not change
+        // the shape of that curve, only how far along it starts to bite;
+        // the residual is recorded as a known limit rather than hidden.
+        guard < 100
       ) {
         fake = generateFake(type, real);
         guard++;
@@ -879,7 +888,7 @@
       try {
         await chrome.storage.local.remove(STORAGE_KEY);
       } catch (err) {
-        console.warn("[GuardAI] could not clear persisted mapping table:", err);
+        console.warn("[Guard4AI] could not clear persisted mapping table:", err);
       }
     }
 

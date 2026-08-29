@@ -1,4 +1,4 @@
-/* GuardAI — styles.css
+/* Guard4AI — styles.css
  * Injected into AI chat pages. Styles the non-blocking warning popup that
  * appears above the input field. All selectors are namespaced with
  * `.guardai-` to avoid clashing with the host page. High z-index keeps it
@@ -972,7 +972,7 @@ html.guardai-light .guardai-firstrun__close:hover { color: #0f172a; }
 /* =====================================================================
  * LIGHT MODE — applied when popup saves guardai_theme = "light".
  * The content script adds html.guardai-light to the host page <html>.
- * Only GuardAI elements are targeted so the host page is never affected.
+ * Only Guard4AI elements are targeted so the host page is never affected.
  * ===================================================================== */
 
 /* ---- Side panel ---- */
@@ -1141,7 +1141,7 @@ html.guardai-light .guardai-toast--error {
 }
 
 /* ---------------------------------------------------------------------------
-   Locked notice — shown when GuardAI has no licence and the master toggle is
+   Locked notice — shown when Guard4AI has no licence and the master toggle is
    on. Deliberately quieter than .guardai-firstrun (which announces something
    that just happened to the user's text); this is a standing state, not an
    event, so it does not animate in and it does not auto-dismiss.
@@ -1191,7 +1191,7 @@ html.guardai-light .guardai-locked__close:hover { color: #0f172a; }
 /* ==========================================================================
    File attachment card
    --------------------------------------------------------------------------
-   Shown when GuardAI takes custody of an attachment. Deliberately its own
+   Shown when Guard4AI takes custody of an attachment. Deliberately its own
    block rather than a modifier on .guardai-prompt: that card is about a
    message being held mid-send and is draggable so it can be moved off the
    composer; this one is about a file and appears bottom-right, out of the way

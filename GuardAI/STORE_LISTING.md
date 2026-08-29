@@ -5,6 +5,56 @@ Everything the store needs that is not in the code. Keep this in step with
 
 ---
 
+## This submission — 1.1.0, renamed to Guard4AI
+
+**Version 1.1.0**, a minor bump, not a patch: file scanning, image OCR,
+scanned-PDF fallback, "Send as masked text" and admin policy are new features,
+not fixes.
+
+**The product is now Guard4AI**, matching the domain the listing and the
+privacy policy have always pointed at (`guard4ai.com`). The rename covers the
+manifest name, the toolbar title, the popup, the settings page, every card and
+toast in the page, and this listing.
+
+**What was deliberately NOT renamed, and why it matters for existing installs:**
+
+| Identifier | Example | Left alone |
+|---|---|---|
+| Storage keys | `guardai_mapping`, `guardai_entitlement`, `guardai_enabled` | 21 keys, all lowercase |
+| CSS classes / DOM ids | `guardai-panel`, `guardai-warning` | 382 in `styles.css` |
+| JS namespace | `window.GuardAI` | every module hangs off it |
+
+These are internal names no user ever sees, and renaming them would be a
+**data-losing migration for no benefit**: an updated extension looking for
+`guard4ai_mapping` would find nothing, and every existing user would silently
+lose their real↔fake mapping table, their licence record, their settings and
+their activity log on update. The rename is a case-sensitive replace of the
+string `GuardAI`, which cannot touch the lowercase `guardai_` and `guardai-`
+forms, plus a guard against the `window.GuardAI` namespace. Verified after the
+change: 21 storage keys present and unchanged, 0 occurrences of `guard4ai_`,
+382 `guardai-` classes intact, 0 `guard4ai-`.
+
+**Permissions are unchanged** — still `storage` plus the same host list — so the
+update installs without a new permission prompt and without re-review on that
+basis.
+
+**The screenshots are stale.** Four of the five in `store/final-1280x800/` show
+the old name in the product UI and cannot be uploaded as-is against a listing
+titled Guard4AI:
+
+| Shot | Shows the old name | Also |
+|---|---|---|
+| 1 | tab title "GuardAI — Settings" | |
+| 2 | card header "GuardAI detected sensitive data" | |
+| 3 | panel header "GuardAI", tab title | |
+| 4 | — usable as-is | |
+| 5 | "What GuardAI masks", "Every category GuardAI can detect", body copy, tab title, omnibox chip | also shows the old "DETECTION MODE" heading (now "Modes") and a test company, "Test co Guard AI v2" |
+
+Shot 5 needs retaking regardless of the rename, since that settings page has
+changed twice since it was captured.
+
+---
+
 ## Privacy policy
 
 **https://guard4ai.com/privacy** — this is the URL the Developer Dashboard
@@ -12,7 +62,7 @@ wants. A `chrome-extension://` page does not qualify, so the policy lives on
 the site and `popup.js` / `settings.js` link out to it. The copy that used to
 ship inside the package has been deleted rather than left to drift.
 
-Rewritten 2026-08-22. The old version claimed GuardAI *"never makes a single
+Rewritten 2026-08-22. The old version claimed Guard4AI *"never makes a single
 network request"* and *"we do not request … any network permissions"* while the
 manifest carried `https://*.supabase.co/*` — a direct contradiction between the
 stated data practices and the requested permissions, on a product whose entire
@@ -43,16 +93,16 @@ submission.
 
 Paste this into that field:
 
-> GuardAI masks personal data before it is sent to AI chat sites. It stays
+> Guard4AI masks personal data before it is sent to AI chat sites. It stays
 > inactive until a licence key is entered, so please activate it first:
 >
 > 1. Install the extension.
-> 2. Click the GuardAI toolbar icon.
+> 2. Click the Guard4AI toolbar icon.
 > 3. Paste this key into the "Activate" field and click Activate:
 >    `GK-REVIEW-CHROME-STORE-0001`
 > 4. Open https://chatgpt.com and type, without sending:
 >    `Contact Sarah Chen on 0412 345 678`
-> 5. Press Enter. GuardAI intercepts the send and offers to replace the name
+> 5. Press Enter. Guard4AI intercepts the send and offers to replace the name
 >    and phone number with realistic fakes. Choose "Mask & Send".
 >
 > Detection runs entirely in the browser. The only network request the
@@ -87,7 +137,8 @@ explicitly disabled.
 bash tools/package.sh
 ```
 
-Produces `dist/guardai-<version>.zip` (~4.7 MB) from an explicit allowlist.
+Produces `dist/guard4ai-<version>.zip` (4.8 MB, 36 files) from an explicit
+allowlist.
 
 **Do not zip the folder by hand.** It is 26 MB, of which 25 MB is
 `node_modules` — jsdom and its dependency tree, pulled in for the test suite.
@@ -185,9 +236,9 @@ outcomes and they read differently on purpose:
 
 | Outcome | What happens | What it says |
 |---|---|---|
-| Found something | **Stops and waits** | Same category rows and counts as a document, plus "GuardAI may not have read all of it" |
+| Found something | **Stops and waits** | Same category rows and counts as a document, plus "Guard4AI may not have read all of it" |
 | Read it, found nothing | **Attaches, with a notice** | "Attached — nothing found, but have a look": it read what it could see, can't read everything in an image, so this **isn't a clean bill of health** and the judgement is still yours |
-| Could not read it | **Stops and waits** | "GuardAI could not read this image properly" — treat as unchecked |
+| Could not read it | **Stops and waits** | "Guard4AI could not read this image properly" — treat as unchecked |
 
 The middle row was a hard stop until 2026-08-28 and is now a notice. The
 reasoning that made it a stop is still true, and the wording still says it —
@@ -198,7 +249,7 @@ words rather than in the friction.
 
 **Always stop on images** (Settings → Modes, default off) restores the hard
 stop for teams that want one. It changes only that middle row: an image with
-findings, or one GuardAI could not read, stops either way.
+findings, or one Guard4AI could not read, stops either way.
 
 PNG, JPEG and WebP. There is no "send the text instead" option for an image: a
 screenshot's meaning is its layout, so there is nothing faithful to paste, and
@@ -325,6 +376,13 @@ something it stops, if it reads an image and finds nothing it attaches it with a
 notice saying exactly that, and if it cannot read the image properly it stops
 and says so.
 
+**Scanned PDFs.** A PDF with no text layer — an emailed invoice, a payslip, a
+signed contract — is rasterised and read with the same text recognition, using
+the same three outcomes as an image. It reads the first 5 pages, and if there
+are more it tells you how many it did not read and makes it your decision:
+"nothing in the 5 pages we read of 40" is not "nothing in this file", and it
+never presents one as the other.
+
 **Send the text instead.** For a document that reads as prose, Guard4AI can
 offer to send the text as a masked message rather than attaching the file, with
 the reply unmasked as usual. It only offers this when the extraction genuinely
@@ -333,11 +391,11 @@ as fragments.
 
 WHAT IT DOES NOT READ
 
-Excel, PowerPoint, legacy .doc, Pages, Numbers, Keynote, archives, HEIC photos
-from an iPhone, and scanned PDFs with no text layer. A file Guard4AI cannot read
-is unchecked, not safe, and it says so by name rather than letting the file look
-like one that came back clean. Attach several files at once and they are decided
-together: if one is stopped, none are attached.
+Excel, PowerPoint, legacy .doc, Pages, Numbers, Keynote, archives, and HEIC
+photos from an iPhone. A file Guard4AI cannot read is unchecked, not safe, and
+it says so by name rather than letting the file look like one that came back
+clean. Attach several files at once and they are decided together: if one is
+stopped, none are attached.
 
 Guard4AI is a browser extension, so the ChatGPT and Claude desktop apps sit
 outside it, and so does Gemini's "Add from Drive", where the file goes to Google

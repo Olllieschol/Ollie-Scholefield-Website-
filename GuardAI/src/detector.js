@@ -1,5 +1,5 @@
 /**
- * GuardAI — detector.js
+ * Guard4AI — detector.js
  * ---------------------------------------------------------------------------
  * Local-only sensitive-data detection engine. NO network calls, ever.
  *
@@ -2260,13 +2260,13 @@
     try {
       fn(text, out);
     } catch (err) {
-      console.warn(`[GuardAI] detector "${name}" failed, continuing with other detectors:`, err);
+      console.warn(`[Guard4AI] detector "${name}" failed, continuing with other detectors:`, err);
     }
   }
 
   class Detector {
     constructor() {
-      // Category toggles ("What GuardAI masks"): types the user has switched
+      // Category toggles ("What Guard4AI masks"): types the user has switched
       // off. Empty by default — every category runs, matching the "all
       // toggles ON by default" requirement. Deliberately stores the OFF set
       // rather than an ON map: a type this file adds in the future is
@@ -2295,7 +2295,7 @@
     scan(text) {
       if (!text || typeof text !== "string") return [];
       if (text.length > MAX_SCAN_LENGTH) {
-        console.warn(`[GuardAI] input truncated for scanning (${text.length} > ${MAX_SCAN_LENGTH} chars)`);
+        console.warn(`[Guard4AI] input truncated for scanning (${text.length} > ${MAX_SCAN_LENGTH} chars)`);
         text = text.slice(0, MAX_SCAN_LENGTH);
       }
       const out = [];
@@ -2341,7 +2341,7 @@
         // not marked `aggressive`) always wins for a span both would match.
         if (this.aggressiveNames) detectStandaloneNames(text, out);
       } catch (err) {
-        console.warn("[GuardAI] detector \"names\" failed, continuing:", err);
+        console.warn("[Guard4AI] detector \"names\" failed, continuing:", err);
       }
 
       // Correct phone-shaped values that are explicitly labelled as a Medicare
@@ -2351,7 +2351,7 @@
       try {
         retypeLabelledNumbers(text, out);
       } catch (err) {
-        console.warn("[GuardAI] label re-typing failed, continuing:", err);
+        console.warn("[Guard4AI] label re-typing failed, continuing:", err);
       }
 
       // A captured span must never be bracket-unbalanced: replacing
@@ -2361,7 +2361,7 @@
       try {
         balanceBrackets(text, out);
       } catch (err) {
-        console.warn("[GuardAI] bracket balance failed, continuing:", err);
+        console.warn("[Guard4AI] bracket balance failed, continuing:", err);
       }
 
       // Whatever a detector captured, it must not span a sentence boundary.
@@ -2376,7 +2376,7 @@
       try {
         clampToSentence(out);
       } catch (err) {
-        console.warn("[GuardAI] sentence clamp failed, continuing:", err);
+        console.warn("[Guard4AI] sentence clamp failed, continuing:", err);
       }
 
       // Category toggles are applied LAST, after every detector (including
@@ -2392,7 +2392,7 @@
       try {
         return withoutDisabled(resolveOverlaps(dedupe(out))).sort((a, b) => a.index - b.index);
       } catch (err) {
-        console.warn("[GuardAI] overlap resolution failed, returning unresolved findings:", err);
+        console.warn("[Guard4AI] overlap resolution failed, returning unresolved findings:", err);
         return withoutDisabled(out).sort((a, b) => a.index - b.index);
       }
     }

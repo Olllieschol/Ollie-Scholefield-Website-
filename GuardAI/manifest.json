@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "GuardAI — Local AI Privacy Guard",
-  "version": "1.0.0",
+  "name": "Guard4AI — Local AI Privacy Guard",
+  "version": "1.1.0",
   "description": "Masks sensitive data in messages, documents and images before it reaches AI chatbots. Detection runs entirely on your device.",
-  "author": "GuardAI",
+  "author": "Guard4AI",
   "permissions": [
     "storage"
   ],
@@ -67,7 +67,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "GuardAI Privacy Dashboard",
+    "default_title": "Guard4AI Privacy Dashboard",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

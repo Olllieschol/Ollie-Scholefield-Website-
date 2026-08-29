@@ -1,5 +1,5 @@
 /**
- * GuardAI — the file reader.
+ * Guard4AI — the file reader.
  * ---------------------------------------------------------------------------
  * Runs inside parser.html, which is a hidden chrome-extension: iframe on the
  * chat page. Takes file bytes in over a private MessagePort, and sends back
@@ -81,7 +81,7 @@ async function extractPdf(bytes, onProgress) {
       // and keep going — but the caller still sees the page count, so a file
       // where EVERY page fails ends up with no text and is reported as
       // unreadable rather than clean.
-      console.warn("[GuardAI] page " + n + " could not be read:", err);
+      console.warn("[Guard4AI] page " + n + " could not be read:", err);
     } finally {
       if (page && typeof page.cleanup === "function") page.cleanup();
     }
@@ -143,7 +143,7 @@ async function ocrPdfPages(doc, total, onProgress) {
       }
     } catch (err) {
       // One page that will not render is not a document that cannot be read.
-      console.warn("[GuardAI] page " + n + " could not be rasterised:", err);
+      console.warn("[Guard4AI] page " + n + " could not be rasterised:", err);
     } finally {
       if (page && typeof page.cleanup === "function") page.cleanup();
       if (canvas) { canvas.width = 0; canvas.height = 0; }

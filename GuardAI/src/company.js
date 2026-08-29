@@ -1,5 +1,5 @@
 /**
- * GuardAI — company reporting boundary.
+ * Guard4AI — company reporting boundary.
  * ---------------------------------------------------------------------------
  * Everything that leaves this device for a company dashboard passes through
  * buildEventBody() below, and nothing else in the extension is allowed to talk

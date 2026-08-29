@@ -1,5 +1,5 @@
 /**
- * GuardAI — backend endpoint for company reporting.
+ * Guard4AI — backend endpoint for company reporting.
  *
  * Matches the website's config.js. Leave these blank and the company features
  * simply do not appear: nothing is sent, and the extension behaves exactly as
