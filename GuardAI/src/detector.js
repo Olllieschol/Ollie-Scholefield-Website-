@@ -776,6 +776,20 @@
         // number.
         if (isAuPhoneShaped(value)) continue;
         const start = from + g.index;
+        // Not the TAIL of a longer alphanumeric token. "Reference
+        // SUP-2026-0441" matched "2026-0441" and reported a bank account on a
+        // page that has none (found 2026-08-29 on a real supplier pack): the
+        // word "reference" is legitimately in REF_CONTEXT, and the rule simply
+        // started reading after the letters. Masking made it worse than a
+        // miscount — the document's own reference silently became
+        // "SUP-0098-6675", a plausible wrong number rather than a visible
+        // hole. A prefixed code is detectRefCode's, and there it is captured
+        // whole. Guard is on the ORIGINAL text, not the window, so a window
+        // edge cannot hide the prefix.
+        const prev = start > 0 ? text[start - 1] : "";
+        const prev2 = start > 1 ? text[start - 2] : "";
+        if ((prev === "-" || prev === "/") && /[\p{L}\p{N}]/u.test(prev2)) continue;
+        if (/[\p{L}]/u.test(prev)) continue;
         // Re-check distance against the real text: the window is generous, the
         // actual proximity rule is the same 25 chars the contiguous branch uses.
         if (!nearWord(text, start, start + value.length, REF_CONTEXT, 25)) continue;
@@ -897,7 +911,13 @@
     // at all. The unspaced form additionally requires an explicit reference
     // context word, because 2-4 letters followed by digits with no separator
     // is a very common shape for ordinary tokens.
-    const re = /\b([A-Za-z]{2,4})(-)?(\d{4,6})\b/g;
+    // Trailing dashed groups are part of the code, not the end of it:
+    // "SUP-2026-0441" is one reference. Capturing only "SUP-2026" would leave
+    // "-0441" sitting beside the stand-in after masking — the half-replaced
+    // shape that made the hyphenated-name bug so damaging. The repetition is
+    // bounded and anchored behind a required prefix, so it stays linear;
+    // test/perf-redos.cjs holds that down.
+    const re = /\b([A-Za-z]{2,4})(-)?(\d{4,6})((?:-\d{2,6}){0,3})\b/g;
     let m;
     while ((m = re.exec(text))) {
       const value = m[0];
@@ -1789,9 +1809,111 @@
       return true;
     };
 
+    /**
+     * Is this candidate a document HEADING rather than a person?
+     *
+     * "New Supplier Onboarding Pack" became "New Emerson Sinclair" on a real
+     * supplier pack (2026-08-29) — the line that tells the AI what the
+     * document is, rewritten into a person. NON_PERSON_WORDS could not help:
+     * it lists job titles and org units, and heading nouns (Supplier,
+     * Onboarding, Pack, Handbook, Checklist, Matrix) are an open-ended
+     * vocabulary a list will always be one word behind. Measured before this
+     * rule: 6 of 9 ordinary document headings were read as people.
+     *
+     * So this is STRUCTURAL, not vocabulary. A heading is short, title-case,
+     * carries no sentence punctuation, and is essentially the whole line.
+     *
+     * THE RESCUE MATTERS AS MUCH AS THE RULE. A signature block —
+     * "Dana Whitcombe" alone on its own line — has exactly the same shape,
+     * and dropping those would trade a mangled heading for a leaked name,
+     * which is the worse direction. So a candidate whose first token is a
+     * given name the gazetteer vouches for is NOT treated as a heading. The
+     * residual cost is real and is limit #2 again: a name absent from the
+     * gazetteer, standing alone on its own line, is now missed. Recorded
+     * rather than tuned away.
+     */
+    // Decided ONCE PER LINE, and remembered. The rewind after a rejection
+    // re-tests a shorter run from the same line ("Supplier Onboarding Pack"
+    // rejected, then "Onboarding Pack" offered), and a shorter run covers
+    // less of the line — so a per-candidate answer let the second attempt
+    // through and simply moved the leak two words to the right. Measured: the
+    // heading came out as "Onboarding Pack" instead.
+    const headingLines = new Map();
+    const HEAD_CONNECTIVES = new Set([
+      "and", "or", "of", "the", "a", "an", "for", "to", "in", "on", "at",
+      "with", "by", "from", "per",
+    ]);
+
+    const isHeadingCandidate = (index, value) => {
+      const gaz = (typeof window !== "undefined" && window.GuardAI && window.GuardAI.NAME_GAZETTEER) || null;
+      // Rescue: a name the gazetteer vouches for is a person wherever it sits,
+      // including alone on a line. Weak on its own — the list is 927 hand-built
+      // given names and misses ordinary ones (measured: "Dianne" absent though
+      // "Diane" is present, "Dana" absent) — so the structural test below has
+      // to be tight enough not to lean on it. See limit #2.
+      if (gaz && typeof gaz.isFirst === "function") {
+        const clean = (t) => String(t).replace(/[^\p{L}\p{M}'’-]/gu, "");
+        const toks = value.split(/\s+/).map(clean).filter(Boolean);
+        if (toks.some((t) => gaz.isFirst(t) || gaz.isLast(t))) return false;
+      }
+
+      const ls = text.lastIndexOf("\n", index - 1) + 1;
+      if (headingLines.has(ls)) return headingLines.get(ls);
+
+      let le = text.indexOf("\n", index);
+      if (le === -1) le = text.length;
+      const line = text.slice(ls, le).trim();
+      const verdict = (v) => { headingLines.set(ls, v); return v; };
+
+      if (!line || line.length > 60) return verdict(false);
+      // A leading list marker belongs to the heading, not to a sentence:
+      // "4. Delivery and Acceptance" is still a heading.
+      const body = line.replace(/^\s*(?:\d+|[ivxlcIVXLC]+|[A-Za-z])[.)]\s+/, "").trim();
+      if (/[.!?;:]/.test(body)) return verdict(false);   // it is a sentence
+      // A heading is words. A line carrying a phone number, a date, an ID or
+      // a reference is doing something else — and this is what keeps
+      // "Contact Dianne Alcorn — (07) 3388 5510" a name rather than a title.
+      if (/\d{4,}/.test(body.replace(/\D/g, "")) || /\d/.test(body)) return verdict(false);
+
+      const words = body.split(/\s+/).filter((t) => /\p{L}/u.test(t));
+      if (words.length < 2) return verdict(false);
+      // Title case, ignoring the small words English leaves lowercase in
+      // titles. Requires at least two capitalised words in their own right.
+      const graded = words.filter((t) => !HEAD_CONNECTIVES.has(t.toLowerCase()));
+      const capped = graded.filter((t) => /^[\p{Lu}]/u.test(t));
+      if (graded.length < 2 || capped.length < 2) return verdict(false);
+      if (capped.length / graded.length < 0.8) return verdict(false);
+      // Finally: the candidate must BE the line, not a name sitting in it.
+      // "Prepared by Dana Whitcombe" is a person with a preamble; "New
+      // Supplier Onboarding Pack" is a title and nothing else.
+      const bodyLetters = (body.match(/\p{L}/gu) || []).length;
+      const valLetters = (value.match(/\p{L}/gu) || []).length;
+      if (!bodyLetters || valLetters / bodyLetters < 0.75) return verdict(false);
+      return verdict(true);
+    };
+
     /** Decide one candidate run. Returns false when it is NOT a name. */
     const accept = (m) => {
-      const parts = m[1].split(/\s+/);
+      // A name never spans a PARAGRAPH break. The token separator is \s+,
+      // which happily crosses a blank line, so the last capitalised word of a
+      // heading paired with the first of the next block — "Agreement\n\nEnd"
+      // — and clampToSentence then trimmed the value back to a single token,
+      // producing NAME_PII "Agreement". That is how "Service Level
+      // Agreement", "Purchase Order Confirmation" and "4. Delivery and
+      // Acceptance" each ended up with a one-word "person" in them (found
+      // 2026-08-29; the shape predates the heading rule and is invisible to
+      // it, because the run's letters are split across two lines).
+      //
+      // A SINGLE newline still counts as a space: name tokens are separated
+      // that way inside CSV and table rows, and rejecting those would undo
+      // the table-layout coverage.
+      // TRUNCATE at the break rather than rejecting the whole run: the match
+      // is greedy, so a real name at the end of a block ("Sarah Chen") is
+      // routinely swept up together with the first word of the next one.
+      // Rejecting outright lost those names; keeping only the head keeps them
+      // and still drops the cross-block pairing.
+      const run = m[1].split(/\n\s*\n/)[0];
+      const parts = run.split(/\s+/);
       // Trim from the RIGHT while the trailing token isn't name-like, so a
       // greedy run gives back words it shouldn't have taken
       // ("James Whitfield Tomorrow" -> "James Whitfield").
@@ -1809,11 +1931,12 @@
       let end = 0;
       let cursor = 0;
       for (const p of parts) {
-        const at = m[1].indexOf(p, cursor);
+        const at = run.indexOf(p, cursor);
         end = at + p.length;
         cursor = end;
       }
-      const value = m[1].slice(0, end);
+      const value = run.slice(0, end);
+      if (isHeadingCandidate(m.index, value)) return false;
       out.push(finding("NAME_PII", "Full name (with other PII)", value, m.index, "medium"));
       return true;
     };

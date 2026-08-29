@@ -31,6 +31,7 @@ const SUITES = [
   { name: "refs-email-flight.cjs (email formats, reference consistency, flight exclusion)", file: "test/refs-email-flight.cjs" },
   { name: "credentials.cjs (usernames + passwords detected by phrasing)", file: "test/credentials.cjs" },
   { name: "credential-fakes.cjs (unique realistic credential fakes, real pipeline)", file: "test/credential-fakes.cjs" },
+  { name: "heading-names.cjs (a document heading is not a person; a prefixed ref is not an account)", file: "test/heading-names.cjs" },
   { name: "name-matching.cjs (lead-word leak, hyphens/apostrophes, non-ASCII names)", file: "test/name-matching.cjs" },
   { name: "aggressive-names.cjs (opt-in standalone names, tiers, silent-mode escalation)", file: "test/aggressive-names.cjs" },
   { name: "lowercase-names.cjs (case-insensitive names + 60-message precision corpus)", file: "test/lowercase-names.cjs" },
