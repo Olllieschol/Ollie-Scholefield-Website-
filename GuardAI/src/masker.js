@@ -437,7 +437,7 @@
    * Everything not in this set is still DETECTED and still listed on the
    * warning card; it just isn't swapped automatically.
    *
-   * ONE EXCEPTION: "Send as safe text" (content.js buildReviewModel with
+   * ONE EXCEPTION: "Send as masked text" (content.js buildReviewModel with
    * docPolicy) masks DOB despite this set. Every leg of the reasoning above assumes the chat
    * flow — an interrupting card that lists the DOB, and a manual-mask step
    * one click away. The document flow has neither for non-blocking types, so

@@ -99,7 +99,7 @@ async function extractDocx(bytes) {
   const text = (res && res.value) || "";
   // How much of the document lives in tables? extractRawText flattens that
   // structure away, but convertToHtml preserves it, and the answer decides
-  // whether "Send as safe text" can be offered — a table flattened to one
+  // whether "Send as masked text" can be offered — a table flattened to one
   // cell per line does not read. Exact enough: mammoth builds the HTML from
   // the document's own w:tbl elements.
   let tableShare = null;
@@ -356,7 +356,7 @@ async function handle(req, port) {
 }
 
 /**
- * Extract-for-sending. Runs only when the user has clicked "Send as safe
+ * Extract-for-sending. Runs only when the user has clicked "Send as masked
  * text" on the card, and it is the one deliberate exception to "no document
  * text crosses out of this frame": the text goes over the private port to the
  * content script, which masks it with the same rules as a typed message and

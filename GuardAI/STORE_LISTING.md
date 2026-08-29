@@ -215,7 +215,7 @@ through it, the same construction as `src/company.js`. There is no `fetch` or
 `useWorkerFetch: false` and `isEvalSupported: false` so it cannot reach the
 network or evaluate code.
 
-**One deliberate exception**: "Send as safe text" (added 2026-08-28) lets the
+**One deliberate exception**: "Send as masked text" (added 2026-08-28) lets the
 user send a document's text as a masked message instead of attaching the file.
 When — and only when — the user clicks that button, the frame re-extracts the
 text and passes it over the private MessagePort to the content script, which

@@ -644,7 +644,7 @@
   }
 
   /* ------------------------------------------------------------------ *
-   * "Send as safe text" suitability.
+   * "Send as masked text" suitability.
    *
    * The option to extract a document's text, mask it, and send it as a
    * message exists ONLY when the extraction will genuinely read correctly.

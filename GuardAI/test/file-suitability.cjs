@@ -1,5 +1,5 @@
 /**
- * "Send as safe text" suitability: the measured rule, held down.
+ * "Send as masked text" suitability: the measured rule, held down.
  *
  * ═══ WHERE THESE NUMBERS COME FROM ══════════════════════════════════════════
  *

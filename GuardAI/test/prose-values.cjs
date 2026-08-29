@@ -1,6 +1,6 @@
 /**
  * Values as DOCUMENTS write them — four defects from the first live
- * "Send as safe text" run (2026-08-28, a real offer letter), each held down
+ * "Send as masked text" run (2026-08-28, a real offer letter), each held down
  * with the control that would catch a lazy fix.
  *
  *   1. "your date of birth as 14 March 1991" reached the model VERBATIM.

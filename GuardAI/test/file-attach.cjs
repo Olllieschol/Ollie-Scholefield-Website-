@@ -589,7 +589,7 @@ console.log("\n--- 8d. no composer, no problem ---");
   check(left >= 8, "not pinned to the edge");
 }
 
-console.log("\n--- 10. Send as safe text: one model, four standard actions ---");
+console.log("\n--- 10. Send as masked text: one model, four standard actions ---");
 {
   const w = loadPage(CHATGPT);
   await settle();
@@ -896,7 +896,7 @@ console.log("\n--- 10e. all three cards teach ONE button language ---");
     "decision card: Don't attach is secondary — safe, but not the loudest thing on the card",
     cancelBtn || "not found");
   check(!!safeTextBtn && safeTextBtn.includes("guardai-act--primary"),
-    "decision card: Send as safe text is primary — the protected path, same green as Mask & Send",
+    "decision card: Send as masked text is primary — the protected path, same green as Mask & Send",
     safeTextBtn || "not found");
   check(!!cancelBtn && !!allowBtn && cancelBtn.includes("guardai-act ") && allowBtn.includes("guardai-act "),
     "…and both sit on the shared component, so the row cannot mismatch in height or radius");
@@ -1141,7 +1141,7 @@ console.log("\n--- 13. images: three outcomes, three different screens, none of 
   check(/may not have read all of it/.test(card.textContent),
     "and the card owns that an OCR read is partial EVEN when it found something");
   check(!card.querySelector(".guardai-filecard__btn--safetext") && !card.querySelector(".guardai-filecard__textwhy"),
-    "no 'Send as safe text', and no absence-reason either — a screenshot has no text version");
+    "no 'Send as masked text', and no absence-reason either — a screenshot has no text version");
   card.querySelector(".guardai-filecard__btn--allow").click();
   await settle(10);
   check(released === 1 && !H.cardEl(), "'Attach anyway' releases it through the same path as a document");
