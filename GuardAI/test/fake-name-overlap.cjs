@@ -142,6 +142,81 @@ const REALS = [
       "and rejecting a name never pushes the draw into the wrong gender pool", `${wrongGender}/100`);
   }
 
+  /* ---- 6. EVERY type built from the name pools, not just NAME_PII ---- */
+  console.log("\n--- the same collision, everywhere the name pools are used ---");
+  {
+    /**
+     * The guard above was added for NAME_PII in 4f23af5. EMAIL and USERNAME
+     * build their fakes from the SAME pools and were never covered, so the
+     * identical collision stayed live for two more years' worth of the thing
+     * masking exists to prevent:
+     *
+     *     real    Marcus Ellery / marcus.ellery@meridianfacilities.com.au
+     *     masked  Rupert Wells  / blake.ellery63@example.com.au
+     *
+     * Measured before the fix: EMAIL 2.4%, USERNAME 2.25%. Both are a real
+     * name fragment leaving a document whose name was masked.
+     *
+     * 4,000 draws each, because a ~2% fault presents as an intermittent and
+     * one sample proves nothing — the lesson from the previewFake bug this
+     * suite already covers.
+     */
+    const masker = new w.GuardAI.Masker();
+    await masker.load();
+    const DRAWS = 4000;
+
+    let emailReuse = 0;
+    for (let i = 0; i < DRAWS; i++) {
+      const local = masker.previewFake("EMAIL", "marcus.ellery@meridianfacilities.com.au", new Set())
+        .split("@")[0].toLowerCase();
+      if (local.includes("ellery") || local.includes("marcus")) emailReuse++;
+    }
+    check(emailReuse === 0,
+      "a fake EMAIL never reuses a name token from the real address", `${emailReuse}/${DRAWS}`);
+
+    let userReuse = 0;
+    for (let i = 0; i < DRAWS; i++) {
+      if (masker.previewFake("USERNAME", "mellery", new Set()).includes("ellery")) userReuse++;
+    }
+    check(userReuse === 0,
+      "a fake USERNAME never carries the real handle's surname", `${userReuse}/${DRAWS}`);
+
+    // CONTROL, and the one that makes the two above meaningful: a guard that
+    // fires on every draw would "pass" them by exhausting the retry budget
+    // and handing back whatever it had. These prove the pool is still alive.
+    const e = new Set(), u = new Set();
+    for (let i = 0; i < 300; i++) {
+      e.add(masker.previewFake("EMAIL", "a.b@corp.com.au", new Set()));
+      u.add(masker.previewFake("USERNAME", "zzzz", new Set()));
+    }
+    check(e.size > 250, "control: EMAIL fakes are still varied — the guard is not always tripping",
+      `${e.size}/300 distinct`);
+    check(u.size > 250, "control: USERNAME fakes are still varied", `${u.size}/300 distinct`);
+
+    // A real address whose domain MATCHES the fake pool's, which is the case
+    // that makes whole-address comparison trip on "com"/"au". Asserted
+    // because it is the shape most likely to break a future change to this
+    // guard — not because whole-address comparison leaks: measured, it does
+    // not (0/4000 either way). The local-part cut is a cost decision, and
+    // this assertion is here so the SAFETY property is pinned regardless of
+    // which way that decision goes.
+    let sameDomain = 0;
+    for (let i = 0; i < DRAWS; i++) {
+      const local = masker.previewFake("EMAIL", "marcus.ellery@example.com.au", new Set())
+        .split("@")[0].toLowerCase();
+      if (local.includes("ellery") || local.includes("marcus")) sameDomain++;
+    }
+    check(sameDomain === 0,
+      "an address sharing the fake pool's own domain still never leaks its name",
+      `${sameDomain}/${DRAWS}`);
+
+    // Types that do NOT draw from the name pools must be unaffected.
+    let phoneVaried = new Set();
+    for (let i = 0; i < 100; i++) phoneVaried.add(masker.previewFake("PHONE", "0427 336 901", new Set()));
+    check(phoneVaried.size > 80, "control: PHONE is untouched by the name-token guard",
+      `${phoneVaried.size}/100 distinct`);
+  }
+
   console.log(`\nFAKE-NAME-OVERLAP: ${failures === 0 ? "ALL PASS" : failures + " FAILURES"}`);
   process.exit(failures ? 1 : 0);
 })().catch((e) => { console.error("ERROR:", e); process.exit(1); });

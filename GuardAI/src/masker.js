@@ -480,15 +480,59 @@
    * readable, and "Logistics" is a designator, not an identity. Names have no
    * equivalent — every word in one is identifying.
    */
+  /**
+   * Types whose fake is built out of the NAME POOLS, and can therefore draw
+   * the very name it is standing in for.
+   *
+   * This guard was added for NAME_PII in 4f23af5, after `Aisha Al-Rashid`
+   * masked to `Aisha Halloway` — 3.5% of draws, the given name sent to the
+   * AI verbatim. It was scoped to NAME_PII, and the same collision was still
+   * live everywhere else that draws from those pools. Measured 2026-08-29:
+   *
+   *     real    Marcus Ellery / marcus.ellery@meridianfacilities.com.au
+   *     masked  Rupert Wells  / blake.ellery63@example.com.au
+   *
+   * — 2.4% for one surname, 5.3% against a set of ten. A real name fragment
+   * leaving a document whose name was masked is the failure the whole
+   * mechanism exists to prevent, so the guard now covers every generator
+   * that reaches for those pools: EMAIL and USERNAME as well as NAME_PII.
+   */
+  const NAME_POOL_TYPES = new Set(["NAME_PII", "EMAIL", "USERNAME"]);
+
   function sharesNameToken(type, real, fake) {
-    if (type !== "NAME_PII") return false;
+    if (!NAME_POOL_TYPES.has(type)) return false;
+    // Only the LOCAL PART can carry a person's name, so the domain is cut
+    // before comparing. This is about COST, not safety, and the distinction
+    // was measured rather than assumed: comparing whole addresses still
+    // catches a genuine collision (the local-part tokens are in there
+    // either way, and 0/4000 leaked under both). What it adds is a spurious
+    // match on "com"/"au" for most pairs, which burns retries generating
+    // fakes it will throw away. Cutting the domain keeps the guard cheap.
+    const body = (v) => (type === "EMAIL" ? String(v || "").split("@")[0] : String(v || ""));
     const words = (v) =>
-      String(v || "")
+      body(v)
         .toLowerCase()
         .split(/[^\p{L}\p{M}]+/u)
         .filter((t) => t.length > 1);
     const realWords = new Set(words(real));
-    return words(fake).some((w) => realWords.has(w));
+    if (words(fake).some((w) => realWords.has(w))) return true;
+
+    // USERNAME concatenates an initial onto a surname with NO separator —
+    // "b" + "ellery" + digits — so the surname is not a token and the check
+    // above cannot see it. Measured after the token fix was in: a real
+    // handle of "mellery" still drew "bellery63" 2.25% of the time, the
+    // surname intact. For handle-shaped values, compare shared LETTER RUNS
+    // instead. Four is the shortest run worth calling a name fragment; three
+    // would trip on ordinary syllables and burn the retry budget.
+    if (type !== "USERNAME") return false;
+    const core = (v) => String(v || "").toLowerCase().replace(/[^\p{L}]/gu, "");
+    const a = core(real);
+    const b = core(fake);
+    if (a.length < 4 || b.length < 4) return false;
+    for (let i = 0; i + 4 <= a.length; i++) {
+      if (b.includes(a.slice(i, i + 4))) return true;
+    }
+    return false;
   }
 
   function generateFake(type, real) {
