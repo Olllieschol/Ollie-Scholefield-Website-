@@ -155,5 +155,60 @@ console.log("\n--- 4. ocrVerdict: three states, cut where the measurements say -
     "the unreadable state carries its plain one-line reason", un.reason);
 }
 
+console.log("\n--- 5. scanned PDFs: a partial read is never a clean bill ---");
+{
+  /**
+   * A PDF with no text layer is rasterised and OCR'd (2026-08-29). Measured
+   * in a real browser: rasterising is 4-26ms a page, OCR ~1.0s on a dense
+   * page, and accuracy falls off a cliff below scale 2 — at 1.5 a dense page
+   * came back at confidence 62 with plausible text and 0 of 4 planted values
+   * surviving. Hence PDF_OCR_SCALE 2 and PDF_OCR_MAX_PAGES 5 (~5s worst
+   * case, against the 14s the image path already spends on a dense
+   * screenshot).
+   *
+   * THE RULE THIS SECTION EXISTS FOR: "nothing found" may only auto-attach
+   * when EVERY page was read.
+   */
+  check(FS.PDF_OCR_SCALE === 2, "raster scale is 2 — below it a dense page loses everything",
+    String(FS.PDF_OCR_SCALE));
+  check(FS.PDF_OCR_MAX_PAGES === 5, "page cap is 5", String(FS.PDF_OCR_MAX_PAGES));
+
+  const found = FS.summarise(det.scan("Tax file number 347 436 637 on BSB 062-948"));
+  const V = (o) => FS.scannedPdfVerdict(o);
+
+  // Everything read, nothing found -> may take the image notice path.
+  const allClean = V({ confidence: 88, textChars: 900, pagesRead: 3, pagesTotal: 3 });
+  check(allClean.action === "img-nothing", "all pages read, nothing found -> the image 'nothing found' state",
+    allClean.action);
+  check(allClean.partial === false, "…and it is not marked partial");
+
+  // Partially read, nothing found -> its OWN state, never img-nothing.
+  const part = V({ confidence: 88, textChars: 900, pagesRead: 5, pagesTotal: 40 });
+  check(part.action === "pdf-partial",
+    "5 of 40 read with nothing found -> pdf-partial, NOT the auto-attaching state", part.action);
+  check(part.action !== "img-nothing",
+    "…stated on its own, because this is the failure that would read as clean");
+  check(part.pagesRead === 5 && part.pagesTotal === 40 && part.partial === true,
+    "…and it carries the page numbers the card has to show",
+    JSON.stringify([part.pagesRead, part.pagesTotal, part.partial]));
+
+  // Findings win regardless of how much was read.
+  const partFound = V({ summary: found, confidence: 88, textChars: 900, pagesRead: 5, pagesTotal: 40 });
+  check(partFound.action === "img-found",
+    "findings in the pages that WERE read still block", partFound.action);
+  check(partFound.partial === true, "…and the card is still told the rest was not read");
+
+  // Unreadable stays unreadable — already a decision.
+  const bad = V({ confidence: 12, textChars: 4, pagesRead: 2, pagesTotal: 9 });
+  check(bad.action === "img-unreadable", "a scan OCR could not read stays unreadable", bad.action);
+
+  // Boundary: exactly at the cap with nothing left over is NOT partial.
+  const exact = V({ confidence: 90, textChars: 900, pagesRead: 5, pagesTotal: 5 });
+  check(exact.action === "img-nothing" && exact.partial === false,
+    "a 5-page scan read in full is not partial", exact.action);
+  const overByOne = V({ confidence: 90, textChars: 900, pagesRead: 5, pagesTotal: 6 });
+  check(overByOne.action === "pdf-partial", "…and a 6-page one is", overByOne.action);
+}
+
 console.log(`\nFILE IMAGE: ${failures === 0 ? "ALL PASS" : failures + " FAILURES"}`);
 process.exit(failures ? 1 : 0);

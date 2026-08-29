@@ -1343,6 +1343,64 @@ console.log("\n--- 13. images: three outcomes, three different screens, none of 
       "…and does NOT fall back to the document 'Checked' header just because a document is present");
   }
 
+  /* (d5) A scanned PDF read only in part must STOP, whatever the settings
+     say. This is the one that would read as a clean bill of health if it
+     took the image notice path: "nothing in the 5 pages we read of 40"
+     delivered the way a clean file is delivered is a false all-clear on a
+     document whose bank details are on page 7. */
+  {
+    const wp = loadPage(CHATGPT);            // hard-stop setting OFF: the default
+    await settle(10);
+    wp.GuardAI._fileHooks.setParser(async () => ({
+      kind: "pdf", label: "PDF document", action: "pdf-partial", pages: 40,
+      pagesRead: 5, pagesTotal: 40, partial: true,
+      summary: { counts: {}, blocking: [], other: [], blockingCount: 0, total: 0, pageHits: {} },
+    }));
+    let rel = 0;
+    wp.document.querySelector("main").addEventListener("change", () => { rel++; });
+    const f = makeFile(wp, "contract-scan.pdf", 900000, "application/pdf");
+    const inp = wp.document.getElementById("upload-files");
+    inp.files = Object.assign([f], { item: () => f });
+    inp.dispatchEvent(new wp.Event("change", { bubbles: true }));
+    await settle(12);
+    const c = wp.GuardAI._fileHooks.cardEl();
+    check(rel === 0 && !!c, "a partially-read scan does NOT auto-attach", `released=${rel}`);
+    check(!!c && !!c.querySelector(".guardai-filecard__btn--allow"),
+      "…it is a decision, with both buttons");
+    check(!!c && /read the first 5 pages of 40/.test(c.textContent),
+      "…and says in numbers how much was read", c ? c.textContent.slice(0, 240) : "");
+    check(!!c && /did not read the other 35/.test(c.textContent),
+      "…and how much was not");
+    check(!!c && /not fully checked/.test(c.textContent),
+      "…and names the state plainly");
+    check(!!c && !/Checked — nothing blocked/.test(c.textContent) &&
+          !/Attached — nothing found/.test(c.textContent),
+      "neither the document 'checked' wording nor the image auto-attach header appears");
+  }
+
+  /* (d6) A scan read IN FULL with nothing found behaves like an image. */
+  {
+    const wf = loadPage(CHATGPT);
+    await settle(10);
+    wf.GuardAI._fileHooks.setParser(async () => ({
+      kind: "pdf", label: "PDF document", action: "img-nothing", pages: 3,
+      pagesRead: 3, pagesTotal: 3, partial: false,
+      summary: { counts: {}, blocking: [], other: [], blockingCount: 0, total: 0, pageHits: {} },
+    }));
+    let rel = 0;
+    wf.document.querySelector("main").addEventListener("change", () => { rel++; });
+    const f = makeFile(wf, "payslip-scan.pdf", 90000, "application/pdf");
+    const inp = wf.document.getElementById("upload-files");
+    inp.files = Object.assign([f], { item: () => f });
+    inp.dispatchEvent(new wf.Event("change", { bubbles: true }));
+    await settle(12);
+    check(rel === 1, "a fully-read scan with nothing found attaches, like an image", `released=${rel}`);
+    const c = wf.GuardAI._fileHooks.cardEl();
+    check(!!c && /can't read everything in an image/.test(c.textContent),
+      "…with the image caveat, not the document 'checked' promise",
+      c ? c.textContent.slice(0, 200) : "no card");
+  }
+
   /* (d) Control in the other direction: the doc flow still auto-releases a
      clean PDF, so holding every image did not quietly start holding
      everything. */

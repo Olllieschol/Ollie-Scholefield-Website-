@@ -17,6 +17,38 @@
  */
 (function () {
   "use strict";
+  /**
+   * Map upsert — Chrome 145, January 2026.
+   *
+   * pdf.js 6.2 calls Map.prototype.getOrInsertComputed on its RENDER path,
+   * which the text path never touches. It only started mattering when
+   * scanned PDFs began being rasterised for OCR, and it bites HARDER than
+   * toHex below: that one needs Chrome 140, this one needs 145, so a browser
+   * new enough to read a PDF's text can still be too old to rasterise one.
+   * Without this, a scanned PDF on Chrome 140-144 throws inside render() and
+   * the user gets "could not read" on a file GuardAI can in fact read.
+   */
+  if (typeof Map.prototype.getOrInsertComputed !== "function") {
+    Object.defineProperty(Map.prototype, "getOrInsertComputed", {
+      configurable: true,
+      writable: true,
+      value: function getOrInsertComputed(key, callback) {
+        if (!this.has(key)) this.set(key, callback(key));
+        return this.get(key);
+      },
+    });
+  }
+  if (typeof Map.prototype.getOrInsert !== "function") {
+    Object.defineProperty(Map.prototype, "getOrInsert", {
+      configurable: true,
+      writable: true,
+      value: function getOrInsert(key, value) {
+        if (!this.has(key)) this.set(key, value);
+        return this.get(key);
+      },
+    });
+  }
+
   const HEX = "0123456789abcdef";
 
   if (typeof Uint8Array.prototype.toHex !== "function") {

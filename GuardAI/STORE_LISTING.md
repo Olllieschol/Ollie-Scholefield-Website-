@@ -204,6 +204,41 @@ PNG, JPEG and WebP. There is no "send the text instead" option for an image: a
 screenshot's meaning is its layout, so there is nothing faithful to paste, and
 the parser frame refuses an extract request for an image even if one is made.
 
+## Scanned PDFs
+
+A PDF with **no text layer** is a scan — an emailed invoice, payslip or signed
+contract — and used to be reported "not checked". It is now rasterised page by
+page and read with the same OCR, using the same three outcomes as an image. A
+PDF that *has* text is read directly from its text layer exactly as before;
+nothing about that path changed, and it never rasterises.
+
+Measured 2026-08-29 in a real browser inside the extension's own parser page:
+rasterising costs 4–26ms a page (under 2% of the work) and OCR ~0.4s on a
+sparse page, ~1.0s on a dense one.
+
+**Rendered at 144 dpi**, because accuracy falls off a cliff below it and
+confidence does not warn you: at 108 dpi a dense page came back at confidence
+62 with plausible-looking text and **none** of the planted BSB, account, TFN or
+Medicare surviving. At 144 dpi all four were found. Higher costs 20–40% more
+for nothing.
+
+**The first 5 pages**, which is about 5 seconds — less than the 14s the image
+path already spends on a dense screenshot — and covers what actually arrives by
+email. Past that, the rest is not read, and **a partially-read scan is always a
+decision, never an automatic attach**: "nothing in the 5 pages we read of 40"
+is not "nothing in this file", and delivered like a clean result it would read
+as exactly that. The card states the numbers before any reassurance — *"It read
+the first 5 pages of 40 and did not read the other 35 … treat this as not fully
+checked."* A scan read in full with nothing found behaves like any other image.
+
+No new libraries, no size change, no new permission: pdf.js and tesseract were
+already bundled, and canvas is a DOM API in the parser page. One addition to
+`src/compat.js` was required — pdf.js's *render* path (which its text path
+never touches) calls `Map.prototype.getOrInsertComputed`, shipped in **Chrome
+145, January 2026**. That is newer than the Chrome 140 the existing `toHex`
+shim covers, so without it a browser new enough to read a PDF's text could
+still be too old to rasterise one.
+
 ## What the parser frame is for, if a reviewer asks
 
 The file bytes and the extracted text exist only inside `parser.html`, which is

@@ -89,8 +89,67 @@ async function extractPdf(bytes, onProgress) {
     if (onProgress && (n % 5 === 0 || n === total)) onProgress(n, total);
   }
 
+  // NO TEXT LAYER -> it is a scan. Rasterise and read it, rather than
+  // reporting "not checked" on every emailed invoice, payslip and signed
+  // contract. Done here, while the document is still open, so the bytes are
+  // not re-parsed (pdf.js may detach the buffer it was handed).
+  let ocr = null;
+  if (text.replace(/\s+/g, "").length < FileScan.MIN_TEXT_CHARS) {
+    ocr = await ocrPdfPages(doc, total, onProgress);
+    if (ocr && ocr.text) text = ocr.text;
+  }
+
   try { await task.destroy(); } catch (_) { /* nothing to recover */ }
-  return { text, pageStarts, pages: total, layoutPages };
+  return { text, pageStarts, pages: total, layoutPages, ocr };
+}
+
+/**
+ * Render the first pages of a scanned PDF and OCR them.
+ *
+ * One page at a time, and the canvas is released each iteration: a 40-page
+ * scan must never hold 40 rasters. Progress is reported per page because
+ * this is the slowest thing the extension does — about a second a dense
+ * page — and a card that sits silent through it reads as a hang.
+ */
+async function ocrPdfPages(doc, total, onProgress) {
+  const cap = FileScan.PDF_OCR_MAX_PAGES;
+  const read = Math.min(cap, total);
+  let text = "";
+  let confSum = 0;
+  let confN = 0;
+
+  for (let n = 1; n <= read; n++) {
+    if (onProgress) onProgress(n, read, "ocr");
+    let page = null;
+    let canvas = null;
+    try {
+      page = await doc.getPage(n);
+      const viewport = page.getViewport({ scale: FileScan.PDF_OCR_SCALE });
+      canvas = document.createElement("canvas");
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      // A scan's own paper is white; without this the canvas starts
+      // transparent and thresholding sees a dark page.
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvasContext: ctx, viewport, intent: "print" }).promise;
+      const blob = await new Promise((r) => canvas.toBlob(r, "image/png"));
+      const res = await ocrImage(blob, "image/png", null);
+      if (res && res.text) {
+        text += res.text + "\n\n";
+        confSum += res.confidence;
+        confN++;
+      }
+    } catch (err) {
+      // One page that will not render is not a document that cannot be read.
+      console.warn("[GuardAI] page " + n + " could not be rasterised:", err);
+    } finally {
+      if (page && typeof page.cleanup === "function") page.cleanup();
+      if (canvas) { canvas.width = 0; canvas.height = 0; }
+    }
+  }
+  return { text, confidence: confN ? confSum / confN : 0, pagesRead: read, pagesTotal: total };
 }
 
 /** DOCX via mammoth's raw-text extractor — headers, tables and footnotes included. */
@@ -262,6 +321,15 @@ function buildReply(id, cls, verdict, pages, suit) {
     pages: typeof pages === "number" && pages > 0 ? pages : 0,
   };
   if (verdict.reason) out.reason = String(verdict.reason);
+  // Page counts for a scanned PDF. Numbers only — how much was read, not
+  // what was on it — so the card can say "5 of 40" without describing any
+  // page. Rebuilt as Numbers rather than passed through, like everything
+  // else that crosses this boundary.
+  if (typeof verdict.pagesRead === "number") {
+    out.pagesRead = Number(verdict.pagesRead) || 0;
+    out.pagesTotal = Number(verdict.pagesTotal) || 0;
+    out.partial = verdict.partial === true;
+  }
   if (suit) out.suit = { offer: suit.offer === true, why: String(suit.why || "") };
   if (typeof verdict.limitMB === "number") out.limitMB = verdict.limitMB;
   if (verdict.summary) {
@@ -308,8 +376,8 @@ async function handle(req, port) {
   let error = null;
   try {
     if (cls.kind === FileScan.KIND.PDF) {
-      extracted = await extractPdf(bytes, (page, total) => {
-        port.postMessage({ id: String(req.id), progress: { page, total } });
+      extracted = await extractPdf(bytes, (page, total, stage) => {
+        port.postMessage({ id: String(req.id), progress: { page, total, stage } });
       });
     } else if (cls.kind === FileScan.KIND.DOCX) {
       extracted = await extractDocx(bytes);
@@ -328,7 +396,21 @@ async function handle(req, port) {
   } else {
     pages = extracted.pages || 0;
     const pre = FileScan.verdict({ kind: cls.kind, bytes: size, text: extracted.text });
-    if (pre.action === FileScan.ACTION.UNREADABLE) {
+    if (extracted.ocr) {
+      // A scanned PDF, read by OCR rather than by its (absent) text layer.
+      // It gets the IMAGE states, not the document ones: OCR reads what it
+      // can see, so "checked" is a promise this path cannot make — and if
+      // only the first pages were read, PDF_PARTIAL keeps it a decision
+      // instead of an auto-attach.
+      const findings = FileScan.scanLong(detector, extracted.text);
+      verdict = FileScan.scannedPdfVerdict({
+        summary: FileScan.summarise(findings),
+        confidence: extracted.ocr.confidence,
+        textChars: extracted.text.replace(/\s+/g, "").length,
+        pagesRead: extracted.ocr.pagesRead,
+        pagesTotal: extracted.ocr.pagesTotal,
+      });
+    } else if (pre.action === FileScan.ACTION.UNREADABLE) {
       verdict = pre; // nothing worth scanning came out
     } else {
       const findings = FileScan.scanLong(detector, extracted.text);

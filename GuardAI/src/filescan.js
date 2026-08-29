@@ -424,6 +424,12 @@
     IMG_FOUND: "img-found",           // OCR read text and the rules fired
     IMG_NOTHING: "img-nothing",       // OCR read text; nothing it read matched
     IMG_UNREADABLE: "img-unreadable", // OCR could not read this image properly
+
+    // A scanned PDF where only the first few pages were read. It is its own
+    // action because it must never take IMG_NOTHING's path: that one
+    // auto-attaches, and "nothing in the 5 pages we read of 40" is not the
+    // same fact as "nothing in this file". See the note on PDF_OCR_MAX_PAGES.
+    PDF_PARTIAL: "pdf-partial",
   };
 
   /** Files above this are refused rather than read into memory. */
@@ -863,8 +869,90 @@
     return { offer: true, why: "" };
   }
 
+  /* ------------------------------------------------------------------ *
+   * Scanned PDFs — rasterise, then OCR.
+   *
+   * A PDF with no text layer used to be reported "not checked", which is
+   * every emailed invoice, payslip and signed contract. The capability
+   * already existed for images; this is the same path with a renderer in
+   * front of it.
+   *
+   * Measured 2026-08-29 in a real browser, inside the extension's own parser
+   * page, with the vendored pdf.js and tesseract:
+   *
+   *   rasterising is FREE      4-26ms a page, under 2% of the cost
+   *   OCR is the whole cost    ~0.4s a sparse page, ~1.0s a dense one
+   *
+   * PDF_OCR_SCALE is 2 (144 dpi) because ACCURACY falls off a cliff below
+   * it, and confidence does not warn you. On a dense page at scale 1.5 the
+   * OCR came back at confidence 62 with plausible-looking text and NOT ONE
+   * of the planted BSB, account, TFN or Medicare survived — 0 of 4. At
+   * scale 2 it is 4 of 4. Above 2 costs 20-40% more for nothing. A sparse
+   * page reads fine at 1.5, which is exactly the trap: measuring one
+   * document would have set this too low.
+   *
+   * Page segmentation stays at tesseract's single-block default. The
+   * multi-window desktop screenshot needed auto layout because a desktop is
+   * several pages at once; a scanned page IS one uniform block. Re-checked
+   * on a DENSE rasterised page: PSM 6, 3 and 4 all found 4 of 4, so the
+   * union that helps screenshots buys nothing here and costs a second pass.
+   * ------------------------------------------------------------------ */
+
+  const PDF_OCR_SCALE = 2;
+
+  /**
+   * How many pages of a scanned PDF get read.
+   *
+   * At ~1s a dense page: 5 pages is about 5 seconds, which is less than the
+   * 14s the image path already spends on a dense retina screenshot. It
+   * covers what actually arrives by email — invoices and payslips are 1-2
+   * pages, contracts and onboarding packs 3-8. A cap of 2 was considered and
+   * is too tight: it would leave most real scanned contracts half-read, which
+   * makes the partial-read message routine rather than notable, and a message
+   * people see constantly is one they stop reading.
+   */
+  const PDF_OCR_MAX_PAGES = 5;
+
+  /**
+   * The verdict for a scanned PDF.
+   *
+   * ONE RULE ABOVE THE OTHERS: "nothing found" may only auto-attach when
+   * EVERY page was read. A partial read is always a decision, because
+   * "nothing in the first 5 pages of 40" reads as a clean bill of health if
+   * it is delivered the way a clean file is, and the bank details are on
+   * page 2 of the contract precisely often enough to matter.
+   *
+   * Findings still win: if the rules fired on the pages that were read, that
+   * is news whether or not the rest was read, and it blocks.
+   */
+  function scannedPdfVerdict(input) {
+    const it = input || {};
+    const pagesRead = Number(it.pagesRead) || 0;
+    const pagesTotal = Number(it.pagesTotal) || 0;
+    const partial = pagesTotal > pagesRead;
+    const base = ocrVerdict(it);
+
+    if (base.action === ACTION.IMG_FOUND) {
+      return Object.assign({}, base, { pagesRead, pagesTotal, partial });
+    }
+    // Could not read what we DID rasterise — unchanged, and already a
+    // decision. Saying "and there were 35 more" adds nothing to it.
+    if (base.action === ACTION.IMG_UNREADABLE) {
+      return Object.assign({}, base, { pagesRead, pagesTotal, partial });
+    }
+    if (partial) {
+      return {
+        action: ACTION.PDF_PARTIAL,
+        summary: base.summary,
+        pagesRead, pagesTotal, partial: true,
+      };
+    }
+    return Object.assign({}, base, { pagesRead, pagesTotal, partial: false });
+  }
+
   const api = {
     KIND, ACTION, MAX_BYTES, MIN_TEXT_CHARS, CHUNK, OVERLAP, BLOCKING_TYPES,
+    PDF_OCR_SCALE, PDF_OCR_MAX_PAGES, scannedPdfVerdict,
     TEXT_EXTS, KNOWN_UNSUPPORTED, IMAGE_EXTS,
     classify, chunk, scanLong, summarise, verdict, pageLookup, extensionOf,
     joinTextItems,

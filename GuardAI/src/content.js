@@ -5362,7 +5362,11 @@
           `.guardai-filecard__file[data-name="${CSS.escape(file.name)}"] .guardai-filecard__fmeta`
         );
         if (!row || !p) return;
-        if (p.total) row.textContent = `page ${p.page} of ${p.total}`;
+        // A scanned page takes about a second to read, against a few
+        // milliseconds to pull text out of a normal one — so it says which
+        // thing is happening, not just a number that appears to have stalled.
+        if (p.stage === "ocr" && p.total) row.textContent = `reading page ${p.page} of ${p.total}…`;
+        else if (p.total) row.textContent = `page ${p.page} of ${p.total}`;
         else if (p.stage === "loading") row.textContent = "starting the reader…";
         else if (typeof p.pct === "number") row.textContent = `reading the image… ${p.pct}%`;
       },
@@ -5496,6 +5500,24 @@
                 `stylised text, a photo of a screen — so look it over yourself before attaching.</p></li>`
               );
             }
+            /* A scan where only the first pages were read. This NEVER takes
+               the auto-attach path: "nothing in the 5 pages we read of 40"
+               is not "nothing in this file", and delivered the way a clean
+               file is delivered it would read as exactly that. The unread
+               pages are stated first, in numbers, before any reassurance. */
+            if (res.action === "pdf-partial") {
+              const read = Number(res.pagesRead) || 0;
+              const all = Number(res.pagesTotal) || 0;
+              const rest = Math.max(0, all - read);
+              return (
+                `<li class="guardai-filecard__file guardai-filecard__file--unchecked">${title}` +
+                `<p class="guardai-filecard__why">This is a scan, so GuardAI read it as pictures. ` +
+                `<strong>It read the first ${read} page${read === 1 ? "" : "s"} of ${all} and ` +
+                `did not read the other ${rest}.</strong> Nothing sensitive turned up in the pages it ` +
+                `did read — but that says nothing about the rest, so treat this as ` +
+                `<strong>not fully checked</strong>.</p></li>`
+              );
+            }
 
             // Only the two found-something verdicts render category rows.
             // Anything else that reaches this point is a verdict this build
@@ -5541,8 +5563,15 @@
             // "img-found" reaches here too: same category rows, same counts,
             // same vocabulary as a document — plus one line owning that an
             // OCR read is a partial read even when it found something.
+            // A scan that DID turn something up still has to say how much of
+            // it was read: findings on pages 1-5 of 40 are news, and the
+            // other 35 pages are a separate fact the user needs alongside.
             const partial = res.action === "img-found"
-              ? `<p class="guardai-filecard__why">Read from the image itself — GuardAI may not have read all of it.</p>`
+              ? (res.partial
+                  ? `<p class="guardai-filecard__why">Read from the scan itself — GuardAI read the ` +
+                    `first ${Number(res.pagesRead) || 0} page` + ((Number(res.pagesRead) || 0) === 1 ? "" : "s") +
+                    ` of ${Number(res.pagesTotal) || 0} and did not read the rest.</p>`
+                  : `<p class="guardai-filecard__why">Read from the image itself — GuardAI may not have read all of it.</p>`)
               : "";
 
             return (
