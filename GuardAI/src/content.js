@@ -5835,6 +5835,15 @@
     // load. The worker throttles it, so a tab storm costs one request.
     try { chrome.runtime.sendMessage({ type: "GUARDAI_POLICY_SYNC" }); } catch (_) {}
 
+    /* Tell the worker this browser used this tool today, so the admin
+       dashboard can show which tools the team actually uses. The worker sends
+       at most one of these per tool per day and drops it entirely on a
+       personal licence; nothing about the page, the message or the person goes
+       with it, only the site name it already reports on a catch. */
+    try {
+      chrome.runtime.sendMessage({ type: "GUARDAI_COMPANY_USAGE", site: location.hostname });
+    } catch (_) {}
+
     startObserving();
     updateLockedNotice();
     console.info(`[Guard4AI] active on ${CONFIG.name}. All processing is local. [build: 2026-07-09-upgrade-s1-s5]`);

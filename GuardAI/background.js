@@ -30,6 +30,7 @@ const STATS_KEY = "guardai_stats";
 const COMPANY_KEY = "guardai_company";
 const ENT_KEY = "guardai_entitlement";
 const POLICY_KEY = "guardai_policy";
+const USAGE_KEY = "guardai_usage_sent";
 
 /** How long a company seat may go without re-reading its employer's policy.
  *  An admin switching to Enforced must not have to wait a day, and must never
@@ -247,6 +248,7 @@ async function disconnectCompany() {
   // company takes the entitlement with it, so what is on the other side of
   // this is no product at all rather than an unenforced one.
   await chrome.storage.local.remove(POLICY_KEY);
+  await chrome.storage.local.remove(USAGE_KEY);
   await chrome.storage.local.remove(COMPANY_KEY);
   // Leaving your employer's dashboard also ends the entitlement it granted.
   const rec = await readEntitlement();
@@ -567,6 +569,57 @@ async function entitlementStatus() {
 }
 
 /**
+ * Say that this browser used a tool today. Once per tool per day, no more.
+ *
+ * The dashboard needs to show which AI tools a team uses, and events cannot
+ * answer that: an event is only written when something is CAUGHT, so a tool
+ * used all day with nothing sensitive in it is invisible. This is the smallest
+ * thing that fills the gap — a tool name, credited to a company.
+ *
+ * The dedupe is the privacy design, not an optimisation. Sending on every
+ * message would make this a per-seat activity log at message resolution;
+ * sending once a day makes the server's unit a browser-day, which is what the
+ * dashboard reports and all it can report. The marker is kept locally, so the
+ * server is never asked what this browser has already sent.
+ *
+ * Silent on every failure, like recordEvents: a dashboard counter must never
+ * be able to interrupt masking, which is the actual product.
+ */
+async function recordUsage(hostname) {
+  if (!isConfigured()) return;
+  const conn = await getConnection();
+  if (!conn) return;                      // individual licence: nothing is ever sent
+
+  const site = normaliseSite(hostname);
+  if (!site) return;
+
+  const today = new Date().toISOString().slice(0, 10);
+  const data = await chrome.storage.local.get(USAGE_KEY);
+  const sent = (data[USAGE_KEY] && typeof data[USAGE_KEY] === "object") ? data[USAGE_KEY] : {};
+  if (sent[site] === today) return;
+
+  try {
+    const res = await fetch(rpcUrl("record_usage"), {
+      method: "POST",
+      headers: rpcHeaders(),
+      body: JSON.stringify({ p_employee_id: conn.employeeId, p_site: site }),
+    });
+    if (!res.ok) return;                  // try again next time rather than lying
+  } catch (_) {
+    return;                               // offline: no marker, so no day is lost
+  }
+
+  // Only after the server has it. Marking first would mean one failed request
+  // silently costs a whole day of that tool's usage.
+  //
+  // Pruned to the sites seen today plus this one, so the record cannot grow
+  // past the number of tools somebody actually uses.
+  const next = { [site]: today };
+  for (const k of Object.keys(sent)) if (sent[k] === today) next[k] = today;
+  await chrome.storage.local.set({ [USAGE_KEY]: next });
+}
+
+/**
  * Report one masked item per category. Each body is rebuilt from scratch by
  * src/company.js, which returns null for anything it cannot verify; a null is
  * skipped rather than sent. Failures are silent by design: a company dashboard
@@ -605,6 +658,13 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       // Only ever reads these two fields off the message. Anything else the
       // sender attached is ignored rather than forwarded.
       recordEvents(msg.categories, msg.site);
+      return; // fire and forget
+
+    case "GUARDAI_COMPANY_USAGE":
+      // Sent once as a content script boots on a supported site. Reads one
+      // field, and recordUsage throws the rest away after looking up which
+      // company to credit.
+      recordUsage(msg.site);
       return; // fire and forget
 
     case "GUARDAI_COMPANY_STATUS":
@@ -649,7 +709,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       releaseSeat()
         .then(() => Promise.all([
           writeEntitlement(null),
-          chrome.storage.local.remove([COMPANY_KEY, POLICY_KEY]),
+          chrome.storage.local.remove([COMPANY_KEY, POLICY_KEY, USAGE_KEY]),
         ]))
         .then(() => sendResponse({ ok: true }));
       return true;
@@ -677,6 +737,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
  * where a fire-and-forget refresh would finish after the assertion.
  * ------------------------------------------------------------------ */
 export {
+  recordUsage,
   activateCode, refreshIfStale, migrateEntitlement,
   entitlementStatus, readEntitlement, writeEntitlement,
   disconnectCompany, releaseSeat,
