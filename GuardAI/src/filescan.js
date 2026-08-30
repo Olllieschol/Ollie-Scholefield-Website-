@@ -950,8 +950,39 @@
     return Object.assign({}, base, { pagesRead, pagesTotal, partial: false });
   }
 
+  /**
+   * Fold a scan result down to the two fields the company dashboard counts.
+   *
+   * Mirrors fileFacts() in src/company.js, which is the module the service
+   * worker imports; this copy exists because content.js is a classic script
+   * and cannot import it. Both are held to the same table by
+   * test/files.cjs, which runs them over every kind/action pair.
+   *
+   * Returns null for a verdict this build does not recognise, and the caller
+   * drops a null rather than counting it — the same fail-closed rule the file
+   * card uses for an unknown action.
+   */
+  const OUTCOME_OF = {
+    pass: "checked", "img-nothing": "checked",
+    block: "blocked", "img-found": "blocked",
+    unreadable: "unreadable", unsupported: "unreadable",
+    "too-large": "unreadable", "img-unreadable": "unreadable",
+    // A scanned PDF where the page cap stopped OCR partway. The pages that
+    // were read were read, but the file as a whole was not — and "we could
+    // not see all of this" is the fact the third column exists to report, so
+    // it counts as unreadable rather than checked.
+    "pdf-partial": "unreadable",
+  };
+  const KIND_OF = { pdf: "pdf", docx: "docx", text: "text", image: "image", unsupported: "other" };
+
+  function fileFacts(kind, action) {
+    const k = KIND_OF[String(kind)];
+    const o = OUTCOME_OF[String(action)];
+    return k && o ? { kind: k, outcome: o } : null;
+  }
+
   const api = {
-    KIND, ACTION, MAX_BYTES, MIN_TEXT_CHARS, CHUNK, OVERLAP, BLOCKING_TYPES,
+    KIND, ACTION, fileFacts, MAX_BYTES, MIN_TEXT_CHARS, CHUNK, OVERLAP, BLOCKING_TYPES,
     PDF_OCR_SCALE, PDF_OCR_MAX_PAGES, scannedPdfVerdict,
     TEXT_EXTS, KNOWN_UNSUPPORTED, IMAGE_EXTS,
     classify, chunk, scanLong, summarise, verdict, pageLookup, extensionOf,

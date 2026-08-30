@@ -46,6 +46,7 @@ const SUITES = [
   { name: "backend-contract.cjs (SQL error codes + safety clauses match the extension)", file: "test/backend-contract.cjs" },
   { name: "policy.cjs (company scanning policy: fail-closed, no mass-enforce on update, write-free poll)", file: "test/policy.cjs" },
   { name: "usage.cjs (AI tool usage: two fields, once a day, aggregate-only schema)", file: "test/usage.cjs" },
+  { name: "files.cjs (attachment counts: type + outcome only, every verdict mapped)", file: "test/files.cjs" },
   { name: "packaging.cjs (the store zip contains everything, and nothing else)", file: "test/packaging.cjs" },
 
   { name: "file-chunking.cjs (document-length scanning + the block/pass policy)", file: "test/file-chunking.cjs" },

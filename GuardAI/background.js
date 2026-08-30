@@ -16,7 +16,7 @@
  * ---------------------------------------------------------------------------
  */
 
-import { buildEventBody, normaliseSite } from "./src/company.js";
+import { buildEventBody, buildFileBody, normaliseSite } from "./src/company.js";
 import { SUPABASE_URL, SUPABASE_ANON_KEY, isConfigured } from "./src/company-config.js";
 import {
   decide, needsRefresh, describe, parseCode,
@@ -569,6 +569,49 @@ async function entitlementStatus() {
 }
 
 /**
+ * Report what happened to a batch of attachments: type and outcome, counted.
+ *
+ * The dashboard needs the denominator, not just the catches. Today the server
+ * hears about a file ONLY when something was blocked, arriving through
+ * record_event as a category indistinguishable from a typed message — so
+ * "how much of what we attach can Guard4AI actually read" was unanswerable,
+ * and that number is the honest limit of the product.
+ *
+ * One request per attach rather than one per file, because a batch is one
+ * user action and splitting it would say more about timing than the counts do.
+ * Every row is rebuilt from scratch by src/company.js, which returns null for
+ * anything it cannot verify; a null is dropped rather than sent.
+ *
+ * Silent on every failure, like recordEvents and recordUsage: a dashboard
+ * counter must never be able to interrupt the product.
+ */
+async function recordFiles(items) {
+  if (!isConfigured()) return;
+  if (!Array.isArray(items) || !items.length) return;
+
+  const conn = await getConnection();
+  if (!conn) return;                      // individual licence: nothing is sent
+
+  const rows = [];
+  for (const it of items) {
+    // Two named reads. Whatever else the sender attached is not looked at.
+    const body = buildFileBody(it && it.kind, it && it.outcome);
+    if (body) rows.push(body);
+  }
+  if (!rows.length) return;
+
+  try {
+    await fetch(rpcUrl("record_files"), {
+      method: "POST",
+      headers: rpcHeaders(),
+      body: JSON.stringify({ p_employee_id: conn.employeeId, p_items: rows }),
+    });
+  } catch (_) {
+    // Offline. The counts are a dashboard nicety; losing a batch is fine.
+  }
+}
+
+/**
  * Say that this browser used a tool today. Once per tool per day, no more.
  *
  * The dashboard needs to show which AI tools a team uses, and events cannot
@@ -660,6 +703,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       recordEvents(msg.categories, msg.site);
       return; // fire and forget
 
+    case "GUARDAI_COMPANY_FILES":
+      // Reads one field off the message, and src/company.js reads two named
+      // fields off each entry in it. Nothing else is forwarded.
+      recordFiles(msg.items);
+      return; // fire and forget
+
     case "GUARDAI_COMPANY_USAGE":
       // Sent once as a content script boots on a supported site. Reads one
       // field, and recordUsage throws the rest away after looking up which
@@ -737,7 +786,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
  * where a fire-and-forget refresh would finish after the assertion.
  * ------------------------------------------------------------------ */
 export {
-  recordUsage,
+  recordUsage, recordFiles,
   activateCode, refreshIfStale, migrateEntitlement,
   entitlementStatus, readEntitlement, writeEntitlement,
   disconnectCompany, releaseSeat,

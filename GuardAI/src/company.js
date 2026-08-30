@@ -79,6 +79,91 @@ export function buildEventBody(employeeId, category, site) {
   return body;
 }
 
+/* ------------------------------------------------------------------------- *
+ * Attachments.
+ *
+ * The dashboard needs to say how much of what a team attaches Guard4AI can
+ * actually see into. That means the server has to hear about files it did NOT
+ * block, which it never has: today a file reaches this boundary only through
+ * record_event, only when something was found, and arrives indistinguishable
+ * from a typed message.
+ *
+ * Two fields per file and nothing else. What is deliberately absent is the
+ * whole of the interesting part: no filename, no size, no page count, no
+ * extract, no findings, and no seat id in the row the server stores.
+ * ------------------------------------------------------------------------- */
+
+/** Broad file types, mirroring KIND in src/filescan.js. `other` is every
+ *  format we do not read — Excel, PowerPoint, archives, HEIC. */
+export const FILE_KINDS = new Set(["pdf", "docx", "text", "image", "other"]);
+
+/**
+ * The three states an admin is shown, folded down from the eight the file
+ * card distinguishes. The fold is deliberate: "we could not read this" is one
+ * fact to a person deciding whether to trust the tool, whether it happened
+ * because the format is unsupported, the PDF was a scan, the image was too
+ * blurry to OCR, or the file was over the size cap.
+ */
+export const FILE_OUTCOMES = new Set(["checked", "blocked", "unreadable"]);
+
+/** filescan.js action -> the outcome the dashboard counts. */
+const OUTCOME_OF = {
+  pass: "checked",
+  "img-nothing": "checked",
+  block: "blocked",
+  "img-found": "blocked",
+  unreadable: "unreadable",
+  unsupported: "unreadable",
+  "too-large": "unreadable",
+  "img-unreadable": "unreadable",
+  // A scanned PDF where the page cap stopped OCR partway: some pages read,
+  // the file as a whole not. "We could not see all of this" is exactly what
+  // the third column reports, so it is unreadable rather than checked.
+  "pdf-partial": "unreadable",
+};
+
+/** filescan.js kind -> the type the dashboard counts. */
+const KIND_OF = { pdf: "pdf", docx: "docx", text: "text", image: "image", unsupported: "other" };
+
+/**
+ * Fold one scan result down to { kind, outcome }, or null if either is
+ * unrecognised.
+ *
+ * An action this build does not know is null rather than a guess, and a null
+ * is dropped rather than counted — the same fail-closed rule the file card
+ * itself uses for an unknown verdict. A miscounted row is a lie on a
+ * dashboard an admin is using to judge coverage.
+ */
+export function fileFacts(kind, action) {
+  const k = KIND_OF[String(kind)];
+  const o = OUTCOME_OF[String(action)];
+  return k && o ? { kind: k, outcome: o } : null;
+}
+
+const FILE_KEYS = ["kind", "outcome"];
+
+/**
+ * Build the one attachment body the backend accepts, or null.
+ *
+ * Same construction as buildEventBody above, for the same reason: assembled
+ * one primitive at a time from named reads, so handing this a whole scan
+ * result cannot leak the filename or the extracted text through it, and the
+ * finished object is counted so that a third field added here refuses to send
+ * rather than shipping quietly.
+ */
+export function buildFileBody(kind, outcome) {
+  if (typeof kind !== "string" || !FILE_KINDS.has(kind)) return null;
+  if (typeof outcome !== "string" || !FILE_OUTCOMES.has(outcome)) return null;
+
+  const body = { kind, outcome };
+
+  const keys = Object.keys(body);
+  if (keys.length !== FILE_KEYS.length) return null;
+  for (const k of keys) if (!FILE_KEYS.includes(k)) return null;
+
+  return body;
+}
+
 /**
  * Normalise a hostname the way content.js resolves a platform, so that
  * app.chatgpt.com and chatgpt.com report as the same site. Anything not on the

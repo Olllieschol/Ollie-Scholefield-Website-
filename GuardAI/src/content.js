@@ -521,6 +521,24 @@
    * No-op unless the user has entered an invite code: the worker checks for a
    * connection before it sends anything.
    */
+  /** Attachment counts, built the same way: named reads only, so a scan
+   *  result cannot ride along attached to something that is sent. */
+  function reportCompanyFiles(items) {
+    if (!items || !items.length) return;
+    const rows = [];
+    for (const it of items) {
+      if (it && typeof it.kind === "string" && typeof it.outcome === "string") {
+        rows.push({ kind: it.kind, outcome: it.outcome });
+      }
+    }
+    if (!rows.length) return;
+    try {
+      chrome.runtime.sendMessage({ type: "GUARDAI_COMPANY_FILES", items: rows });
+    } catch (_) {
+      /* service worker asleep — non-fatal, the scan already happened */
+    }
+  }
+
   function reportCompanyCategories(items) {
     if (!items || !items.length) return;
     const categories = [];
@@ -5034,6 +5052,23 @@
     // reportCompanyCategories reads one field off each entry and builds a
     // fresh array of strings, so it is handed shapes, not findings.
     if (categories.size) reportCompanyCategories([...categories].map((type) => ({ type })));
+
+    /* And the denominator. Two fields per file — a broad type and one of three
+       outcomes — so an admin can see how much of what the team attaches
+       Guard4AI could actually read, not only what it stopped. The mapping from
+       the eight verdicts to the three states lives in src/company.js, which
+       returns null for a verdict it does not know rather than guessing; a null
+       is dropped rather than counted. Nothing about the file itself is read
+       here: not its name, its size, or a character of it. */
+    const FS = window.GuardAI && window.GuardAI.FileScan;
+    const items = [];
+    for (const { res } of results) {
+      const facts = FS && FS.fileFacts
+        ? FS.fileFacts(res && res.kind, res && res.action)
+        : null;
+      if (facts) items.push(facts);
+    }
+    if (items.length) reportCompanyFiles(items);
   }
 
   /* ---- "Send as masked text" ---- */
