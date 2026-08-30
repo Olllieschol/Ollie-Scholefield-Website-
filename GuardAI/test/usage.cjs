@@ -23,6 +23,12 @@
  * Plus the SQL side: the counter has no employee_id column at all, and the
  * dashboard's breakdown is suppressed in the database rather than in the page.
  *
+ * And the join between the two halves. The first version of this file drove
+ * recordUsage directly and read content.js as text, which proved each end and
+ * not the wire between them. A live company then showed an empty panel with
+ * both ends correct, so section 5 delivers the message the way Chrome does and
+ * follows it out to the request.
+ *
  * Exit code 1 on any failure.
  */
 const fs = require("fs");
@@ -68,9 +74,21 @@ async function loadWorker({ storage = {}, ok = true } = {}) {
   globalThis.chrome = env.chrome;
   env.calls = [];
   globalThis.fetch = async (url, opts) => {
-    env.calls.push({ url: String(url), body: JSON.parse(opts.body) });
-    if (!ok) return { ok: false, status: 500, json: async () => ({}) };
-    return { ok: true, status: 200, json: async () => ({}) };
+    const body = JSON.parse(opts.body);
+    // `ok` may be a function, so one worker can answer differently over its
+    // life. Section 5 needs exactly that: a server that 404s and then exists.
+    const verdict = typeof ok === "function" ? ok(String(url), body) : ok;
+    const status = typeof verdict === "number" ? verdict : (verdict ? 200 : 500);
+    env.calls.push({ url: String(url), body, status });
+    return { ok: status >= 200 && status < 300, status, json: async () => ({}) };
+  };
+  // Deliver a message the way Chrome does, rather than calling the handler.
+  // Returns whatever the listener returned, which is itself a property worth
+  // asserting: a truthy return holds the message port open.
+  env.send = (msg) => {
+    let ret;
+    for (const f of env.listeners.message) ret = f(msg, { id: "test-sender" }, () => {});
+    return ret;
   };
   env.mod = await import("../background.js?useq=" + (++seq));
   return env;
@@ -186,7 +204,83 @@ const usageCalls = (env) => env.calls.filter((c) => c.url.includes("record_usage
       "the usage message carries no findings");
   }
 
-  console.log("\n--- 5. the SQL side ---");
+  console.log("\n--- 5. and the worker acts on it: boot() to POST, end to end ---");
+  // Everything above proves the two halves separately: recordUsage is driven
+  // directly, and content.js is read as text to confirm it sends. Neither
+  // proves they are joined. They were not exercised together until the panel
+  // came up empty on a live company with both halves demonstrably correct —
+  // the answer was that nothing had booted a content script since the function
+  // was deployed, and no test could have told us that, because no test ever
+  // delivered the message. These do.
+  {
+    const env = await loadWorker({ storage: { ...connected } });
+    const ret = env.send({ type: "GUARDAI_COMPANY_USAGE", site: "chatgpt.com" });
+    await drain();
+    const c = usageCalls(env)[0];
+    check(usageCalls(env).length === 1, "one message from boot() becomes one record_usage POST",
+      String(usageCalls(env).length));
+    check(Boolean(c) && c.body.p_site === "chatgpt.com" && c.body.p_employee_id === SEAT,
+      "carrying the seat and the tool, as recordUsage builds it");
+    check(ret === undefined,
+      "and the listener returns nothing: a usage ping never holds the message port open");
+    check(Boolean(env.storage.guardai_usage_sent),
+      "the day is marked only once the server has it");
+  }
+  {
+    // The handler reads ONE field off the message. A content script that had
+    // been tampered with cannot widen the body by attaching more to it.
+    const env = await loadWorker({ storage: { ...connected } });
+    env.send({
+      type: "GUARDAI_COMPANY_USAGE", site: "chatgpt.com",
+      categories: ["TFN"], text: "my tax file number is", employeeId: "someone-else",
+    });
+    await drain();
+    const c = usageCalls(env)[0];
+    check(JSON.stringify(Object.keys(c.body).sort()) === JSON.stringify(["p_employee_id", "p_site"]),
+      "extra fields on the message are ignored, not forwarded", JSON.stringify(c.body));
+    check(c.body.p_employee_id === SEAT, "and the seat comes from storage, never from the message");
+  }
+  {
+    // The failure the deploy actually produced: the extension shipped before
+    // the SQL landed. Every ping 404s. The day must survive that, or a single
+    // badly timed release costs a day of every tool's usage.
+    let deployed = false;
+    const env = await loadWorker({
+      storage: { ...connected },
+      ok: () => (deployed ? 200 : 404),
+    });
+
+    env.send({ type: "GUARDAI_COMPANY_USAGE", site: "chatgpt.com" });
+    await drain();
+    check(usageCalls(env).length === 1 && usageCalls(env)[0].status === 404,
+      "a ping sent before the function exists gets a 404");
+    check(env.storage.guardai_usage_sent === undefined,
+      "and writes no marker, so it has not spent the day");
+
+    deployed = true;                       // the migration is applied
+    env.send({ type: "GUARDAI_COMPANY_USAGE", site: "chatgpt.com" });
+    await drain();
+    check(usageCalls(env).length === 2, "the very next page load tries again");
+    check(usageCalls(env)[1].status === 200 && Boolean(env.storage.guardai_usage_sent),
+      "and lands, with no operator intervention");
+  }
+  {
+    const env = await loadWorker({ storage: { ...connected } });
+    env.send({ type: "GUARDAI_COMPANY_USAGE", site: "chatgpt.com" });
+    await drain();
+    env.send({ type: "GUARDAI_COMPANY_USAGE", site: "chatgpt.com" });
+    await drain();
+    check(usageCalls(env).length === 1,
+      "a second boot the same day sends nothing, over the wire and not just in the function");
+  }
+  {
+    const env = await loadWorker({ storage: {} });
+    env.send({ type: "GUARDAI_COMPANY_USAGE", site: "chatgpt.com" });
+    await drain();
+    check(env.calls.length === 0, "an unconnected browser sends nothing when the message arrives");
+  }
+
+  console.log("\n--- 6. the SQL side ---");
   const SQL = path.join(SITE, "supabase", "usage-delta.sql");
   if (!fs.existsSync(SQL)) {
     console.log("skip  usage-delta.sql not found beside this checkout");
@@ -226,7 +320,7 @@ const usageCalls = (env) => env.calls.filter((c) => c.url.includes("record_usage
       "the table itself is closed to anon and RLS is on");
   }
 
-  console.log("\n--- 6. the dashboard's tool list is generated, not a second copy ---");
+  console.log("\n--- 7. the dashboard's tool list is generated, not a second copy ---");
   {
     const gen = path.join(SITE, "scripts", "gen-sites.mjs");
     if (!fs.existsSync(gen)) {
