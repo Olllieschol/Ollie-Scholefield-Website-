@@ -64,7 +64,16 @@ changed twice since it was captured.
 3. Retake any screenshot showing a changed UI or the old name.
 4. Confirm `hello@guard4ai.com` receives mail — a privacy policy with a dead
    contact address is its own rejection.
-5. After the submission is approved, revoke that submission's key by key.
+5. **Re-read "Where your data goes" against the code that actually sends.**
+   Twice now this listing has claimed less traffic than the extension makes:
+   once when the policy said "never makes a single network request" while the
+   manifest carried supabase, and again on 2026-08-31 when `record_usage` and
+   `record_files` landed while the copy still said "the category and the
+   count … never the page you were on". Site reporting made that sentence
+   false. On a privacy product an under-claim is not a safe error — it is the
+   disclosure being wrong. Anything new that calls `rpcUrl(...)` changes this
+   section and the Dashboard's Privacy practices tab together.
+6. After the submission is approved, revoke that submission's key by key.
 
 ---
 
@@ -173,7 +182,7 @@ select l.key, count(a.token) as activations, max(a.last_seen_at) as last_used
 |---|---|
 | `storage` | Stores the user's settings, the local real↔fake mapping table, and the licence record. All `chrome.storage.local`; none of it is synced or transmitted. |
 | Host access to the AI chat sites listed in the manifest | The content script reads the message box on those sites and scans it locally before the user sends. Access is requested only for sites the extension actively protects. |
-| `https://*.supabase.co/*` | Licence validation, and — only for workplace accounts, only after an invite code is entered — an anonymous count of how many items of each category were masked. Never the values, never the message text, never a URL. |
+| `https://*.supabase.co/*` | Licence validation, and — only for workplace accounts, only after an invite code is entered — three anonymous tallies: how many items of each category were masked; which supported AI site the browser used, once per site per day (`normaliseSite()` maps the hostname onto a fixed list, so it is a site name and never a page or URL); and the type and outcome of a checked attachment (`buildFileBody()` allowlists the payload to `{kind, outcome}`, both from fixed sets). Never the values, never the message text, never a filename, never a URL. Individual licences send nothing but the licence check — `recordUsage()` returns early without a company connection. |
 
 No remote code is executed. Everything runs from the package; the optional NLP
 model, if bundled, is loaded from inside the extension with remote fetching
@@ -457,9 +466,12 @@ libraries that ship with the extension — nothing is uploaded and nothing is
 fetched — and the bytes and extracted text never leave that frame.
 
 The extension makes one kind of network request: a licence check. On a workplace
-plan it also sends an anonymous tally so an admin can see the tool is working —
-the category and the count, never the value, the filename, the message, or the
-page you were on. Full detail: https://guard4ai.com/privacy
+plan it also sends anonymous tallies so an admin can see the tool is working:
+how many items of each category were masked, which of the supported AI sites
+this browser used (the site name only, once a day, never a page or a web
+address), and the type and outcome of attachments that were checked. Never the
+value, never the filename, never the message. Full detail:
+https://guard4ai.com/privacy
 
 A LICENCE IS REQUIRED
 
