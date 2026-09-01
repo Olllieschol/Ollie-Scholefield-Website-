@@ -2271,13 +2271,31 @@ function ClassView({ currentClass, students, incomingStudents = [], weekIdx, set
   // start date fell after the currently-viewed week, even though they belong in the pipeline list
   // regardless of which week is selected. Once their effective status for the viewed week becomes
   // 'enrolled' (see above), they move to `active` instead and are excluded here.
-  // Auto-order the pipeline list by how close each student is to enrolling: Wait list first,
-  // then Placement fee (already paid to hold a spot), then Invoice sent, then Quote sent, then
-  // bare Inquiries.
-  const PIPELINE_ORDER = { enrolled_pending: 0, wait_list: 1, placement_fee: 2, invoice_sent: 3, quote_sent: 4, inquiry: 5 };
+  // Order the pipeline list by how close each child actually is to starting — soonest Start date
+  // at the top, furthest away at the bottom — rather than by which pipeline stage they're at, so
+  // staff read it as a "who's coming next" queue. Anyone with no usable Start date (blank, or
+  // free text like "tbc"/"August 10th" that never parsed into a real date) sorts to the bottom,
+  // since there's no way to place them in the queue until a real date is entered.
+  // This ordering applies to the Waitlist/Pipeline section only — the Active list is untouched.
+  // Parsed exactly the way shortDate() renders these cells, so the queue order always matches the
+  // dates staff actually see — imported values are often free text ("10 August 2026", "1.08.2026")
+  // rather than real ISO dates, and a strict ISO check would wrongly dump those at the bottom.
+  const startQueueKey = (s) => {
+    const raw = s.originalStart;
+    if (!raw || raw === 'tbc') return null;
+    let dt = new Date(raw);
+    if (isNaN(dt)) dt = new Date(normalizeDobToIso(raw));
+    return isNaN(dt) ? null : dt.getTime();
+  };
   const waitlist = filterByStatus(students)
     .filter(s => ['inquiry','quote_sent','invoice_sent','wait_list','placement_fee','enrolled_pending'].includes(s.status) && effectiveStatusForWeek(s) !== 'enrolled')
-    .sort((a, b) => PIPELINE_ORDER[a.status] - PIPELINE_ORDER[b.status] || compareByName(a, b));
+    .sort((a, b) => {
+      const ak = startQueueKey(a), bk = startQueueKey(b);
+      if (ak && bk) return ak - bk || compareByName(a, b);
+      if (ak) return -1;
+      if (bk) return 1;
+      return compareByName(a, b);
+    });
   const left = filteredStudents.filter(s => ['left','cancelled'].includes(s.status)).sort(compareByName);
 
   const enrolledCount = students.filter(s => s.status === 'enrolled' && isStudentActive(s)).length;
@@ -2522,7 +2540,7 @@ function SpreadsheetWithTopScroll({ active, incoming = [], waitlist, left, total
                 <th className="text-left font-medium px-3 py-2.5">Status</th>
                 <th className="text-left font-medium px-3 py-2.5">DOB</th>
                 <th className="text-left font-medium px-3 py-2.5">Age</th>
-                <th className="text-left font-medium px-3 py-2.5">Started</th>
+                <th className="text-left font-medium px-3 py-2.5">Start date</th>
                 <th className="text-left font-medium px-3 py-2.5">Returning</th>
                 <th className="text-left font-medium px-3 py-2.5">Last day</th>
                 <th className="text-left font-medium px-3 py-2.5">Length</th>
@@ -4814,7 +4832,7 @@ function ArchiveView({ students, onSelectStudent, onRestore, onPermanentDelete }
                   <th className="text-left font-medium px-4 py-2.5">Child</th>
                   <th className="text-left font-medium px-3 py-2.5">Last class</th>
                   <th className="text-left font-medium px-3 py-2.5">Parents</th>
-                  <th className="text-left font-medium px-3 py-2.5">Started</th>
+                  <th className="text-left font-medium px-3 py-2.5">Start date</th>
                   <th className="text-left font-medium px-3 py-2.5">Last day</th>
                   <th className="text-left font-medium px-3 py-2.5">Reason</th>
                   <th className="text-right font-medium px-3 py-2.5">Actions</th>
@@ -4918,7 +4936,7 @@ function AllStudentsView({ students, onSelectStudent }) {
               <th className="text-left font-medium px-3 py-2.5">Status</th>
               <th className="text-left font-medium px-3 py-2.5">Age</th>
               <th className="text-left font-medium px-3 py-2.5">Parents</th>
-              <th className="text-left font-medium px-3 py-2.5">Started</th>
+              <th className="text-left font-medium px-3 py-2.5">Start date</th>
               <th className="text-center font-medium px-3 py-2.5">HS</th>
               <th className="w-10"></th>
             </tr>
