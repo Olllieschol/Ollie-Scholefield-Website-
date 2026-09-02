@@ -247,6 +247,59 @@ function pageEnv({ masking = true, badgeMode, extra = {} } = {}) {
       plain ? window.getComputedStyle(plain).display : "absent");
   }
 
+  /* ---- 3c. Recent swaps uses the same colours as the in-page panel ---- */
+  console.log("\n--- recent swaps: one colour language across both surfaces ---");
+  {
+    /**
+     * The convention is documented in styles.css and is NOT the obvious one:
+     * colour follows the VALUE, not its position. A real value is always
+     * green, a fake always red, so the same mapping reads the same in the
+     * popup and on the page. The popup list is always real -> fake, so the
+     * struck-out real is green and the fake beside it red — identical to a
+     * MASKED row in the panel.
+     *
+     * Pinned by comparing the two stylesheets rather than by hard-coding
+     * hexes here, because the failure worth catching is the two surfaces
+     * DRIFTING, and a copy of the value in a third file would drift too.
+     */
+    const popupCss = read("popup.html");
+    const pageCss = read("styles.css");
+    const tok = (css, name, scope) => {
+      const block = scope ? css.slice(css.indexOf(scope)) : css;
+      const m = block.match(new RegExp(name + "\\s*:\\s*(#[0-9a-fA-F]{3,8})"));
+      return m && m[1].toLowerCase();
+    };
+    const panelDarkReal = (pageCss.match(/\.guardai-panel__row--mask \.guardai-panel__from \{ color: (#[0-9a-f]{6})/i) || [])[1];
+    const panelDarkFake = (pageCss.match(/\.guardai-panel__row--mask \.guardai-panel__to \{ color: (#[0-9a-f]{6})/i) || [])[1];
+    const panelLightReal = (pageCss.match(/guardai-light \.guardai-panel__row--mask \.guardai-panel__from \{ color: (#[0-9a-f]{6})/i) || [])[1];
+    const panelLightFake = (pageCss.match(/guardai-light \.guardai-panel__row--mask \.guardai-panel__to \{ color: (#[0-9a-f]{6})/i) || [])[1];
+    check(!!(panelDarkReal && panelDarkFake && panelLightReal && panelLightFake),
+      "the in-page panel's swap colours are readable from styles.css",
+      `${panelDarkReal}/${panelDarkFake} ${panelLightReal}/${panelLightFake}`);
+
+    const popDarkReal = tok(popupCss, "--swap-real");
+    const popDarkFake = tok(popupCss, "--swap-fake");
+    const popLightReal = tok(popupCss, "--swap-real", "body.gd-light");
+    const popLightFake = tok(popupCss, "--swap-fake", "body.gd-light");
+    check(popDarkReal === (panelDarkReal || "").toLowerCase(),
+      "dark: a REAL value is the same green in the popup as on the page",
+      `${popDarkReal} vs ${panelDarkReal}`);
+    check(popDarkFake === (panelDarkFake || "").toLowerCase(),
+      "dark: a FAKE value is the same red", `${popDarkFake} vs ${panelDarkFake}`);
+    check(popLightReal === (panelLightReal || "").toLowerCase(),
+      "light: the same green", `${popLightReal} vs ${panelLightReal}`);
+    check(popLightFake === (panelLightFake || "").toLowerCase(),
+      "light: the same red", `${popLightFake} vs ${panelLightFake}`);
+
+    // And that the rows actually USE the tokens — matching values in :root
+    // proves nothing if the rules still point at --text-dim.
+    check(/\.gd-swap__real \{ color: var\(--swap-real\)/.test(popupCss) &&
+          /text-decoration: line-through/.test(popupCss),
+      "the real value is painted with the token and struck through");
+    check(/\.gd-swap__fake \{ color: var\(--swap-fake\)/.test(popupCss),
+      "and the fake with the other token");
+  }
+
   /* ---- 4. The badge on the page ---- */
   console.log("\n--- floating badge: on the page ---");
   {

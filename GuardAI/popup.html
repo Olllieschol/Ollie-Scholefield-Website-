@@ -32,6 +32,15 @@
   --track:     #2e2e2e;   /* score-ring / progress track */
   --danger:    #f0564b;   /* destructive + danger */
   --good:      #2ea043;   /* privacy score in a healthy state */
+  /* Swap colours, shared with the in-page panel (styles.css). The rule there
+   * is that colour follows the VALUE, not its position: a real value is
+   * always green, a fake always red, so the eye learns one mapping across
+   * both surfaces. This list is always real -> fake, so the struck-out real
+   * is green and the fake beside it is red — the same as a "MASKED" row in
+   * the panel. Same hexes as styles.css, per theme, or the two surfaces
+   * would drift apart the first time either is touched. */
+  --swap-real: #3fb950;
+  --swap-fake: #ff6b6b;
   --radius:    12px;
   --slider-off: #333333;
 }
@@ -48,6 +57,8 @@ body.gd-light {
   --on-accent: #ffffff;
   --track:     #e2e2e6;
   --slider-off: #cbcbd2;
+  --swap-real: #16a34a;
+  --swap-fake: #dc2626;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -292,9 +303,9 @@ body {
 /* real -> fake is shown with weight/strike, not colour: the real value is
  * struck-through and dimmed (it's what you DON'T want sent), the fake is
  * bright and bold (the safe stand-in). Semantic without any colour. */
-.gd-swap__real { color: var(--text-dim); text-decoration: line-through; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gd-swap__real { color: var(--swap-real); text-decoration: line-through; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gd-swap__arrow { color: var(--text-dim); flex: none; }
-.gd-swap__fake { color: var(--text); font-weight: 700; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gd-swap__fake { color: var(--swap-fake); font-weight: 700; max-width: 42%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gd-swap__type { margin-left: auto; font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px; flex: none; }
 /* subtle highlight when a swap row is freshly added */
 .gd-swap.gd-swap--new { animation: gd-swap-in 0.6s ease; }
