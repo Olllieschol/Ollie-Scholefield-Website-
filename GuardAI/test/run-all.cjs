@@ -81,6 +81,7 @@ const SUITES = [
   { name: "panel-no-autoopen.cjs (panel never pops open on its own)", file: "test/panel-no-autoopen.cjs" },
   { name: "panel-autopanel-setting.cjs (opt-in panel auto-open after Mask & Send)", file: "test/panel-autopanel-setting.cjs" },
   { name: "silent-mode.cjs (silent auto-mask + safe fallback)", file: "test/silent-mode.cjs" },
+  { name: "automatic-and-badge.cjs (Automatic protection default, badge modes, uploads always confirmed)", file: "test/automatic-and-badge.cjs" },
 ];
 
 let anyFail = false;

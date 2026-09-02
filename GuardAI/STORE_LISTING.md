@@ -294,19 +294,23 @@ outcomes and they read differently on purpose:
 | Outcome | What happens | What it says |
 |---|---|---|
 | Found something | **Stops and waits** | Same category rows and counts as a document, plus "Guard4AI may not have read all of it" |
-| Read it, found nothing | **Attaches, with a notice** | "Attached — nothing found, but have a look": it read what it could see, can't read everything in an image, so this **isn't a clean bill of health** and the judgement is still yours |
+| Read it, found nothing | **Stops and waits** | "Nothing found, your call": it read what it could see, cannot read everything a person can, so look it over yourself |
 | Could not read it | **Stops and waits** | "Guard4AI could not read this image properly" — treat as unchecked |
 
-The middle row was a hard stop until 2026-08-28 and is now a notice. The
-reasoning that made it a stop is still true, and the wording still says it —
-but a click on every clean screenshot, while a clean *document* attaches on
-its own, teaches people to dismiss the card without reading, which is exactly
-what the two outcomes that carry news depend on. The honesty lives in the
-words rather than in the friction.
+The middle row went hard stop -> notice (2026-08-28) -> hard stop again
+(2026-09-02), and the round trip is worth recording because both moves were
+right about different things. The notice existed because a click on every
+clean screenshot, while a clean *document* attached itself, taught people to
+dismiss the card without reading — which is what the two outcomes that carry
+news depend on. What settled it was removing the inconsistency instead of the
+friction: **every upload waits now, documents included**, so there is no
+asymmetry left to teach the wrong habit. And a file is the one thing that
+cannot be partly masked — text is swapped word by word, a file goes or it
+does not — so the only decision it offers belongs to the user, every time.
 
-**Always stop on images** (Settings → Modes, default off) restores the hard
-stop for teams that want one. It changes only that middle row: an image with
-findings, or one Guard4AI could not read, stops either way.
+**Always stop on images** is therefore inert. It is left in Settings, marked
+as no longer changing anything, rather than removed: a switch that vanishes
+leaves whoever turned it on wondering what became of it.
 
 PNG, JPEG and WebP. There is no "send the text instead" option for an image: a
 screenshot's meaning is its layout, so there is nothing faithful to paste, and
@@ -428,10 +432,18 @@ without being read.
 
 **Screenshots and images.** PNG, JPEG and WebP are read with text recognition,
 up to 24 megapixels. Text recognition reads what it can see, which is less than
-you can, so an image never gets a clean bill of health: if Guard4AI finds
-something it stops, if it reads an image and finds nothing it attaches it with a
-notice saying exactly that, and if it cannot read the image properly it stops
-and says so.
+you can, so an image never gets a clean bill of health: whether it finds
+something, finds nothing, or cannot read the picture at all, it tells you which
+of the three happened and lets you decide.
+
+**Every attachment is a decision.** Messages can be sent automatically with
+nothing to click — that is the point of Automatic protection. Files are the
+exception, in both modes and whatever your settings say. A message can be
+masked word by word; a file cannot be partly masked, so the only choice it
+offers is whether it goes at all, and that one is always yours. You get the
+filename, what was found inside it if scanning is on, and Send anyway or
+Cancel. If Guard4AI cannot look inside that kind of file, the card says so
+rather than letting it through quietly.
 
 **Scanned PDFs.** A PDF with no text layer — an emailed invoice, a payslip, a
 signed contract — is rasterised and read with the same text recognition, using

@@ -119,7 +119,10 @@ function makeEnv({ profile }) {
   window.DataTransfer = function () { throw new Error("no DataTransfer"); };
   window.ClipboardEvent = window.Event;
 
-  const storage = LICENSED();
+  // Automatic protection defaults ON; this file exercises the REVIEW flow,
+  // which is what OFF means. Seeded so the default can move again
+  // without silently turning these scenarios into no-ops.
+  const storage = Object.assign({ guardai_masking_enabled: false }, LICENSED());
   window.chrome = {
     storage: { local: {
       get: (k) => Promise.resolve((Array.isArray(k) ? k : [k]).reduce((o, kk) => { if (kk in storage) o[kk] = storage[kk]; return o; }, {})),

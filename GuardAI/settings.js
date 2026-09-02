@@ -100,18 +100,18 @@
             "information sits beside it. Turn this on to also catch names standing on their " +
             "own. It will flag more false positives, because words like Sydney, April and " +
             "Grace are both names and ordinary words.",
-      note: "With Masking mode on, an uncertain match still shows the warning card instead " +
+      note: "With Automatic protection on, an uncertain match still shows the warning card instead " +
             "of being swapped silently, so a false positive can't quietly rewrite your message.",
     },
     {
       key: "guardai_image_hard_stop",
       title: "Always stop on images",
-      desc: "Off by default. When Guard4AI reads a screenshot and finds nothing, it attaches " +
-            "the image and tells you what it did, rather than making you click. Turn this on " +
-            "and every image waits for you instead.",
-      note: "This only changes the case where nothing was found. An image with sensitive " +
-            "details in it, or one Guard4AI could not read properly, always stops and waits — " +
-            "with or without this setting.",
+      desc: "No longer changes anything — every upload now waits for you, so this is " +
+            "already how images behave whether it is on or off.",
+      note: "Kept so that turning it on in the past does not break anything. Uploads " +
+            "became a decision in every case because a file cannot be partly masked: " +
+            "the only choice available for one is whether it goes at all.",
+      dead: true,
     },
   ];
 

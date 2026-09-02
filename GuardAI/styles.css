@@ -779,6 +779,13 @@
   transition: filter 0.15s;
 }
 .guardai-reopen:hover { filter: brightness(1.12); }
+/* "When masking": the badge appears on a swap and fades out again. Opacity
+ * only — it keeps its box while fading so the page never reflows under the
+ * pointer, and content.js sets display:none once the transition is done. */
+.guardai-reopen--fading { opacity: 0; transition: opacity 0.45s ease; }
+@media (prefers-reduced-motion: reduce) {
+  .guardai-reopen--fading { transition: opacity 0.01s !important; }
+}
 .guardai-reopen__shield { font-size: 18px; }
 .guardai-reopen__count {
   background: #f4f4f5;
@@ -1327,6 +1334,16 @@ html.guardai-light .guardai-locked__close:hover { color: #0f172a; }
   text-align: center;
 }
 .guardai-filecard__where { color: #8a8a8a; font-size: 11px; }
+
+.guardai-filecard__mute {
+  display: flex; align-items: center; gap: 8px;
+  margin: 14px 0 2px; cursor: pointer;
+  font-size: 13px; color: #d4d4d8;
+}
+.guardai-filecard__mute input { width: 15px; height: 15px; accent-color: #6b6b70; cursor: pointer; flex: none; }
+.guardai-filecard__mutewhy { margin: 0 0 4px 23px; font-size: 11.5px; color: #8a8a90; }
+html.guardai-light .guardai-filecard__mute { color: #3a3a40; }
+html.guardai-light .guardai-filecard__mutewhy { color: #6a6a70; }
 
 .guardai-filecard__btns {
   display: flex;

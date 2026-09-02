@@ -59,7 +59,10 @@ const DEFAULT_STATS = () => ({
 
 const DEFAULT_SETTINGS = {
   guardai_enabled: true,
-  guardai_masking_enabled: false,
+  // Automatic protection, ON by default: the product's job is to protect
+  // without being asked. Read as `!== false` everywhere, so a missing key
+  // is already on; written here so storage shows what the switch is.
+  guardai_masking_enabled: true,
   // Attachment scanning, on by default. Both are read as `!== false`
   // everywhere, so a missing key is already "on" — these are written only so
   // that a person looking at storage can see what the switches are.

@@ -132,6 +132,29 @@ body {
 .gd-switch input:checked + .gd-slider::before { transform: translateX(18px); background: var(--on-accent); }
 .gd-switch input:focus-visible + .gd-slider { outline: 2px solid var(--text); outline-offset: 2px; }
 
+/* ---- Segmented control ----
+ * Three mutually exclusive states where a switch only offers two. Built from
+ * buttons with role="radio" rather than <input type=radio> so the whole
+ * control can be styled without fighting native rendering; popup.js keeps
+ * aria-checked in step with the stored value, which is what a screen reader
+ * and the tests both read. */
+.gd-row--stack { display: block; }
+.gd-seg-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.gd-seg {
+  display: inline-flex; flex: none; padding: 2px; gap: 2px;
+  background: var(--slider-off); border-radius: 8px;
+}
+.gd-seg__btn {
+  font: inherit; font-size: 11px; font-weight: 600; line-height: 1;
+  padding: 6px 9px; border: 0; border-radius: 6px; cursor: pointer;
+  background: transparent; color: var(--text-dim); white-space: nowrap;
+  transition: background .15s, color .15s;
+}
+.gd-seg__btn:hover { color: var(--text); }
+.gd-seg__btn[aria-checked="true"] { background: var(--good); color: var(--on-accent); }
+.gd-seg__btn:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.gd-row--stack .gd-row__desc { margin-top: 8px; }
+
 /* ---- Score card ---- */
 /* Company connection banner. Shown only when an invite code has been entered,
    because the whole point is that the user can see, at a glance and without
@@ -384,13 +407,16 @@ body.gd-disabled .gd-platforms { opacity: 0.45; pointer-events: none; }
       <p class="gd-score-hint" id="score-hint">You're protected. Nothing risky sent yet.</p>
     </section>
 
-    <!-- Masking mode (silent auto-mask) -->
+    <!-- Automatic protection (silent auto-mask).
+       * Named for what the OFF position does, not the ON one. "Masking mode"
+       * read as though masking stopped when it was off; off still masks, it
+       * just asks first. -->
     <section class="gd-row">
       <div>
-        <span class="gd-row__title">Masking mode</span>
-        <span class="gd-row__desc">When on: sensitive data is replaced and sent automatically, no interruptions.<br />When off: you'll see a warning card before anything sends.</span>
+        <span class="gd-row__title">Automatic protection</span>
+        <span class="gd-row__desc">On: sensitive data is swapped and sent straight away. No interruptions.<br />Off: you'll see a warning card before anything sends.</span>
       </div>
-      <label class="gd-switch" title="Auto-mask and send silently, with no warning card">
+      <label class="gd-switch" title="Swap and send automatically, with no warning card">
         <input type="checkbox" id="toggle-masking" />
         <span class="gd-slider"></span>
       </label>
@@ -399,13 +425,28 @@ body.gd-disabled .gd-platforms { opacity: 0.45; pointer-events: none; }
     <!-- Auto-open detail panel after masking -->
     <section class="gd-row">
       <div>
-        <span class="gd-row__title">Detail panel</span>
-        <span class="gd-row__desc">When on: the full breakdown pops up every time something's masked.<br />When off: just the badge updates. Click it anytime to see details.</span>
+        <span class="gd-row__title">Show details every time</span>
+        <span class="gd-row__desc">On: the full breakdown opens whenever something's masked.<br />Off: the badge just updates quietly. Click it any time to see what changed.</span>
       </div>
-      <label class="gd-switch" title="Automatically open the panel after masking">
+      <label class="gd-switch" title="Open the panel automatically after masking">
         <input type="checkbox" id="toggle-autopanel" />
         <span class="gd-slider"></span>
       </label>
+    </section>
+
+    <!-- Floating badge visibility. Three states rather than a toggle: "only
+       * when something happened" is the useful default, and it is neither
+       * always-on nor off. -->
+    <section class="gd-row gd-row--stack">
+      <div class="gd-seg-head">
+        <span class="gd-row__title">Floating badge</span>
+        <div class="gd-seg" role="radiogroup" aria-label="Floating badge">
+          <button type="button" class="gd-seg__btn" role="radio" data-badge="always" aria-checked="false">Always</button>
+          <button type="button" class="gd-seg__btn" role="radio" data-badge="masking" aria-checked="true">When masking</button>
+          <button type="button" class="gd-seg__btn" role="radio" data-badge="off" aria-checked="false">Off</button>
+        </div>
+      </div>
+      <span class="gd-row__desc" id="badge-desc">Everything the badge shows is also in this panel under Recent swaps.</span>
     </section>
 
     <!-- Session stats -->

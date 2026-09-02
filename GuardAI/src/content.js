@@ -214,6 +214,8 @@
     userDisabledCategories: [], // what the user themselves chose, kept apart
     // so that lifting a lock restores their choice instead of a guess at it.
     // Empty by default — everything on.
+    // Floating badge visibility: "always" | "masking" | "off".
+    badgeMode: "masking",
     imageHardStop: false, // "Always stop on images" — opt-in, default OFF.
     // OFF means an image OCR read and found nothing in is attached with a
     // notice rather than a decision. It never affects the other two image
@@ -290,6 +292,13 @@
   /** The user's own choice, unless their admin pinned it on. Never written
    *  back to storage: when a policy relaxes, everyone's own setting is still
    *  exactly where they left it. */
+  /** Three-state, so anything unrecognised falls back to the DEFAULT rather
+   *  than to an extreme. An unknown value must not read as "off": a storage
+   *  glitch would then silently remove the badge, and the user would have no
+   *  way to tell that from the extension being broken. */
+  const BADGE_MODES = ["always", "masking", "off"];
+  const badgeModeFrom = (v) => (BADGE_MODES.includes(v) ? v : "masking");
+
   function effectiveFrom(userValue, pol, name) {
     return lockedBy(pol, name) ? true : userValue;
   }
@@ -335,6 +344,7 @@
         "guardai_masking_enabled",
         "guardai_auto_restore",
         "guardai_autopanel_enabled",
+        "guardai_badge_mode",
         "guardai_disabled_categories",
         "guardai_aggressive_names",
         "guardai_image_hard_stop",
@@ -353,9 +363,10 @@
       state.imageScanning = effectiveFrom(data.guardai_image_scanning !== false, state.policy, "images");
       state.entitled = entitledFrom(data.guardai_entitlement);
       state.maskingEnabled = effectiveFrom(
-        data.guardai_masking_enabled === true, state.policy, "masking"); // default OFF
+        data.guardai_masking_enabled !== false, state.policy, "masking"); // default ON
       state.autoRestore = data.guardai_auto_restore !== false; // default ON
       state.autoOpenPanel = data.guardai_autopanel_enabled === true; // default OFF
+      state.badgeMode = badgeModeFrom(data.guardai_badge_mode);
       state.userDisabledCategories = Array.isArray(data.guardai_disabled_categories)
         ? data.guardai_disabled_categories
         : [];
@@ -397,7 +408,7 @@
 
       const wasMasking = state.maskingEnabled;
       state.maskingEnabled = effectiveFrom(
-        d.guardai_masking_enabled === true, state.policy, "masking");
+        d.guardai_masking_enabled !== false, state.policy, "masking");
       // Same follow-up the masking toggle does on its own: the per-message
       // buttons belong to one mode and not the other, so a policy that moves
       // masking has to take them away or put them back rather than leaving
@@ -455,7 +466,7 @@
       // Through the policy, not raw: a pinned masking mode stays on even if
       // something writes false to the key it shadows.
       state.maskingEnabled = effectiveFrom(
-        changes.guardai_masking_enabled.newValue === true, state.policy, "masking");
+        changes.guardai_masking_enabled.newValue !== false, state.policy, "masking");
       // Take the per-message toggle buttons away / put them back immediately,
       // rather than leaving stale ones on screen until the next render.
       if (state.maskingEnabled) removeMessageToggles();
@@ -467,6 +478,13 @@
     }
     if (changes.guardai_autopanel_enabled) {
       state.autoOpenPanel = changes.guardai_autopanel_enabled.newValue === true;
+    }
+    if (changes.guardai_badge_mode) {
+      // Live across tabs, like every other mode. Re-run the visibility rule
+      // straight away so switching to "Off" clears a badge that is on screen
+      // right now, rather than at the next mask.
+      state.badgeMode = badgeModeFrom(changes.guardai_badge_mode.newValue);
+      applyBadgeMode();
     }
     if (changes.guardai_aggressive_names) {
       state.aggressiveNames = changes.guardai_aggressive_names.newValue === true;
@@ -1205,7 +1223,7 @@
    */
   /**
    * @param {object} [opts]
-   * @param {boolean} [opts.silent] - Silent mode (the "Masking mode" toggle):
+   * @param {boolean} [opts.silent] - Silent send (the "Automatic protection" toggle):
    *   mask and send with NO visible UI on the happy path — no warning card,
    *   no panel popping open, no error toast. Activity is still logged (the
    *   badge/panel update quietly) and the one-time first-mask explainer still
@@ -2012,10 +2030,55 @@
     showReopen();
   }
 
+  /** Milliseconds the badge stays up in "when masking" before fading. */
+  let badgeLingerMs = 5000;
+  let badgeFadeTimer = null;
+  let badgeHideTimer = null;
+
+  function clearBadgeTimers() {
+    if (badgeFadeTimer) { clearTimeout(badgeFadeTimer); badgeFadeTimer = null; }
+    if (badgeHideTimer) { clearTimeout(badgeHideTimer); badgeHideTimer = null; }
+  }
+
+  /**
+   * Re-apply the visibility rule to a badge that already exists. Called when
+   * the setting changes in another tab, so "Off" takes a badge off the screen
+   * immediately instead of at the next mask.
+   *
+   * Deliberately does NOT create the badge: "always" needs one on a page where
+   * nothing has happened yet, and that is showReopen()'s job at boot.
+   */
+  function applyBadgeMode() {
+    if (!reopenEl) {
+      if (state.badgeMode === "always") showReopen();
+      return;
+    }
+    clearBadgeTimers();
+    if (state.badgeMode === "off") {
+      reopenEl.style.display = "none";
+      return;
+    }
+    reopenEl.classList.remove("guardai-reopen--fading");
+    if (state.badgeMode === "always") {
+      if (canRestore()) reopenEl.style.display = "";
+      return;
+    }
+    // "masking": leave whatever is on screen alone. It is already on its way
+    // out under its own timer, and restarting that on an unrelated settings
+    // change would make the badge outlast the swap it belongs to.
+  }
+
   function showReopen() {
     // Same invariant as ensurePanel(): the collapsed badge must never appear
     // while Guard4AI is off.
     if (!canRestore()) return;
+    // "Off" means never — including the paths that call this directly, such
+    // as closing the panel. Checked before the element is created so the
+    // setting costs nothing on a page that would otherwise never need one.
+    if (state.badgeMode === "off") {
+      if (reopenEl) reopenEl.style.display = "none";
+      return;
+    }
     if (!reopenEl) {
       reopenEl = document.createElement("button");
       reopenEl.className = "guardai-reopen";
@@ -2033,7 +2096,22 @@
       document.body.appendChild(reopenEl);
     }
     reopenEl.querySelector(".guardai-reopen__count").textContent = String(activityLog.length);
+    clearBadgeTimers();
+    reopenEl.classList.remove("guardai-reopen--fading");
     reopenEl.style.display = "";
+    if (state.badgeMode === "masking") {
+      // Appear on the swap, then get out of the way. The count is still in
+      // the panel under Recent swaps, so nothing is lost by it going.
+      badgeFadeTimer = setTimeout(() => {
+        if (!reopenEl) return;
+        reopenEl.classList.add("guardai-reopen--fading");
+        badgeHideTimer = setTimeout(() => {
+          if (!reopenEl) return;
+          reopenEl.style.display = "none";
+          reopenEl.classList.remove("guardai-reopen--fading");
+        }, 500);
+      }, badgeLingerMs);
+    }
   }
 
   function renderPanel() {
@@ -2152,7 +2230,7 @@
 
     reportStats({ detected: findings.length });
 
-    // "Masking mode" (silent mode): skip the warning card entirely and mask +
+    // "Automatic protection": skip the warning card entirely and mask +
     // send automatically, with no visible interruption on the happy path.
     // Any failure/uncertainty still falls back to the normal, fully-visible
     // warning card below — silent mode only ever silences a CONFIRMED-safe
@@ -3062,6 +3140,15 @@
   // masker/detector instances) so tests can drive the REAL applyRules /
   // buildSwapRules against a synthetic DOM instead of reimplementing them.
   window.GuardAI._restoreHooks = { buildSwapRules, applyRules, swapAcrossNodes, matchNodeValue, masker, detector };
+  // Test hook for the floating badge. setLinger shortens the 5s wait so a
+  // test can watch it fade without sleeping five seconds — the alternative
+  // is a suite that either takes minutes or asserts nothing about the fade.
+  window.GuardAI._badgeHooks = {
+    showReopen,
+    applyBadgeMode,
+    setLinger: (ms) => { badgeLingerMs = ms; },
+    mode: () => state.badgeMode,
+  };
   // Test hook: exercises the real logActivity()/panel-visibility logic (the
   // "never auto-open, just badge, unless already visibly open" behavior)
   // without needing to drive a full mutation-observer + response cycle.
@@ -4184,11 +4271,19 @@
   /** Add a toggle button to any assistant message that doesn't have one yet
    * AND actually has masked/real data in it worth toggling. */
   function decorateMessages(root) {
-    // Silent "Masking mode" means the extension leaves no visible trace on the
-    // page — including these per-message buttons. Auto-restore is unaffected:
-    // runUnmaskPass walks the DOM itself and only consults data-guardai-view
-    // for messages the user pinned by hand, which can't happen without buttons.
-    if (state.maskingEnabled) return;
+    // These used to be suppressed whenever the mode was on, because the mode
+    // was called "Masking mode" and read as stealth: leave no visible trace.
+    //
+    // It is called "Automatic protection" now, and it is ON by default — so
+    // that reading would mean a brand-new user never gets a "Show what AI
+    // sees" toggle at all, and never discovers the feature. A per-message
+    // toggle on an ALREADY-SENT message is not an interruption; it is the
+    // review affordance the popup's own copy points at ("click it any time to
+    // see what changed"). What automatic mode silences is the SEND path — no
+    // warning card, no confirmation, no detail panel — and that is untouched.
+    //
+    // If stealth is wanted back it needs to be its own setting, because the
+    // two things are no longer the same request.
     if (masker.size === 0) return; // nothing masked yet — nothing to toggle anywhere
     const unmaskRules = buildSwapRules("unmask");
     const remaskRules = buildSwapRules("remask");
@@ -4948,7 +5043,41 @@
     // switch means, and it keeps the card's promise intact: it never describes
     // a file it did not read.
     const scanning = files.filter(shouldScanFile);
-    if (!scanning.length) { releaseFiles(files, origin); return; }
+
+    // "Don't ask again for this file type", from the card's own checkbox.
+    // Session-scoped: it survives a page reload (the same upload retried
+    // after a refresh should not re-ask) and dies with the browser, so a
+    // decision made once in a hurry cannot silently persist into next week.
+    const muted = await mutedKinds();
+    const kindOf = (f) => {
+      const FS = window.GuardAI && window.GuardAI.FileScan;
+      if (!FS || typeof FS.classify !== "function") return "unknown";
+      try { return (FS.classify(f && f.name, f && f.type) || {}).kind || "unknown"; }
+      catch (_) { return "unknown"; }
+    };
+    if (files.length && files.every((f) => muted.includes(kindOf(f)))) {
+      releaseFiles(files, origin);
+      return;
+    }
+
+    // A file the switches told us not to read still gets a card. It is the
+    // one rule uploads do not share with text: a message can be masked
+    // word by word, and a file cannot be partly sent — so the only honest
+    // thing to do with one we have not read is say so and let the person
+    // decide. Turning scanning off means "do not look inside", never
+    // "send it without asking".
+    const unscanned = files
+      .filter((f) => !shouldScanFile(f))
+      .map((file) => ({
+        file,
+        res: { kind: kindOf(file), label: labelForFile(file), action: "unscanned" },
+      }));
+
+    if (!scanning.length) {
+      const card0 = showFileCard(files);
+      card0.decide(unscanned, decisionHandlers(files, origin, card0, unscanned));
+      return;
+    }
 
     const card = showFileCard(scanning);
     const results = [];
@@ -5000,16 +5129,42 @@
 
     reportFileStats(results);
 
-    if (!blocked.length && !unchecked.length) {
-      // Everything read, nothing worth stopping for. Hand it straight back and
-      // say so briefly — the user still deserves to know a check happened.
-      const ok = releaseFiles(files, origin);
-      card.cleared(results, ok);
-      return;
-    }
+    // EVERY upload is confirmed, including a clean one, and in both modes.
+    //
+    // This reverses two earlier decisions on purpose. Clean documents used to
+    // attach themselves with a notice, and an image OCR read and found
+    // nothing in used to as well. The argument then was that a click on every
+    // clean attachment teaches people to click past the cards that carry
+    // news, and that argument is still true — but it was weighed against the
+    // wrong risk. Text can be swapped inline and sent; a file cannot be
+    // partly masked, so the only decision available for a file is whether it
+    // goes at all, and that decision is the user's every time. "Nothing was
+    // found" is also not "nothing is in there": it is the limit of what the
+    // reader could see, which is exactly what the image wording has always
+    // said and what a clean document's wording quietly implied otherwise.
+    //
+    // Consequence worth knowing: guardai_image_hard_stop no longer changes
+    // anything, because every image now stops. It is left in place rather
+    // than removed so a team that switched it on does not get an error, and
+    // is marked dead in settings.
+    card.decide(results.concat(unscanned),
+      decisionHandlers(files, origin, card, results.concat(unscanned)));
+  }
 
-    card.decide(results, {
-      onAllow: () => {
+  /**
+   * The card's two buttons, shared by every path into it.
+   *
+   * Pulled out because there are now three callers — scanned, unscanned, and
+   * the mixed batch — and three copies of "release, close, and explain if the
+   * release failed" is three chances for one of them to drift into releasing
+   * without asking.
+   */
+  function decisionHandlers(files, origin, card, results) {
+    return {
+      onAllow: async () => {
+        if (card.dontAskAgain && card.dontAskAgain()) {
+          await muteKinds(results.map((r) => r.res && r.res.kind).filter(Boolean));
+        }
         const ok = releaseFiles(files, origin);
         card.close();
         if (!ok) {
@@ -5023,7 +5178,49 @@
       onCancel: () => {
         card.close();
       },
-    });
+    };
+  }
+
+  /* ---- "Don't ask again for this file type", session-scoped ----
+   *
+   * chrome.storage.session, not local: it must survive a page reload, because
+   * re-asking about the same file the user just approved is the sort of thing
+   * that trains people to click through cards. It must NOT survive a browser
+   * restart, because a suppression the user cannot see is one they will not
+   * remember granting. Falls back to memory where storage.session is missing,
+   * which fails in the safe direction — the card comes back. */
+  const MUTED_KEY = "guardai_muted_kinds";
+  let mutedMemory = [];
+
+  async function mutedKinds() {
+    try {
+      if (chrome.storage && chrome.storage.session) {
+        const d = await chrome.storage.session.get(MUTED_KEY);
+        const v = d && d[MUTED_KEY];
+        return Array.isArray(v) ? v : [];
+      }
+    } catch (_) { /* fall through to memory */ }
+    return mutedMemory.slice();
+  }
+
+  async function muteKinds(kinds) {
+    const add = kinds.filter((k) => k && k !== "unknown");
+    if (!add.length) return;
+    const next = Array.from(new Set((await mutedKinds()).concat(add)));
+    mutedMemory = next;
+    try {
+      if (chrome.storage && chrome.storage.session) {
+        await chrome.storage.session.set({ [MUTED_KEY]: next });
+      }
+    } catch (_) { /* memory copy already holds it for this page */ }
+  }
+
+  /** The human label for a file we were told not to read. */
+  function labelForFile(file) {
+    const FS = window.GuardAI && window.GuardAI.FileScan;
+    if (!FS || typeof FS.classify !== "function") return "File";
+    try { return (FS.classify(file && file.name, file && file.type) || {}).label || "File"; }
+    catch (_) { return "File"; }
   }
 
   /**
@@ -5532,7 +5729,7 @@
         `<p class="guardai-filecard__note">Reading it on this device. Nothing has been uploaded.</p>`
     );
 
-    return {
+    const api = {
       /**
        * Live progress from the parser: per-page for long PDFs, and for
        * images a stage line then a percentage. OCR on a text-dense retina
@@ -5606,6 +5803,19 @@
         if (fileCardEl !== wrap) return;
         const anyBlocked = results.some(
           (r) => r.res.action === "block" || r.res.action === "img-found");
+        // Every upload is confirmed now, so this card also has to handle the
+        // case where the check came back clean. It must not borrow the
+        // "could not check it" header for a file that WAS read — that would
+        // be the honesty rule pointed the other way, understating a check
+        // that actually happened.
+        const allClean = results.length > 0 && results.every((r) => r.res.action === "pass");
+        const anyUnscanned = results.some((r) => r.res.action === "unscanned");
+        // A batch of a read PDF and a read screenshot was falling through to
+        // "could not check it", which is the honesty rule pointed backwards —
+        // both files WERE read. It cannot claim "nothing found" either, since
+        // an OCR pass is not a full read. This is the honest middle.
+        const allRead = results.length > 0 &&
+          results.every((r) => r.res.action === "pass" || r.res.action === "img-nothing");
         // Only image results, none of which found anything: the header must
         // not claim a check failed OR that the file is clean — "nothing in
         // what it could read" is the whole truth available.
@@ -5641,6 +5851,13 @@
               (res.pages ? `, ${res.pages} page${res.pages === 1 ? "" : "s"}` : "") +
               `</span></div>`;
 
+            if (res.action === "unscanned") {
+              return (
+                `<li class="guardai-filecard__file guardai-filecard__file--unchecked">${title}` +
+                `<p class="guardai-filecard__why"><strong>Guard4AI can't check inside this file.</strong> ` +
+                `Anything in it will be sent as-is.</p></li>`
+              );
+            }
             if (res.action === "unsupported") {
               return (
                 `<li class="guardai-filecard__file guardai-filecard__file--unchecked">${title}` +
@@ -5769,22 +5986,36 @@
         render(
           head(anyBlocked
             ? "Not attached — check this first"
-            : onlyImgNothing
-              ? "Not attached — nothing found, your call"
-              : "Not attached — Guard4AI could not check it") +
+            : allClean
+              ? "Checked — nothing found. Attach it?"
+              : onlyImgNothing || allRead
+                ? "Not attached — nothing found, your call"
+                : anyUnscanned
+                  ? "Not attached — Guard4AI didn't look inside this"
+                  : "Not attached — Guard4AI could not check it") +
             `<p class="guardai-filecard__platform">${escapeHtml(
               `Going to ${CONFIG.name}. ${CONFIG.note || ""}`
             )}</p>` +
             `<ul class="guardai-filecard__files">${body}</ul>` +
             safeTextRow +
+            `<label class="guardai-filecard__mute">` +
+            `<input type="checkbox" class="guardai-filecard__mutebox" />` +
+            `<span>Don't ask again for this file type</span>` +
+            `</label>` +
+            `<p class="guardai-filecard__mutewhy">Until you quit the browser.</p>` +
             `<div class="guardai-filecard__btns">` +
-            `<button class="guardai-act guardai-act--secondary guardai-filecard__btn--cancel">Don't attach</button>` +
-            `<button class="guardai-act guardai-act--danger guardai-filecard__btn--allow">Attach anyway</button>` +
+            `<button class="guardai-act guardai-act--secondary guardai-filecard__btn--cancel">Cancel</button>` +
+            `<button class="guardai-act guardai-act--danger guardai-filecard__btn--allow">Send anyway</button>` +
             `</div>`
         );
 
         wrap.querySelector(".guardai-filecard__btn--cancel").onclick = handlers.onCancel;
         wrap.querySelector(".guardai-filecard__btn--allow").onclick = handlers.onAllow;
+        // Read at click time, not now: the box is ticked after this runs.
+        api.dontAskAgain = () => {
+          const box = wrap.querySelector(".guardai-filecard__mutebox");
+          return !!(box && box.checked);
+        };
         const safeBtn = wrap.querySelector(".guardai-filecard__btn--safetext");
         if (safeBtn) {
           safeBtn.onclick = async () => {
@@ -5802,6 +6033,7 @@
 
       close() { if (fileCardEl === wrap) dismissFileCard(); },
     };
+    return api;
   }
 
   // Test hook: drives the real attachment interception — which input an
@@ -5881,6 +6113,10 @@
 
     startObserving();
     updateLockedNotice();
+    // "Always" means present on a supported site from page load, before
+    // anything has been masked — the other two modes are driven by activity
+    // and need nothing here.
+    if (state.badgeMode === "always") showReopen();
     console.info(`[Guard4AI] active on ${CONFIG.name}. All processing is local. [build: 2026-07-09-upgrade-s1-s5]`);
   }
 

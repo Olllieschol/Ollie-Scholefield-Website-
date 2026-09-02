@@ -27,10 +27,14 @@
   const savedTheme = localStorage.getItem(THEME_KEY);
   applyTheme(savedTheme === "light");
 
+  /** The stored values the segmented control may hold. */
+  const BADGE_MODES = ["always", "masking", "off"];
+
   const els = {
     enabled: $("toggle-enabled"),
     masking: $("toggle-masking"),
     autopanel: $("toggle-autopanel"),
+    badgeBtns: Array.from(document.querySelectorAll(".gd-seg__btn")),
     scoreValue: $("score-value"),
     scoreRing: $("score-ring"),
     scoreHint: $("score-hint"),
@@ -164,6 +168,7 @@
         "guardai_enabled",
         "guardai_masking_enabled",
         "guardai_autopanel_enabled",
+        "guardai_badge_mode",
         "guardai_stats",
         "guardai_mapping",
         "guardai_policy",
@@ -184,8 +189,14 @@
     const lockedOn = lockedBy(policy, "enabled");
     const lockedMasking = lockedBy(policy, "masking");
     const enabled = lockedOn ? true : data.guardai_enabled !== false;
-    const masking = lockedMasking ? true : data.guardai_masking_enabled === true;
+    const masking = lockedMasking ? true : data.guardai_masking_enabled !== false; // default ON
     const autopanel = data.guardai_autopanel_enabled === true; // default OFF
+    // Three-state, so a missing or unrecognised value falls back to the
+    // default rather than to one of the extremes. An unknown string must not
+    // read as "off" — that would silently hide the badge on a storage
+    // glitch, and a control that disappears is worse than one that stays.
+    const badgeMode = BADGE_MODES.includes(data.guardai_badge_mode)
+      ? data.guardai_badge_mode : "masking";
     paintPolicyLock(lockedOn, lockedMasking, policy);
     const stats = data.guardai_stats || {
       detected: 0,
@@ -198,6 +209,9 @@
     els.enabled.checked = enabled;
     els.masking.checked = masking;
     els.autopanel.checked = autopanel;
+    for (const b of els.badgeBtns) {
+      b.setAttribute("aria-checked", String(b.dataset.badge === badgeMode));
+    }
     document.body.classList.toggle("gd-disabled", !enabled);
 
     animateCount(els.detected, stats.detected || 0);
@@ -361,6 +375,21 @@
   els.autopanel.addEventListener("change", async () => {
     await chrome.storage.local.set({ guardai_autopanel_enabled: els.autopanel.checked });
   });
+
+  // Segmented control. aria-checked is repainted from STORAGE by render()
+  // rather than optimistically here, so what the control shows is always what
+  // was actually stored — a failed write leaves the old selection visible
+  // instead of a lie.
+  for (const btn of els.badgeBtns) {
+    btn.addEventListener("click", async () => {
+      const mode = btn.dataset.badge;
+      if (!BADGE_MODES.includes(mode)) return;
+      try {
+        await chrome.storage.local.set({ guardai_badge_mode: mode });
+      } catch (_) { return; }
+      await render();
+    });
+  }
 
   // Click-to-arm, click-again-to-confirm — NOT window.confirm(): Chrome
   // closes an extension's action popup the instant a native alert/confirm/

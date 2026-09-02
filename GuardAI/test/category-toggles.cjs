@@ -78,13 +78,21 @@ for (const t of catalogueTypes) {
   check(agg && /warning card|masking mode/i.test(agg.note || ""),
     "the aggressive-names row states the silent-mode interaction");
 
+  // Superseded 2026-09-02: every upload waits now, so this switch changes
+  // nothing. It is kept in the list rather than deleted, because a setting
+  // that vanishes leaves anyone who turned it on wondering what happened to
+  // it — and the row has to SAY it is inert, or it reads as a live control
+  // that silently does nothing, which is worse than either.
   const stop = MODES.find((m) => m.key === "guardai_image_hard_stop");
-  check(!!stop, "the always-stop-on-images mode is present");
-  check(stop && /off by default/i.test(stop.desc),
-    "the always-stop-on-images row says it is off by default");
-  check(stop && /always stops|always stop/i.test(stop.note || ""),
-    "…and its note says the other two image outcomes stop either way",
+  check(!!stop, "the always-stop-on-images mode is still listed");
+  check(stop && /no longer changes anything/i.test(stop.desc),
+    "…and says plainly that it no longer changes anything",
+    stop ? stop.desc : "");
+  check(stop && /cannot be partly masked|every upload/i.test((stop.note || "") + stop.desc),
+    "…and says why, so it does not read as an unexplained dead control",
     stop ? stop.note : "");
+  check(stop && stop.dead === true,
+    "…and is marked dead in the data, not only in prose");
 
   /**
    * EVERY mode key must be read by the side that acts on it. settings.js

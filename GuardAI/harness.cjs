@@ -135,7 +135,14 @@ function makeEnv({ pasteWorks, seed, licensed = true, storageFails = false } = {
   // licensed:false boots the extension exactly as a user who has never
   // entered a code sees it. Everything else defaults to a working licence —
   // see the note on LICENSED().
-  const storage = Object.assign(licensed ? LICENSED() : {}, seed || {});
+  // Automatic protection defaults ON, so a send goes straight through with
+  // no card. Every scenario below is about the REVIEW flow — the card, the
+  // pause, the editable box — which is what OFF means. Seeded rather than
+  // relying on a default, so the next time that default moves this file
+  // keeps testing the thing it is named for.
+  const storage = Object.assign(
+    { guardai_masking_enabled: false },
+    licensed ? LICENSED() : {}, seed || {});
   const storageListeners = [];
   const runtimeMessages = [];
   window.chrome = {

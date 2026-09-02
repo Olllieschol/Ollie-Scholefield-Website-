@@ -423,7 +423,7 @@ console.log("\n--- 6. an approved file is not held a second time ---");
   check(scans === 2, "a different file is still scanned", `scans=${scans}`);
 }
 
-console.log("\n--- 7. a clean file is handed back without asking ---");
+console.log("\n--- 7. even a clean file is a decision ---");
 {
   const w = loadPage(CHATGPT);
   await settle();
@@ -440,11 +440,25 @@ console.log("\n--- 7. a clean file is handed back without asking ---");
   input.dispatchEvent(new w.Event("change", { bubbles: true }));
   await settle(20);
 
-  check(siteSaw === 1, "it goes through on its own", `${siteSaw}`);
+  // REVERSED 2026-09-02. A clean document used to hand itself back with a
+  // notice. Every upload is a decision now, in both modes: text can be
+  // swapped word by word, a file cannot be partly masked, so the only choice
+  // a file offers is whether it goes at all — and that one is the user's.
+  check(siteSaw === 0, "it does NOT go through on its own", `${siteSaw}`);
   const card = H.cardEl();
-  check(!!card && /nothing blocked/i.test(card.textContent), "and says it was checked",
-    card ? card.textContent.slice(0, 80) : "no card");
-  check(!card.querySelector(".guardai-filecard__btn--allow"), "with no decision to make");
+  check(!!card && /nothing found/i.test(card.textContent),
+    "the card still says the check happened and found nothing",
+    card ? card.textContent.slice(0, 90) : "no card");
+  check(!!card.querySelector(".guardai-filecard__btn--allow"),
+    "and offers the decision rather than making it");
+  // The honesty rule, pointed the other way: a file that WAS read must not be
+  // described as unreadable just because it now waits.
+  check(!/could not check/i.test(card.textContent),
+    "without describing a file it read as one it could not",
+    card.textContent.slice(0, 120));
+  card.querySelector(".guardai-filecard__btn--allow").click();
+  await settle(20);
+  check(siteSaw === 1, "clicking Send anyway hands it over", `${siteSaw}`);
 }
 
 console.log("\n--- 8. a file that was not read never looks like a clean one ---");
@@ -1146,14 +1160,15 @@ console.log("\n--- 13. images: three outcomes, three different screens, none of 
   await settle(10);
   check(released === 1 && !H.cardEl(), "'Attach anyway' releases it through the same path as a document");
 
-  /* (b) Nothing found: a NOTICE, not a decision.
-     Changed 2026-08-28. It used to hold and wait for a click, on the
-     reasoning that an OCR pass is never a clean bill of health. That
-     reasoning is still true and the wording still says so — but requiring a
-     click on every clean screenshot, while a clean DOCUMENT auto-attaches,
-     trained people to click past the card, which is what the two states
-     that DO carry news depend on. So it attaches and tells you. The honesty
-     lives in the words now, not in the friction. */
+  /* (b) Nothing found: a DECISION again.
+     Held and waited originally; became a notice on 2026-08-28 because a click
+     on every clean screenshot, while a clean DOCUMENT attached itself, trained
+     people to click past the card; and became a decision again on 2026-09-02
+     when clean DOCUMENTS stopped attaching themselves too. That removes the
+     inconsistency the 08-28 change was reacting to — uploads are now uniform —
+     and settles it on the safer side: a file cannot be partly masked, so the
+     only choice it offers is whether it goes at all. The wording that made
+     this state honest is unchanged and still asserted below. */
   const w2 = loadPage(CHATGPT);
   await settle(10);
   const H2 = w2.GuardAI._fileHooks;
@@ -1170,25 +1185,34 @@ console.log("\n--- 13. images: three outcomes, three different screens, none of 
   await settle(10);
 
   const card2 = H2.cardEl();
-  check(released2 === 1, "nothing-found attaches on its own, like a clean document",
+  check(released2 === 0, "nothing-found waits, like every other upload",
     `released=${released2}`);
-  check(!!card2, "and still says something — the notice is not silence");
-  check(!card2.querySelector(".guardai-filecard__btn--allow") &&
-        !card2.querySelector(".guardai-filecard__btn--cancel"),
-    "…with NO buttons: it is a notice, not a decision");
+  check(!!card2, "and says something — silence was never the alternative");
+  check(!!card2.querySelector(".guardai-filecard__btn--allow") &&
+        !!card2.querySelector(".guardai-filecard__btn--cancel"),
+    "…with both buttons: it is a decision again");
   // The honesty, which is the whole reason this state has its own wording.
   check(/read what it could see/.test(card2.textContent),
     "the notice says we looked", card2.textContent.slice(0, 220));
-  check(/found nothing sensitive/.test(card2.textContent), "…and what we found");
-  check(/can't read everything in an image/.test(card2.textContent),
+  check(/nothing it read looks sensitive/.test(card2.textContent), "…and what we found");
+  check(/cannot read everything a person can/.test(card2.textContent),
     "…and that we cannot read everything in an image");
-  check(/isn't a clean bill of health/.test(card2.textContent),
-    "…said in those words, so it cannot be read as one");
+  check(/look it over yourself/.test(card2.textContent),
+    "…and hands the judgement back, so it cannot be read as a clean bill of health");
+  // The negative is the load-bearing half: whatever the wording becomes, an
+  // image must never borrow the document flow's vocabulary.
+  // Scoped to the EXPLANATION, not the whole card: the fixture is called
+  // clean.png, and the first version of this matched its own filename.
+  const why2 = [...card2.querySelectorAll(".guardai-filecard__why")]
+    .map((e) => e.textContent).join(" ");
+  check(!/\bchecked\b/i.test(why2) && !/\bclean\b/i.test(why2),
+    "…and never says 'checked' or 'clean' about an image", why2.slice(0, 160));
   check(/your call/.test(card2.textContent), "…and that the judgement is still theirs");
   check(!/Checked — nothing blocked/.test(card2.textContent),
     "the DOCUMENT flow's 'Checked' header appears nowhere on an image notice",
     card2.textContent.slice(0, 120));
-  check(/Attached/.test(card2.textContent), "the header says what actually happened");
+  check(/Not attached/.test(card2.textContent),
+    "the header says what actually happened", card2.textContent.slice(0, 80));
 
   /* (b2) The setting restores the hard stop, for teams that want it. */
   const w2b = loadPage(CHATGPT, "https://chatgpt.com/c/x", { guardai_image_hard_stop: true });
@@ -1217,10 +1241,16 @@ console.log("\n--- 13. images: three outcomes, three different screens, none of 
   await settle(6);
   check(released2b === 1, "…and 'Attach anyway' still releases it", `released=${released2b}`);
 
-  /* (b3) The setting is opt-in and cannot be turned on by accident: only an
-     explicit true counts, the same rule every other mode toggle follows. */
+  /* (b3) The setting is now INERT, and that is what this checks.
+     It used to be the difference between attaching a nothing-found image and
+     holding it, so these cases pinned that only an explicit `true` counted.
+     Every upload waits now, so there is nothing left for it to switch — and
+     the case worth pinning is the opposite one: whatever is in storage,
+     including the values that used to mean "off", the image still waits.
+     A dead setting that quietly came back to life would be a silent release. */
   for (const [label, seeded] of [
-    ["absent", undefined], ["false", false], ["the string 'true'", "true"], ["1", 1], ["null", null],
+    ["absent", undefined], ["false", false], ["the string 'true'", "true"],
+    ["1", 1], ["null", null], ["true", true],
   ]) {
     const seed = seeded === undefined ? {} : { guardai_image_hard_stop: seeded };
     const wx = loadPage(CHATGPT, "https://chatgpt.com/c/x", seed);
@@ -1236,7 +1266,7 @@ console.log("\n--- 13. images: three outcomes, three different screens, none of 
     ix.files = Object.assign([fx], { item: () => fx });
     ix.dispatchEvent(new wx.Event("change", { bubbles: true }));
     await settle(10);
-    check(rel === 1, `hard stop stays OFF when the setting is ${label}`, `released=${rel}`);
+    check(rel === 0, `the image still waits when the dead setting is ${label}`, `released=${rel}`);
   }
 
   /* (c) Could not read it: unmistakable, and marked unchecked. */
@@ -1335,10 +1365,15 @@ console.log("\n--- 13. images: three outcomes, three different screens, none of 
     iz.dispatchEvent(new wz.Event("change", { bubbles: true }));
     await settle(14);
     const cz = wz.GuardAI._fileHooks.cardEl();
-    check(rel === 1, "a clean document + a nothing-found image releases as one batch", `released=${rel}`);
-    check(!!cz && /can't read everything in an image/.test(cz.textContent),
-      "…and the notice still carries the image caveat",
+    check(rel === 0, "a clean document + a nothing-found image waits as one batch", `released=${rel}`);
+    check(!!cz && /cannot read everything a person can/.test(cz.textContent),
+      "…and the card still carries the image caveat",
       cz ? cz.textContent.slice(0, 200) : "no card");
+    // The mixed batch was the case that exposed a wrong header: both files
+    // WERE read, so "could not check it" understated a check that happened.
+    check(!!cz && /nothing found, your call/.test(cz.textContent),
+      "…and does not claim it failed to read files it read",
+      cz ? cz.textContent.slice(0, 90) : "no card");
     check(!!cz && !/Checked — nothing blocked/.test(cz.textContent),
       "…and does NOT fall back to the document 'Checked' header just because a document is present");
   }
@@ -1394,9 +1429,9 @@ console.log("\n--- 13. images: three outcomes, three different screens, none of 
     inp.files = Object.assign([f], { item: () => f });
     inp.dispatchEvent(new wf.Event("change", { bubbles: true }));
     await settle(12);
-    check(rel === 1, "a fully-read scan with nothing found attaches, like an image", `released=${rel}`);
+    check(rel === 0, "a fully-read scan with nothing found waits, like an image", `released=${rel}`);
     const c = wf.GuardAI._fileHooks.cardEl();
-    check(!!c && /can't read everything in an image/.test(c.textContent),
+    check(!!c && /cannot read everything a person can/.test(c.textContent),
       "…with the image caveat, not the document 'checked' promise",
       c ? c.textContent.slice(0, 200) : "no card");
   }
@@ -1418,7 +1453,17 @@ console.log("\n--- 13. images: three outcomes, three different screens, none of 
   files4.files = Object.assign([pdf], { item: () => pdf });
   files4.dispatchEvent(new w4.Event("change", { bubbles: true }));
   await settle(10);
-  check(released4 === 1, "control: a clean DOCUMENT still releases on its own", `released=${released4}`);
+  // Was "a clean DOCUMENT still releases on its own" — the control for the
+  // image/document asymmetry. There is no asymmetry left to control for:
+  // both wait. What is worth holding onto is that a clean document's card is
+  // still allowed to say the check succeeded, which is the honesty rule in
+  // the direction people forget.
+  check(released4 === 0, "a clean DOCUMENT waits too", `released=${released4}`);
+  const card4 = w4.GuardAI._fileHooks.cardEl();
+  check(!!card4 && /nothing found/i.test(card4.textContent) &&
+        !/could not check/i.test(card4.textContent),
+    "…and its card says the check happened and found nothing",
+    card4 ? card4.textContent.slice(0, 90) : "no card");
 }
 
 console.log("\n--- 10. an unlicensed install never intercepts ---");
