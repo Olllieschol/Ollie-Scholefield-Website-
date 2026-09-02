@@ -5,11 +5,33 @@ Everything the store needs that is not in the code. Keep this in step with
 
 ---
 
-## This submission — 1.1.0, renamed to Guard4AI
+## This submission — 1.2.0, renamed to Guard4AI
 
-**Version 1.1.0**, a minor bump, not a patch: file scanning, image OCR,
-scanned-PDF fallback, "Send as masked text" and admin policy are new features,
-not fixes.
+**Version 1.2.0.** 1.1.0 was prepared and never uploaded, so this release
+carries both sets of changes and the store sees one jump from 1.0.0.
+
+Minor, not a patch, on both counts. From 1.1.0: file scanning, image OCR,
+scanned-PDF fallback, "Send as masked text" and admin policy. Added since:
+
+- **"Masking mode" is now "Automatic protection", and defaults ON.** The old
+  label read as though masking stopped when the toggle was off; off still
+  masks, it asks first. Existing users who set it explicitly keep their
+  choice — only a never-touched install changes behaviour.
+- **"Detail panel" is now "Show details every time"**, unchanged behaviour.
+- **A floating-badge control**: always / when masking / off, default "when
+  masking", which shows on a swap and fades after five seconds.
+- **Every attachment is now a decision**, in both modes and regardless of
+  settings. Clean documents and nothing-found images used to attach
+  themselves with a notice; they now wait, because a file cannot be partly
+  masked and the only choice it offers is whether it goes at all. A file type
+  scanning is switched off for gets a card too, saying so, rather than
+  passing through silently.
+- **Recent swaps in the popup** now uses the same colour language as the
+  in-page panel: a real value green, a fake red.
+
+`guardai_image_hard_stop` is inert as a consequence of the attachment change.
+It is left in Settings marked as changing nothing, rather than removed, so
+anyone who turned it on is not left wondering where it went.
 
 **The product is now Guard4AI**, matching the domain the listing and the
 privacy policy have always pointed at (`guard4ai.com`). The rename covers the
