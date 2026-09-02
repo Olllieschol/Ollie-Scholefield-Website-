@@ -63,7 +63,13 @@ function loadWindow() {
     url: "https://grok.com/c/abc", runScripts: "dangerously", pretendToBeVisual: true,
   });
   const w = dom.window;
-  const storage = {};
+  // These suites are all about the per-message "Show what AI sees" buttons,
+  // which are an Automatic-protection-OFF feature: with it on, the
+  // extension leaves no visible trace on the page. Automatic protection
+  // now defaults ON, so the mode is seeded rather than assumed — otherwise
+  // these test nothing and pass by finding zero buttons for the wrong
+  // reason.
+  const storage = { guardai_masking_enabled: false };
   w.chrome = {
     storage: {
       local: {

@@ -222,6 +222,31 @@ function pageEnv({ masking = true, badgeMode, extra = {} } = {}) {
       on.map((b) => b.dataset.badge).join(","));
   }
 
+  /* ---- 3b. The badge card actually stacks ---- */
+  console.log("\n--- floating badge: the card lays out as a card ---");
+  {
+    /**
+     * Shipped broken and no test saw it. `.gd-row--stack { display: block }`
+     * was written above `.gd-row { display: flex }`, equal specificity, so
+     * the later rule won and the card rendered as three columns — title,
+     * control, and the helper text crushed into a clipped strip. Every
+     * assertion about titles, values and persistence passed throughout,
+     * because none of them looked at layout.
+     */
+    const { window } = popupEnv({});
+    await wait(120);
+    const d = window.document;
+    const stack = [...d.querySelectorAll(".gd-row")].find((r) => r.classList.contains("gd-row--stack"));
+    check(!!stack, "the badge card is a row");
+    check(stack && window.getComputedStyle(stack).display === "block",
+      "…and stacks its label above its helper text rather than beside it",
+      stack ? window.getComputedStyle(stack).display : "absent");
+    const plain = [...d.querySelectorAll(".gd-row:not(.gd-row--stack)")][0];
+    check(plain && window.getComputedStyle(plain).display === "flex",
+      "control: the ordinary toggle rows are still side-by-side",
+      plain ? window.getComputedStyle(plain).display : "absent");
+  }
+
   /* ---- 4. The badge on the page ---- */
   console.log("\n--- floating badge: on the page ---");
   {

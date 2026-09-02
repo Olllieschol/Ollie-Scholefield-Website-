@@ -4271,19 +4271,17 @@
   /** Add a toggle button to any assistant message that doesn't have one yet
    * AND actually has masked/real data in it worth toggling. */
   function decorateMessages(root) {
-    // These used to be suppressed whenever the mode was on, because the mode
-    // was called "Masking mode" and read as stealth: leave no visible trace.
+    // Automatic protection leaves no visible trace on the page, including
+    // these per-message buttons. Auto-restore is unaffected: runUnmaskPass
+    // walks the DOM itself and only consults data-guardai-view for messages
+    // the user pinned by hand, which cannot happen without buttons.
     //
-    // It is called "Automatic protection" now, and it is ON by default — so
-    // that reading would mean a brand-new user never gets a "Show what AI
-    // sees" toggle at all, and never discovers the feature. A per-message
-    // toggle on an ALREADY-SENT message is not an interruption; it is the
-    // review affordance the popup's own copy points at ("click it any time to
-    // see what changed"). What automatic mode silences is the SEND path — no
-    // warning card, no confirmation, no detail panel — and that is untouched.
-    //
-    // If stealth is wanted back it needs to be its own setting, because the
-    // two things are no longer the same request.
+    // I briefly removed this gate, reasoning that with the mode now ON by
+    // default a new user would never discover "Show what AI sees". The user
+    // put it back: the buttons are an OPTION, and turning Automatic
+    // protection off is how you take it. Recorded so the same argument does
+    // not get re-made — it is settled, not unexamined.
+    if (state.maskingEnabled) return;
     if (masker.size === 0) return; // nothing masked yet — nothing to toggle anywhere
     const unmaskRules = buildSwapRules("unmask");
     const remaskRules = buildSwapRules("remask");

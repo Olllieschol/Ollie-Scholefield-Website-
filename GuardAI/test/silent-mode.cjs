@@ -164,25 +164,15 @@ function check(ok, label, detail) {
     check(r.wasCloaked, "silent mode: the chat box is hidden while the text is swapped (no visible re-type)");
     check(r.finalOpacity !== "0", "silent mode: the chat box is visible again once the send completes", `opacity=${r.finalOpacity}`);
 
-    // REVERSED 2026-09-02, and this is the argument, because the assertion
-    // used to say the opposite and was not wrong at the time.
+    // Per-message "Show what AI sees" buttons: Automatic protection leaves no
+    // trace on the page, even on a message that DOES contain masked data (the
+    // sent text itself, reused here) — proving this is the mode gate at work,
+    // not just "there was nothing to toggle anyway".
     //
-    // The mode was called "Masking mode", it was OFF by default, and it read
-    // as stealth: leave no trace on the page. Under that reading, suppressing
-    // these buttons was right.
-    //
-    // It is called "Automatic protection" now and it is ON by default. The
-    // same rule would mean a brand-new user never sees a "Show what AI sees"
-    // button at all and never discovers the feature — while the popup's own
-    // copy tells them to "click it any time to see what changed". What
-    // automatic mode silences is the SEND path: no warning card, no
-    // confirmation, no detail panel. A button on a message ALREADY SENT
-    // interrupts nothing; it is the review affordance, and losing it by
-    // default costs more than showing it does.
-    //
-    // Stealth is a real want and it is now a DIFFERENT want. If it comes
-    // back it needs its own setting, and this assertion should come back
-    // with it rather than being folded into the automatic-mode one again.
+    // Briefly removed on 2026-09-02, reasoning that with the mode ON by
+    // default a new user would never discover the feature. The user put it
+    // back: the buttons are an OPTION, taken by turning Automatic protection
+    // off. Left recorded so the argument is not re-made from scratch.
     const { document } = r.env;
     const main = document.createElement("main");
     for (const role of ["user", "assistant"]) {
@@ -194,8 +184,8 @@ function check(ok, label, detail) {
     document.body.appendChild(main);
     const hooks = r.env.window.GuardAI._decorateHooks;
     hooks.decorateMessages(hooks.findResponseRoot());
-    check(document.querySelectorAll(".guardai-msgtoggle").length === 2,
-      "automatic mode still offers 'Show what AI sees' on messages already sent — it silences the send, not the review",
+    check(document.querySelectorAll(".guardai-msgtoggle").length === 0,
+      "automatic mode: no per-message 'Show what AI sees' buttons are added to the page, even on messages with masked data",
       String(document.querySelectorAll(".guardai-msgtoggle").length));
   }
 
