@@ -154,16 +154,70 @@ function rpcHeaders() {
   };
 }
 
-/** Turn a PostgREST error into something a person can act on. */
+/**
+ * The cap the server actually refused at.
+ *
+ * connect_company raises SEAT_LIMIT_REACHED:<n>. A backend that predates that
+ * raises the bare code, so a missing number is a normal answer and the caller
+ * words around it rather than inventing one.
+ */
+function seatCapFrom(text) {
+  const m = /SEAT_LIMIT_REACHED:(\d+)/.exec(text);
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * Turn a PostgREST error into something a person can act on.
+ *
+ * Every code connect_company can raise is named here. Two of them used to be,
+ * and everything else fell through to "check your connection" — which told a
+ * customer whose subscription had lapsed that their internet was broken, and
+ * sent them to the one place that could not help.
+ *
+ * An empty `raw` is the only genuine transport failure. A server that answered
+ * with a code this build does not know gets its own wording, so an error added
+ * to the RPC later is never reported as a network problem.
+ */
 function connectError(raw) {
   const text = String(raw || "");
-  if (text.includes("SEAT_LIMIT_REACHED")) {
-    return "Your company has reached its 20-seat limit.";
+
+  if (!text) {
+    return "Could not reach Guard4AI. Check your connection and try again.";
   }
+
   if (text.includes("INVALID_CODE")) {
-    return "That invite code was not recognised. Check it with your admin.";
+    return "That key was not recognised. Check it against your licence email, " +
+           "or with your admin.";
   }
-  return "Could not reach Guard4AI. Check your connection and try again.";
+
+  if (text.includes("NO_PLAN")) {
+    return "This account has not chosen a plan yet. Pick one at " +
+           "guard4ai.com/pricing, then activate again.";
+  }
+
+  if (text.includes("SUBSCRIPTION_INACTIVE")) {
+    return "This subscription is not active. If it is your account, check " +
+           "billing at guard4ai.com/account. Otherwise ask your admin.";
+  }
+
+  if (text.includes("SEAT_LIMIT_REACHED")) {
+    const cap = seatCapFrom(text);
+    /* Worded by the real cap, not the largest tier's. Telling someone on a
+       one-browser licence that their company has reached twenty seats is
+       advice about a company they do not have. */
+    if (cap === 1) {
+      return "Your licence covers one browser and it is already in use. " +
+             "Deactivate the other one at guard4ai.com/account.";
+    }
+    if (cap) {
+      return "Every seat on this plan is in use (" + cap + " of " + cap + "). " +
+             "Ask your admin to free one.";
+    }
+    return "Every seat on this plan is in use. Ask your admin to free one.";
+  }
+
+  return "Guard4AI could not activate this key. Try again, or email " +
+         "hello@guard4ai.com.";
 }
 
 /**
