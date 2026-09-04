@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Guard4AI — Local AI Privacy Guard",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Masks sensitive data in messages, documents and images before it reaches AI chatbots. Detection runs entirely on your device.",
   "author": "Guard4AI",
   "permissions": [
