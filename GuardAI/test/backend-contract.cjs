@@ -41,8 +41,19 @@ const raised = new Set([...sql.matchAll(/raise exception '([A-Z_]+)'/g)].map((m)
 /** Everything the extension knows how to explain. */
 const handled = new Set([...bg.matchAll(/text\.includes\("([A-Z_]+)"\)/g)].map((m) => m[1]));
 
-/** Codes raised by the company-side SQL, which is not in this repo at all. */
-const COMPANY_CODES = new Set(["SEAT_LIMIT_REACHED", "INVALID_CODE"]);
+/** Codes raised by the company-side SQL, which is not in this repo at all.
+ *
+ *  connect_company lives in the landing repo (supabase/schema.sql, then
+ *  policy-delta.sql, then seats-delta.sql), so this file cannot verify that
+ *  they are raised. What it CAN still hold is the other direction: each one
+ *  must keep a branch in background.js, or a real refusal turns back into
+ *  "check your connection". */
+const COMPANY_CODES = new Set([
+  "SEAT_LIMIT_REACHED",     // connect_company, now raised as SEAT_LIMIT_REACHED:<cap>
+  "INVALID_CODE",           // connect_company
+  "SUBSCRIPTION_INACTIVE",  // connect_company, and refresh_company's reason
+  "NO_PLAN",                // connect_company, added in seats-delta.sql
+]);
 
 (async () => {
   console.log("\n--- the error contract ---");
