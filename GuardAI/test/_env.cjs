@@ -26,6 +26,43 @@ const LICENSED = () => ({
 const ROOT = path.join(__dirname, "..");
 const read = (f) => fs.readFileSync(path.join(ROOT, "src", f), "utf8");
 
+/**
+ * Load the real src/ files into a JSDOM window.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * KNOWN BLIND SPOT, and it has already cost sixteen days of broken masking.
+ *
+ * EVERY SUITE BUILT ON THIS HARNESS IS BLIND TO STRICT-MODE FAILURES THAT
+ * THROW IN CHROME.
+ *
+ * Our src files open with "use strict", so assigning to an undeclared name is
+ * a ReferenceError in the browser. Inside JSDOM's window.eval it is not: the
+ * sandbox global intercepts the assignment and quietly creates a property.
+ * Verified directly — an explicit "use strict" function eval'd in this window
+ * assigns to an undeclared name without complaint.
+ *
+ * What that cost: detectPassword referenced an undeclared `m` from 21 August
+ * 2026 (a0fe50f). It threw on EVERY scan in Chrome for sixteen days, losing
+ * connection strings, wallet seed phrases and standalone strong tokens.
+ * runDetector caught it and wrote a console.warn nobody read. Fifty-nine
+ * suites stayed green the entire time, because none of them could see it.
+ *
+ * So: GREEN TESTS HERE DO NOT MEAN THE EXTENSION RUNS. If tests pass and the
+ * extension is broken in the browser, suspect this first.
+ *
+ * Two mitigations exist, and neither is this file:
+ *   - test/detector-liveness.cjs loads the detector in a plain Node vm
+ *     context, which DOES enforce strict mode, and asserts that it does
+ *     before relying on it.
+ *   - test/_undeclared.cjs reads every function in src/ statically for
+ *     assignment to a name declared nowhere in scope, so branches no sample
+ *     reaches are covered too.
+ *
+ * This harness is not fixed by switching to vm: the content-script suites
+ * need a real DOM. Any OTHER strict-mode divergence between JSDOM and Chrome
+ * is therefore still invisible here.
+ * ─────────────────────────────────────────────────────────────────────────
+ */
 function loadWindow() {
   const dom = new JSDOM("<!DOCTYPE html><body></body>", {
     url: "https://chatgpt.com/c/x",
