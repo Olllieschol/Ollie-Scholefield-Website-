@@ -53,6 +53,7 @@ const COMPANY_CODES = new Set([
   "INVALID_CODE",           // connect_company
   "SUBSCRIPTION_INACTIVE",  // connect_company, and refresh_company's reason
   "NO_PLAN",                // connect_company, added in seats-delta.sql
+  "NAME_TOO_LONG",          // connect_company and rename_seat, names-delta.sql
 ]);
 
 (async () => {

@@ -212,6 +212,19 @@ body {
 .gd-lock__title { font-size: 13.5px; font-weight: 700; margin: 0 0 5px; }
 .gd-lock__body { font-size: 11.5px; line-height: 1.5; color: var(--text-dim); margin: 0 0 11px; }
 .gd-lock__row { display: flex; gap: 7px; }
+/* Names are prose, not a key: no monospace and no letter-spacing, or "Sarah"
+   arrives looking like a serial number. */
+.gd-lock__names { display: flex; gap: 7px; margin: 0 0 7px; }
+.gd-lock__names input {
+  flex: 1; min-width: 0;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 7px 9px; font-size: 12px;
+}
+.gd-lock__names input:focus { outline: none; border-color: var(--text-dim); }
+.gd-lock__names input::placeholder { color: var(--text-dim); }
+/* Said at the moment the name is typed, not in a policy nobody opens. */
+.gd-lock__shared { margin: 9px 0 0; font-size: 11px; line-height: 1.45; color: var(--text-dim); }
 .gd-lock__row input {
   flex: 1; min-width: 0;
   background: var(--bg); color: var(--text);
@@ -405,12 +418,19 @@ body.gd-disabled .gd-platforms { opacity: 0.45; pointer-events: none; }
         Nothing is being masked. Enter your licence key, or the invite code from
         your workplace.
       </p>
+      <div class="gd-lock__names">
+        <input id="lock-first" type="text" placeholder="First name"
+               autocomplete="given-name" maxlength="40" aria-label="First name" />
+        <input id="lock-last" type="text" placeholder="Last name"
+               autocomplete="family-name" maxlength="40" aria-label="Last name" />
+      </div>
       <div class="gd-lock__row">
         <input id="lock-code" type="text" placeholder="GK-XXXX-XXXX-XXXX"
                autocomplete="off" spellcheck="false" maxlength="32"
                aria-label="Licence key or invite code" />
         <button class="gd-lock__btn" id="lock-activate" type="button">Activate</button>
       </div>
+      <p class="gd-lock__shared" id="lock-shared">With a workplace invite code, your name is shown to whoever issued it, next to how many items Guard4AI has masked for you. A personal licence key reports nothing, and the name is not used.</p>
       <p class="gd-lock__msg" id="lock-msg" role="status" aria-live="polite"></p>
     </section>
 

@@ -216,6 +216,10 @@ function connectError(raw) {
     return "Every seat on this plan is in use. Ask your admin to free one.";
   }
 
+  if (text.includes("NAME_TOO_LONG")) {
+    return "That name is too long. Forty characters each for first and last.";
+  }
+
   return "Guard4AI could not activate this key. Try again, or email " +
          "hello@guard4ai.com.";
 }
@@ -224,16 +228,27 @@ function connectError(raw) {
  * Redeem an invite code and remember the anonymous employee id it returns.
  * Rejects with a human-readable message; callers surface it verbatim.
  */
-async function connectCompany(code) {
+async function connectCompany(code, first, last) {
   if (!isConfigured()) throw new Error("Company accounts are not available in this build.");
   if (typeof code !== "string" || !code.trim()) throw new Error("Enter your invite code.");
+
+  /* Trimmed here as well as in the two UIs and again in the database. The
+     name is the one field a person types freely, and the seats table reads
+     badly if "Sarah " and "Sarah" become two people. */
+  const clean = (v) => String(v == null ? "" : v).replace(/\s+/g, " ").trim();
+  const f = clean(first), l = clean(last);
+  if (!f || !l) throw new Error("Enter your first and last name.");
 
   let res;
   try {
     res = await fetch(rpcUrl("connect_company"), {
       method: "POST",
       headers: rpcHeaders(),
-      body: JSON.stringify({ p_code: code.trim().toUpperCase() }),
+      body: JSON.stringify({
+        p_code: code.trim().toUpperCase(),
+        p_first: f,
+        p_last: l,
+      }),
     });
   } catch (_) {
     throw new Error(connectError(""));
@@ -246,6 +261,9 @@ async function connectCompany(code) {
   const conn = {
     employeeId: payload.employee_id,
     companyName: String(payload.company_name || "your company"),
+    // What the admin will actually see, as the database stored it, rather
+    // than as it was typed into the box.
+    displayName: payload.display_name ? String(payload.display_name) : (f + " " + l),
     connectedAt: Date.now(),
   };
   await chrome.storage.local.set({ [COMPANY_KEY]: conn });
@@ -473,14 +491,16 @@ async function activateLicence(code) {
  * The single activation entry point. One field in the UI, routed by prefix,
  * so nobody has to work out which kind of customer they are.
  */
-async function activateCode(raw) {
+async function activateCode(raw, first, last) {
   const parsed = parseCode(raw);
   if (!parsed) {
     throw new Error("That doesn\u2019t look like a Guard4AI code. Company codes start with GA-, licence keys with GK-.");
   }
 
   if (parsed.kind === "company") {
-    const conn = await connectCompany(parsed.code); // grants the entitlement itself
+    // Only a company seat has a name. A personal licence has no seat and no
+    // admin to show one to, so the fields are ignored rather than stored.
+    const conn = await connectCompany(parsed.code, first, last); // grants the entitlement itself
     return { kind: "company", connection: conn };
   }
 
@@ -778,7 +798,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       return true;
 
     case "GUARDAI_COMPANY_CONNECT":
-      connectCompany(msg.code)
+      // Nothing in this build sends this any more; GUARDAI_ACTIVATE replaced
+      // it. Kept wired rather than half-wired, so it cannot become the one
+      // path that mints a nameless seat.
+      connectCompany(msg.code, msg.first, msg.last)
         .then((conn) => sendResponse({ ok: true, connection: conn }))
         .catch((err) => sendResponse({ ok: false, error: err.message }));
       return true;
@@ -795,7 +818,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       return true;
 
     case "GUARDAI_ACTIVATE":
-      activateCode(msg.code)
+      activateCode(msg.code, msg.first, msg.last)
         .then((out) => entitlementStatus().then((s) => sendResponse({ ok: true, ...out, ...s })))
         .catch((err) => sendResponse({ ok: false, error: err.message }));
       return true;

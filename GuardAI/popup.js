@@ -539,15 +539,26 @@
   {
     const btn = $("lock-activate");
     const input = $("lock-code");
+    const firstEl = $("lock-first");
+    const lastEl = $("lock-last");
     if (btn && input) {
+      const tidy = (el) => (el ? el.value.replace(/\s+/g, " ").trim() : "");
       const activate = () => {
         const code = input.value.trim();
         if (!code) return setLockMsg("Enter your licence key or invite code.", "bad");
+        const first = tidy(firstEl);
+        const last = tidy(lastEl);
+        /* Required for a workplace code and meaningless for a personal one,
+           so the rule follows the prefix rather than the field. Mirrors
+           parseCode in src/entitlement.js, which the popup cannot import. */
+        if (/^GA-/i.test(code) && (!first || !last)) {
+          return setLockMsg("Enter your first and last name. Your workplace code needs it.", "bad");
+        }
         btn.disabled = true;
         btn.textContent = "\u2026";
         setLockMsg("");
         try {
-          chrome.runtime.sendMessage({ type: "GUARDAI_ACTIVATE", code }, (res) => {
+          chrome.runtime.sendMessage({ type: "GUARDAI_ACTIVATE", code, first, last }, (res) => {
             btn.disabled = false;
             btn.textContent = "Activate";
             if (chrome.runtime.lastError || !res) {
@@ -555,6 +566,8 @@
             }
             if (!res.ok) return setLockMsg(res.error || "Could not activate. Try again.", "bad");
             input.value = "";
+            if (firstEl) firstEl.value = "";
+            if (lastEl) lastEl.value = "";
             setLockMsg("Guard4AI is on. Open tabs are protected straight away.", "good");
             paintLicence(res.state, res.record);
             render();

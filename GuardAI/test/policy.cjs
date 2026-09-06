@@ -496,7 +496,7 @@ const FLEXIBLE = { mode: "flexible", version: 8, locks: {}, company_name: "Acme 
         ? jsonRes(200, { employee_id: connection.employeeId, company_name: "Acme Pty Ltd", seat_limit: 20, policy: ENFORCED })
         : jsonRes(200, { valid: true }),
     });
-    await env.mod.activateCode("GA-ABCD-EFGH");
+    await env.mod.activateCode("GA-ABCD-EFGH", "Sarah", "Chen");
     const pol = await env.mod.readPolicy();
     check(P.isLocked(pol, "enabled"), "redeeming an invite code applies the policy that came back with it");
     check(F(pol, "provisional") === undefined, "a real answer, not the seed");
@@ -509,7 +509,7 @@ const FLEXIBLE = { mode: "flexible", version: 8, locks: {}, company_name: "Acme 
         ? jsonRes(200, { employee_id: connection.employeeId, company_name: "Acme Pty Ltd", seat_limit: 20 })
         : jsonRes(200, { valid: true }),
     });
-    await env.mod.activateCode("GA-ABCD-EFGH");
+    await env.mod.activateCode("GA-ABCD-EFGH", "Sarah", "Chen");
     const pol = await env.mod.readPolicy();
     check(pol && !P.anyLocked(pol),
       "an older backend that sends no policy leaves the seat unenforced, not enforced");

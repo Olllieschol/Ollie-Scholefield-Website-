@@ -231,10 +231,41 @@ const jsonRes = (status, body) => ({ ok: status >= 200 && status < 300, status, 
     const env = await loadWorker({
       fetchImpl: () => jsonRes(200, { employee_id: "22222222-2222-2222-2222-222222222222", company_name: "Acme" }),
     });
-    await env.mod.activateCode("GA-7K2M-QP4X");
+    await env.mod.activateCode("GA-7K2M-QP4X", "  Sarah   ", " Chen ");
     check(env.storage.guardai_company !== undefined, "a GA- code still connects to the company");
     check(F(env.storage.guardai_entitlement, "kind") === "company",
       "AND unlocks the product — an employee should never need two things");
+    /* The name is the one field typed freely, so the trim is the difference
+       between one Sarah Chen and two of her in the seats table. */
+    check(env.fetchCalls[0].body.p_first === "Sarah" && env.fetchCalls[0].body.p_last === "Chen",
+      "the name is trimmed and whitespace-collapsed before it is sent",
+      JSON.stringify([env.fetchCalls[0].body.p_first, env.fetchCalls[0].body.p_last]));
+    env.restoreClock();
+  }
+  {
+    /* A seat with no name is a row the admin cannot act on. The worker refuses
+       rather than leaving the UI as the only thing standing between a blank
+       field and a permanent "Not named". */
+    const env = await loadWorker({
+      fetchImpl: () => jsonRes(200, { employee_id: "33333333-3333-3333-3333-333333333333", company_name: "Acme" }),
+    });
+    let threw = null;
+    try { await env.mod.activateCode("GA-7K2M-QP4X", "Sarah", "   "); }
+    catch (e) { threw = e.message; }
+    check(threw && /first and last name/i.test(threw),
+      "a workplace code with a blank name is refused by the worker, not just the page", threw);
+    check(env.fetchCalls.length === 0, "and no seat is minted for it");
+    env.restoreClock();
+  }
+  {
+    /* A personal licence has no seat and no admin to show a name to. Asking
+       for one would be collecting a name for nothing. */
+    const env = await loadWorker({
+      fetchImpl: () => jsonRes(200, { token: "44444444-4444-4444-4444-444444444444", plan: "individual", valid_until: "2026-04-01T00:00:00Z" }),
+    });
+    const out = await env.mod.activateCode("GK-ABCD-EFGH-IJKL");
+    check(F(out, "kind") === "individual", "a personal key still activates with no name at all");
+    check(!("p_first" in env.fetchCalls[0].body), "and no name is sent with it");
     env.restoreClock();
   }
   {

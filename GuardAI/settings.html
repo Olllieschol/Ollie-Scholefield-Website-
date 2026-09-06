@@ -88,6 +88,17 @@ header.top {
 .company h2 { font-size: 15px; margin-bottom: 6px; }
 .company > p { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; }
 .company__row { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+/* A name is prose. The code field's monospace and letter-spacing would make
+   "Sarah" read as something to be typed exactly. */
+.company__names { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+.company__names input {
+  flex: 1; min-width: 140px;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: 9px;
+  padding: 10px 12px; font-size: 13.5px;
+}
+.company__names input:focus { outline: none; border-color: var(--text-dim); }
+.company__names input::placeholder { color: var(--text-dim); }
 .company__row input {
   flex: 1; min-width: 180px;
   background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
@@ -292,6 +303,12 @@ footer.note {
             licence key, or the invite code your workplace gave you — one field
             takes either, and there is no account and no password to set up.
           </p>
+          <div class="company__names">
+            <input id="company-first" type="text" placeholder="First name"
+                   autocomplete="given-name" maxlength="40" aria-label="First name" />
+            <input id="company-last" type="text" placeholder="Last name"
+                   autocomplete="family-name" maxlength="40" aria-label="Last name" />
+          </div>
           <div class="company__row">
             <input id="company-code" type="text" placeholder="GK-XXXX-XXXX-XXXX  or  GA-XXXX-XXXX"
                    autocomplete="off" spellcheck="false" maxlength="32"
@@ -304,11 +321,13 @@ footer.note {
             no usage — Guard4AI does not contact us again except to check the key
             is still valid.
             <br /><br />
-            <b>A workplace invite code does report counts.</b> Your admin can see
-            <b>how many</b> items were masked and <b>what kind</b> they were, on
-            <b>which AI platform</b> and <b>when</b>. They cannot see the values
-            themselves, the messages around them, or anything you typed. Those
-            never leave this device either way.
+            <b>A workplace invite code does report counts, under your name.</b>
+            The name you enter above is shown to whoever issued the code,
+            alongside <b>how many</b> items were masked and <b>what kind</b> they
+            were, on <b>which AI platform</b> and <b>when</b>. They cannot see the
+            values themselves, the messages around them, or anything you typed.
+            Those never leave this device either way. A personal licence key
+            ignores the name entirely.
           </p>
         </div>
 

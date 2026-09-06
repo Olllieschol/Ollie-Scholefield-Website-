@@ -577,15 +577,27 @@
     const connectBtn = document.getElementById("company-connect");
     if (!input || !connectBtn) return;
 
+    const firstEl = document.getElementById("company-first");
+    const lastEl = document.getElementById("company-last");
+    const tidy = (el) => (el ? el.value.replace(/\s+/g, " ").trim() : "");
+
     connectBtn.addEventListener("click", async () => {
       const code = input.value.trim();
       if (!code) return setCompanyMsg("Enter your licence key or invite code.", true);
+
+      const first = tidy(firstEl);
+      const last = tidy(lastEl);
+      /* Required for a workplace code, ignored for a personal one. The rule
+         follows the prefix, mirroring parseCode in src/entitlement.js. */
+      if (/^GA-/i.test(code) && (!first || !last)) {
+        return setCompanyMsg("Enter your first and last name. Your workplace code needs it.", true);
+      }
 
       connectBtn.disabled = true;
       connectBtn.textContent = "Activating\u2026";
       setCompanyMsg("");
 
-      const out = await askWorker({ type: "GUARDAI_ACTIVATE", code });
+      const out = await askWorker({ type: "GUARDAI_ACTIVATE", code, first, last });
       connectBtn.disabled = false;
       connectBtn.textContent = "Activate";
 
@@ -594,6 +606,8 @@
         return;
       }
       input.value = "";
+      if (firstEl) firstEl.value = "";
+      if (lastEl) lastEl.value = "";
       setCompanyMsg("");
       await refreshActivation();
     });

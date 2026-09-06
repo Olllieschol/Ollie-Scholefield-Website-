@@ -273,6 +273,8 @@ const vis = (el) => !!el && el.style.display !== "none";
         : { ok: true, state: "active", record: rec({ kind: "individual" }) },
     });
     await wait(150);
+    env.document.getElementById("company-first").value = "Sarah";
+    env.document.getElementById("company-last").value = "Chen";
     env.document.getElementById("company-code").value = "GA-7K2M-QP4X";
     env.document.getElementById("company-connect").click();
     await wait(120);
@@ -282,6 +284,46 @@ const vis = (el) => !!el && el.style.display !== "none";
       "naming the company", env.document.getElementById("activate-state").textContent);
     check(/visible to your admin/i.test(env.document.getElementById("activate-detail").textContent),
       "and repeating what the admin can see, where it is now relevant");
+  }
+  {
+    /* The disclosure has to be next to the field, at the moment the name is
+       typed. A privacy page nobody opens is not being told. */
+    const env = makeEnv("settings.html", { state: "locked", onActivate: () => ({ ok: true }) });
+    await wait(150);
+    const shared = env.document.querySelector(".company__shared").textContent;
+    check(/name/i.test(shared) && /(issued|whoever|admin)/i.test(shared),
+      "the activation screen says the name is shown to whoever issued the code", shared.trim().slice(0, 90));
+    check(/personal licence/i.test(shared) && /ignores the name|not used/i.test(shared),
+      "and that a personal licence does not use it");
+  }
+  {
+    /* Blank name, workplace code: refused before anything is sent. */
+    let sent = 0;
+    const env = makeEnv("settings.html", {
+      state: "locked",
+      onActivate: () => { sent++; return { ok: true, state: "active", record: rec({ kind: "company" }) }; },
+    });
+    await wait(150);
+    env.document.getElementById("company-code").value = "GA-7K2M-QP4X";
+    env.document.getElementById("company-connect").click();
+    await wait(120);
+    check(sent === 0, "a workplace code with no name never reaches the worker");
+    check(/first and last name/i.test(env.document.getElementById("company-msg").textContent),
+      "and the page says which field is missing",
+      env.document.getElementById("company-msg").textContent);
+  }
+  {
+    /* Same blank fields, personal key: goes straight through. */
+    let sent = 0;
+    const env = makeEnv("settings.html", {
+      state: "locked",
+      onActivate: () => { sent++; return { ok: true, state: "active", record: rec({ kind: "individual" }) }; },
+    });
+    await wait(150);
+    env.document.getElementById("company-code").value = "GK-ABCD-EFGH-IJKL";
+    env.document.getElementById("company-connect").click();
+    await wait(120);
+    check(sent === 1, "a personal key with no name is not held up by the name rule");
   }
 
   /* The seat id.
