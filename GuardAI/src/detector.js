@@ -1490,6 +1490,10 @@
 
     // Connection strings with embedded credentials: scheme://user:pass@host/...
     // The whole URL is the secret — flag it all so nothing identifying remains.
+    // `m` is declared here and not at the top: the three scanCredential calls
+    // above own their own match variable inside that helper, and a shared one
+    // at function scope is what made this read like it was already declared.
+    let m;
     const connRe = /\b[a-z][a-z0-9+.-]*:\/\/[^\s:@\/]+:[^\s@\/]+@[^\s]+/gi;
     while ((m = connRe.exec(text))) {
       const secret = trimSecret(m[0]);

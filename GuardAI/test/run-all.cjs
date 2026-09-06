@@ -21,6 +21,9 @@ const SUITES = [
   { name: "harness-submit.cjs (hostile beforeinput editors)", file: "harness-submit.cjs" },
   { name: "bug1-variants.cjs (header-as-name regression)", file: "bug1-variants.cjs" },
   // Detection quality.
+  // First, because it answers "is the detector alive at all". Every suite
+  // below assumes the answer is yes, and for sixteen days it was no.
+  { name: "detector-liveness.cjs (every detector runs, and finds something)", file: "test/detector-liveness.cjs" },
   { name: "detect-adversarial.cjs (realistic blind-spot battery)", file: "test/detect-adversarial.cjs" },
   { name: "detect-falsepositive.cjs (over-masking battery)", file: "test/detect-falsepositive.cjs" },
   { name: "table-layout.cjs (CSV/markdown table leaks)", file: "test/table-layout.cjs" },
