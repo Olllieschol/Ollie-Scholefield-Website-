@@ -1,0 +1,246 @@
+@import "tailwindcss";
+
+/*
+  InForIt design tokens.
+  Paper, ink and one coral accent. Plan tints are used only on the poster.
+*/
+@theme {
+  --color-paper: #f7f2e9;
+  --color-paper-deep: #eee6d8;
+  --color-card: #fffcf6;
+  --color-ink: #18203a;
+  --color-ink-soft: #4a5068;
+  --color-ink-faint: #757a8c;
+  --color-line: #d9cfbe;
+  --color-coral: #f0532f;
+  --color-coral-deep: #b83a1c;
+  --color-coral-wash: #fbe0d7;
+  --color-go: #24694a;
+  --color-go-wash: #dcebdf;
+
+  --color-tint-butter: #f3d77a;
+  --color-tint-pool: #a9cbe3;
+  --color-tint-sage: #bfd3b0;
+  --color-tint-blush: #f4c7bb;
+
+  --font-display: var(--font-archivo), "Arial Narrow", sans-serif;
+  --font-body: var(--font-atkinson), system-ui, sans-serif;
+
+  --ease-snap: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+html {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  font-size: 1.0625rem;
+  line-height: 1.5;
+  overflow-x: hidden;
+}
+
+@layer components {
+/* Display type: condensed for posters, semi-condensed for headings. */
+.type-poster {
+  font-family: var(--font-display);
+  font-variation-settings: "wdth" 62;
+  font-weight: 800;
+  line-height: 0.88;
+  letter-spacing: -0.01em;
+}
+.type-heading {
+  font-family: var(--font-display);
+  font-variation-settings: "wdth" 78;
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.005em;
+}
+.type-figure {
+  font-family: var(--font-display);
+  font-variation-settings: "wdth" 70;
+  font-weight: 800;
+  line-height: 1;
+  font-feature-settings: "tnum" 1;
+}
+
+
+/* Tactile buttons: they sit on a short ledge and press down into it. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 3.5rem;
+  padding: 0 1.25rem;
+  border-radius: 14px;
+  font-weight: 700;
+  font-size: 1.0625rem;
+  text-align: center;
+  transition:
+    transform 90ms var(--ease-snap),
+    box-shadow 90ms var(--ease-snap),
+    background-color 120ms ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
+}
+.btn-primary {
+  background: var(--color-coral);
+  color: var(--color-ink);
+  box-shadow: 0 4px 0 var(--color-coral-deep);
+}
+.btn-primary:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 var(--color-coral-deep);
+}
+.btn-secondary {
+  background: var(--color-card);
+  color: var(--color-ink);
+  box-shadow:
+    inset 0 0 0 2px var(--color-ink),
+    0 3px 0 var(--color-ink);
+}
+.btn-secondary:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow:
+    inset 0 0 0 2px var(--color-ink),
+    0 1px 0 var(--color-ink);
+}
+.btn:disabled {
+  background: var(--color-paper-deep);
+  color: var(--color-ink-faint);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+/* Choice tiles used for radios and checkboxes. The input stays real and focusable. */
+.choice {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 3.25rem;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  background: var(--color-card);
+  box-shadow: inset 0 0 0 1.5px var(--color-line);
+  cursor: pointer;
+  transition:
+    box-shadow 120ms ease,
+    background-color 120ms ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.choice:has(input:checked) {
+  background: var(--color-ink);
+  color: var(--color-paper);
+  box-shadow: inset 0 0 0 1.5px var(--color-ink);
+}
+.choice:has(input:focus-visible) {
+  outline: 3px solid var(--color-coral);
+  outline-offset: 2px;
+}
+.choice input {
+  position: absolute;
+  opacity: 0;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: pointer;
+}
+
+.field {
+  width: 100%;
+  min-height: 3.25rem;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  background: var(--color-card);
+  color: var(--color-ink);
+  box-shadow: inset 0 0 0 1.5px var(--color-line);
+  font-size: 1.0625rem; /* 17px keeps iOS from zooming on focus */
+}
+.field:focus {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--color-ink);
+}
+.field[aria-invalid="true"] {
+  box-shadow: inset 0 0 0 2px var(--color-coral-deep);
+}
+.field::placeholder {
+  color: var(--color-ink-faint);
+}
+
+/* Ticket perforation between the poster and its stub. */
+.perforation {
+  position: relative;
+  height: 0;
+  border-top: 2px dashed color-mix(in srgb, var(--color-ink) 35%, transparent);
+  margin: 0 1.25rem;
+}
+.perforation::before,
+.perforation::after {
+  content: "";
+  position: absolute;
+  top: -12px;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--color-paper);
+}
+.perforation::before {
+  left: calc(-1.25rem - 11px);
+}
+.perforation::after {
+  right: calc(-1.25rem - 11px);
+}
+
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-ink);
+  outline-offset: 3px;
+}
+
+/* Short, explanatory motion only. */
+@keyframes step-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.step-in {
+  animation: step-in 180ms var(--ease-snap) both;
+}
+@keyframes stamp {
+  0% {
+    transform: scale(0.94);
+  }
+  60% {
+    transform: scale(1.02);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.stamp {
+  animation: stamp 200ms var(--ease-snap);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}
